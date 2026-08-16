@@ -53,6 +53,12 @@ submit:
 report: build
 	@./mako.sh report us build/report.json
 
+# Syncs the GitHub Projects board from the report. Runs on the host, not in the
+# build container: it needs the `gh` CLI and your credentials.
+.PHONY: board
+board:
+	python3 tools/board_sync.py
+
 .PHONY: requirements
 requirements:
 	python3 -m venv .venv

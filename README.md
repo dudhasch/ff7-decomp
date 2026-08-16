@@ -33,6 +33,11 @@ sudo pacman -S go ninja 7zip bchunk
 yay mipsel-linux-gnu-binutils mipsel-linux-gnu-gcc
 ```
 
+On a host with a read-only root filesystem (SteamOS/Steam Deck, Silverblue,
+Bazzite, ...) the toolchain cannot be installed natively — build in a container
+instead, which also guarantees the exact binutils version the project is
+validated against. See [docs/STEAMOS.md](docs/STEAMOS.md).
+
 
 Create a /disks directory and place the required disk images within:
 
@@ -59,6 +64,8 @@ make disks
 * `make clean`: remove generated files from build
 * `make format`: format codebase
 * `make disks` : extract the individual data files from the .bin disk image 
+* `make report`: measure progress into `build/report.json`
+* `make board`: sync the GitHub Projects status board from that report (see [docs/BOARD.md](docs/BOARD.md))
 * `./mako.sh rank <source_path>`: find remaning functions to decompile sorted from easier to hardest
 * `./mako.sh dec <function_name>`: decompile function
 * `./mako.sh symbols add <path> <name> <offset> [size]`: add or rename symbol

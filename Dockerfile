@@ -17,7 +17,7 @@
 FROM ubuntu:noble
 
 RUN apt-get update && \
-    apt-get install -y build-essential binutils make git python3 python3-venv ninja-build 7zip bchunk && \
+    apt-get install -y build-essential binutils make git python3 python3-venv ninja-build 7zip bchunk wget ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 RUN echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ questing main universe multiverse restricted" > /etc/apt/sources.list.d/questing.list && \
@@ -34,11 +34,15 @@ ENV GOCACHE=/gocache/build
 
 RUN mkdir -p /gocache/mod /gocache/build && chmod -R 777 /gocache
 
+# Create the workdir while still root. Docker's WORKDIR would create it owned by
+# the current USER, but buildah/podman creates it root-owned, so the chown below
+# has to happen before dropping privileges for the image to build under both.
+RUN mkdir -p /ff7 && chown ubuntu:ubuntu /ff7
+
 USER ubuntu
 WORKDIR /ff7
 COPY requirements.txt requirements.txt
-RUN chown ubuntu:ubuntu /ff7 && \
-    mkdir -p /ff7/.venv /ff7/build && \
+RUN mkdir -p /ff7/.venv /ff7/build && \
     mkdir -p ~/go/bin && \
     ln -s /usr/local/go/bin/go ~/go/bin/go && \
     git config --global --add safe.directory /ff7 && \
