@@ -280,58 +280,88 @@ void func_801D069C(void) {
 // for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
 // clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
 //
-// 1179 of the 1205 instructions match. Everything structural is right: same
-// instruction count, byte-identical .data/.rodata/.bss, and every saved
-// register lands where the original put it. What is left is instruction
-// *scheduling* in a few small spots -- gcc picking a different order between
-// two independent instructions, e.g. `li s2,0x21` and `addiu s6,sp,0x20`
-// swapping places in the case-2 loop preheader -- plus the mask loop below.
-// Run tools/checkfn.py to see them.
+// 12 rows of 1205 instructions still differ. Everything structural is right:
+// same instruction count, byte-identical .data/.rodata/.bss, and every saved
+// register where the original put it. Everything from the second switch's jump
+// table onwards now matches except two rows in the ATB case, so what is left is
+// concentrated in case 2 of the first switch.
 //
-// Two things in here are known not to be the original phrasing, but removing
-// either costs 60+ instructions of diff, so they are load-bearing until the
-// real form is found:
-//   * `i = Savemap.config;` in the magic-order case. It is not there for its
-//     value: it makes `i` conflict with `setting`, which pushes `setting` off
-//     s1 and lets the sound case's &Savemap.config pseudo have it. Without the
-//     conflict the whole first switch reallocates. A fresh temp does not work
-//     -- it has to be an allocno that already outranks `setting`.
-//   * `x = ...; dy = ...;` hoisted out of the func_8001EB2C calls in case 2.
+// Measure variants with tools/variant_eval.py rather than checkfn.py: it scores
+// a variant against a private object, so many can run at once, and one takes
+// about three seconds instead of a full ninja round trip. Baseline is 12.
 //
-// The mask loop is the clearest lead. The original's outer counter is a u16 in
-// s2 -- the register `setting` holds -- and its `D_801D24C0[j]` lands in a
-// scratch a0, not in `value`. s2 means the allocno crosses a call, which no
-// variable local to that block does, so the counter really is `setting`. But
-// writing it that way inverts the whole s0/s1/s2 assignment (`setting` picks up
-// loop-depth-weighted refs and outranks `value`), costing 50+ rows. Whatever
-// keeps `setting` ranked third in the original is the same thing the
-// `i = Savemap.config` hack is standing in for.
+// FOUR THINGS HERE LOOK ODD AND ARE LOAD-BEARING. Each was measured alone and
+// in combination; they are additive, and they cost 14 rows between them.
 //
-// Also established, and reverted because each costs more than it fixes:
-//   * `dy` in case 2 is a strength-reduced induction variable, not a for-init
-//     local: writing `dy = i * 12 + 0x21;` in the body puts `li 0x21` after the
-//     invariant hoists, exactly where the original has it. It costs an
-//     s2/s3/s4 rotation between dy, x and rowY (31 changed, 3 inserted), so the
-//     for-init form stays until dy can be made to outrank x.
-//   * Making rowY an induction variable too changes the saved-register count.
+//   * `value` holds the button pointer in case 3 (`value = (s32)D_801D1ADC`,
+//     `*(u8*)value`). The walking pointer has to occupy the *same allocno* as
+//     the `value` used by the first switch -- that is what donates it enough
+//     loop-weighted references to keep the s0/s1/s2 ranking right. It is not a
+//     question of style: a separate `u8 *button` is 91, `corner` in place of
+//     `value` is 91, indexing with `value` is 97, indexing with `i` is 120, and
+//     the natural `value = *button;` inside the loop is 180. So the original
+//     used one variable as both an integer and a byte pointer -- the same shape
+//     as func_801D01C8's `s32 _setting` / `u8 *setting` pair further up.
 //
-// Ruled out by measurement, all worse than what is here: swapping the `y = ...`
-// / `x = ...` statements at the top of case 2 (no codegen change at all -- only
-// the line attribution moves); calling func_801D0040 before `value = value + 1`
-// in the ATB case; writing `setting | (Savemap.config & 0xFFFC)` for the sound
-// case's store; merging `corner` into `value`; and the declaration order of
-// `value` and `setting`.
+//   * `w` names the 0x100 that case 3's loop stores into rect.w/rect.h, and
+//     sits in for-init slot 2. Naming it keeps it out of the loop-invariant set
+//     so gcc cannot emit it at the very end of the preheader, which is where
+//     the literal ends up and where the original does not have it. The slot
+//     matters: `w` second scores 12, `w` third scores 19, the literal 26.
 //
-// Directed searches already tried and exhausted, all still 805: statement order
-// in the case-2 preheader and where `dy` is initialised (8), function-level
-// declaration order (120), the type of every case-2 local and of the mask
-// loop's temp plus three forms of that loop (576), the field-assignment order
-// of both 4-field rect blocks (576), and &rect as an explicit pointer with the
-// three call sites and three landing sites swept (4608). None of the residue is
-// reachable from the C's shape at those points. Note that those searches, and
-// the "1169 of 1189" this comment used to claim, predate the checkfn.py fix for
-// diff.py's 1024-line truncation -- they never saw the last ~150 instructions,
-// which is where the mask loop lives.
+//   * The sound case writes Savemap.config with `&=` then `|=`. gcc still folds
+//     it to one `sh`, but the two-statement form is what makes the result
+//     coalesce into the masked value's register rather than setting's.
+//
+//   * The mask loop's counter is `setting`, not a block-local. The counter sits
+//     in a callee-saved register while nothing in the loop nest calls anything,
+//     and gcc only refuses call-clobbered registers for an allocno that crosses
+//     a call -- so the counter must be a variable that is live across calls
+//     elsewhere. This only pays off together with the `value` pointer above:
+//     on its own it costs 50+ rows, because `setting` picks up loop-weighted
+//     references and overtakes `value` in the allocation order.
+//
+// It also replaced the `i = Savemap.config;` hack that used to sit in the
+// magic-order case: that existed only to force an i/setting conflict, and the
+// mask loop now creates the real one.
+//
+// WHAT IS LEFT, all instruction scheduling in case 2 except the last:
+//   * `li s2,0x21` (dy) and `addiu s6,sp,0x20` (&rect) swap places in the loop
+//     preheader. Mechanism understood: the preheader is one ~41-instruction
+//     basic block, the two initialisers tie on scheduling priority, and the
+//     order falls out of their position in the RTL chain. Loop-invariant motion
+//     emits &rect immediately before the loop, i.e. after any for-init, so a
+//     for-init `dy` always wins the early slot. Writing `dy = i * 12 + 0x21;`
+//     in the loop body makes dy a strength-reduced induction variable, whose
+//     initialiser is emitted after the invariants -- that reproduces the
+//     target's order exactly and clears these rows. It costs 8 elsewhere,
+//     because strength reduction allocates a fresh pseudo that loses the two
+//     references the `x = ...; dy = ...;` hoist donates, dropping dy below x
+//     and rowY. Adding one in-loop reference restores the exact target
+//     allocation, so a zero-cost way to donate ~2 references to that giv closes
+//     both this and the next item.
+//   * The `D_801D24A0[1].x` and `.y` loads, and `x` versus `rowY`, come out in
+//     the opposite order. Not reachable by statement order: gcc has already
+//     CSE'd both loads before the scheduler runs, and x-first, rowY-first and
+//     rowY-inlined all produce byte-identical output.
+//   * `sh zero,0x20(sp)` in the block after case 2's loop. These 2 rows are a
+//     conserved quantity: writing the block so it clears entirely moves the
+//     cost to the loop back-edge, where the store takes the branch delay slot.
+//     Only something that changes what fills that slot can spend them.
+//   * The ATB case's delay slot (`li a0,0x1` versus `addiu s0,s0,1`). Every
+//     reordering tried scores 97, alone or on top of everything above, so the
+//     cascade is independent of the rest.
+//   * One row is the compiler-generated jump table, which has no symbol to
+//     align to. The floor is 1, not 0.
+//
+// Also ruled out by measurement: making rowY an induction variable (changes the
+// saved-register count); calling func_801D0040 before the increment in the ATB
+// case; `setting | (Savemap.config & 0xFFFC)` in the sound case; merging
+// `corner` into `value`; declaration order of `value` and `setting`; naming
+// &rect and initialising it in case 2's for-init (15 -- it moves &rect early,
+// but the target wants both it and dy late); and hoisting the
+// `unkA * 3 + unkB * 6` index in case 2, which the target recomputes each
+// iteration rather than hoisting.
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
 #else
@@ -433,9 +463,9 @@ void func_801D080C(s32 arg0) {
             rect.y = D_801D24A0[1].y + dy;
             func_80027B84(&rect);
         }
-        rect.x = 0;
         rect.y = 0;
         rect.w = 0x100;
+        rect.x = 0;
         rect.h = 0x100;
         func_80026A34(0, 1, 0x1F, &rect);
 
@@ -461,7 +491,7 @@ void func_801D080C(s32 arg0) {
         s32 y;
         s32 dy;
         s32 labelDy;
-        u8* button;
+        s32 w;
 
         if (arg0 & 2) {
             s32 cursorY = D_801D24CC[0].unkB * 21 + 0xA;
@@ -484,19 +514,19 @@ void func_801D080C(s32 arg0) {
         func_8001DE0C(&window, x, y, 0x78, 0xBB);
         y += 6;
         x += 0xA;
-        for (i = 0, button = D_801D1ADC, labelDy = 4, rowY = y; i < 10; i++,
-            labelDy += 18) {
-            func_801D014C(x, rowY, *button);
-            func_801D014C(x + 0x2C, rowY, Savemap.button_config[*button]);
+        for (i = 0, w = 0x100, value = (s32)D_801D1ADC, labelDy = 4, rowY = y;
+             i < 10; i++, labelDy += 18) {
+            func_801D014C(x, rowY, *(u8*)value);
+            func_801D014C(x + 0x2C, rowY, Savemap.button_config[*(u8*)value]);
             rowY += 18;
             rect.x = 0;
             rect.y = 0;
-            rect.w = 0x100;
-            rect.h = 0x100;
+            rect.w = w;
+            rect.h = w;
             func_80026A34(0, 1, 0x1F, &rect);
             func_80026F44(x + 0x3E, y + labelDy - 2,
-                          D_801D2238[Savemap.button_config[*button]], 6);
-            button++;
+                          D_801D2238[Savemap.button_config[*(u8*)value]], 6);
+            value++;
         }
         func_8001E040(&window);
         break;
@@ -549,7 +579,8 @@ void func_801D080C(s32 arg0) {
                 if ((D_80062D7E & 0x8000) && setting != 0) {
                     func_801D0040(1);
                     setting = setting - 1;
-                    Savemap.config = (Savemap.config & 0xFFFC) | setting;
+                    Savemap.config &= 0xFFFC;
+                    Savemap.config |= setting;
                     func_801D0080(setting);
                 }
                 break;
@@ -689,8 +720,8 @@ void func_801D080C(s32 arg0) {
                 }
                 if ((D_80062D7E & 0x8000) && setting != 0) {
                     func_801D0040(1);
-                    i = Savemap.config;
-                    Savemap.config = (i & 0xE3FF) | ((setting - 1) << 10);
+                    Savemap.config =
+                        (Savemap.config & 0xE3FF) | ((setting - 1) << 10);
                 }
                 break;
             }
@@ -761,12 +792,10 @@ void func_801D080C(s32 arg0) {
                 // Left1, Right1 and Menu must each still be bound to some
                 // button before the layout can be accepted.
                 s32 mapped = 0;
-                u16 j;
-                for (j = 0; j < 3; j++) {
+                for (setting = 0; setting < 3; setting++) {
                     for (i = 0; i < 16; i++) {
-                        value = D_801D24C0[j];
-                        if (value == Savemap.button_config[i]) {
-                            mapped |= 1 << j;
+                        if (D_801D24C0[setting] == Savemap.button_config[i]) {
+                            mapped |= 1 << setting;
                         }
                     }
                 }

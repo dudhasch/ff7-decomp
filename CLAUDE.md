@@ -197,6 +197,30 @@ the function name, because `diff.py -o --max-lines 2000 <fn>` binds `<fn>` to
 the end-address positional and returns an empty diff with score 0 — which reads
 as a flawless match.
 
+#### Sweeping many variants at once
+
+`checkfn.py` builds through ninja into `build/us/...`, a single shared path, so
+it cannot be run concurrently: two agents editing the same `.c` overwrite each
+other's object and read each other's verdict. When you want to sweep dozens of
+phrasings of one function — or run several searches in parallel —
+use `tools/variant_eval.py` instead:
+
+```shell
+cp src/menu/cnfgmenu.c .variants/_base.c
+sha256sum .variants/_base.c | cut -d' ' -f1 > .variants/_base.sha256
+.venv/bin/python3 tools/variant_eval.py .variants/my-idea.json --rows
+```
+
+It compiles a variant to a private temp object and diffs it with
+`diff.py -f/-F`, which takes explicit object paths and so never consults the
+map file or the build directory — nothing is shared but read-only inputs. A run
+takes about three seconds against roughly forty for a ninja round trip, and the
+verdict is the one `checkfn.py` would give (same alias discounting, same
+scoping). A variant is described as *edits against a pinned base*, and each
+`old` string must match exactly once or the run aborts, so a typo cannot
+silently score as "no change". The tool is currently hardcoded to
+`func_801D080C`; point the constants at another function to reuse it.
+
 ### 3b. Check .rodata ownership before writing the C
 
 Some functions cannot be decompiled alone, and the failure shows up as a red
