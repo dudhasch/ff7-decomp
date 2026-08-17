@@ -76,7 +76,37 @@ a near-miss, in rough order of frequency:
 * **Stack layout differs** — a local's type or declaration order is wrong.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
-### 4. Verify for real
+### 4. Last-mile: decomp-permuter
+
+If step 3 stalls — zero diff rows are out of reach by hand, or you're stuck
+permuting variable declarations/expression order yourself — hand the function
+to [decomp-permuter](https://github.com/simonlindholm/decomp-permuter), an
+external tool that brute-forces AST-level permutations of a function until the
+compiled output matches. It is a search tool, not a substitute for
+understanding: only reach for it once the C is *semantically* correct and the
+remaining diff looks like compiler-specific register/ordering noise.
+
+This repo ships `config/permuter_settings.toml` (compiler type, build system,
+and macros such as `gDma.*`/`_SHIFTL` that the permuter should treat as opaque
+side effects rather than trying to permute); decomp-permuter auto-discovers it
+by walking up from the target directory, so no extra flags are needed. Typical
+usage:
+
+```shell
+git clone https://github.com/simonlindholm/decomp-permuter ../decomp-permuter
+ninja build/us/src/battle/battle.c.o
+../decomp-permuter/import.py -o build/us/src/battle/battle.c.o func_800A85FC
+../decomp-permuter/permuter.py func_800A85FC -j"$(nproc)"
+```
+
+`import.py` creates a self-contained scratch under `permuter/func_800A85FC/`
+(target `.s`, current `.c`, and compile command); `permuter.py` then searches
+until it prints a `(0)` base-score / perfect match or you stop it. Copy the
+winning permutation back into the real `.c` file by hand — never commit
+anything from the `permuter/` scratch directory — then re-run step 3 to
+confirm `asm-differ` shows zero diff rows before moving to step 5.
+
+### 5. Verify for real
 
 ```shell
 make build          # 13x OK — the commit gate
@@ -181,6 +211,7 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `include/` | Shared headers; `include/psxsdk/` is the PSY-Q SDK |
 | `config/us.yaml` | splat config: overlays, segments, target SHA-1s |
 | `config/symbols.*.txt` | Hand-maintained symbol names — edit via `mako.sh symbols` |
+| `config/permuter_settings.toml` | Auto-discovered by decomp-permuter (see step 4) |
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
