@@ -3587,9 +3587,33 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAxyzi);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPxyzi);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncVisi);
+s32 OpcodeFuncVisi(void) {
+    u8 model;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkon);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("visi", 1);
+    }
+    model = g_EntityToModel[g_CurrentEntity];
+    if (model != 0xFF) {
+        g_FieldModels[model].visible = GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
+
+s32 OpcodeFuncTlkon(void) {
+    u8 model;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("tlkon", 1);
+    }
+    model = g_EntityToModel[g_CurrentEntity];
+    if (model != 0xFF) {
+        g_FieldModels[model].TalkOff = GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyzi);
 
@@ -4730,7 +4754,17 @@ s32 OpcodeFuncScr2d(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlc);
+s32 OpcodeFuncScrlc(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrlc", 0);
+    }
+    g_FieldState->cameraScrollMode = GET_PARAM_U8(4);
+    g_FieldState->cameraScrollTargetId = g_FieldState->pcModelId;
+    g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(2, 2);
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrla);
 
