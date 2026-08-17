@@ -280,88 +280,101 @@ void func_801D069C(void) {
 // for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
 // clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
 //
-// 12 rows of 1205 instructions still differ. Everything structural is right:
-// same instruction count, byte-identical .data/.rodata/.bss, and every saved
-// register where the original put it. Everything from the second switch's jump
-// table onwards now matches except two rows in the ATB case, so what is left is
-// concentrated in case 2 of the first switch.
+// 5 rows of 1205 instructions still differ, and the floor is 1, not 0: one of
+// them is a compiler-generated jump table, which has no symbol to align to.
+// Everything else in the function is byte-identical -- same instruction count,
+// same .data/.rodata/.bss, every register where the original put it.
 //
-// Measure variants with tools/variant_eval.py rather than checkfn.py: it scores
-// a variant against a private object, so many can run at once, and one takes
-// about three seconds instead of a full ninja round trip. Baseline is 12.
+// Measure variants with tools/variant_eval.py, not checkfn.py: it scores
+// against a private object, so many run at once, ~3 seconds each. Baseline 5.
 //
-// FOUR THINGS HERE LOOK ODD AND ARE LOAD-BEARING. Each was measured alone and
-// in combination; they are additive, and they cost 14 rows between them.
+// SEVEN THINGS HERE LOOK ODD AND ARE ALL LOAD-BEARING. Every one was measured
+// against the alternative that reads better; the number after each is what the
+// clean version costs.
 //
-//   * `value` holds the button pointer in case 3 (`value = (s32)D_801D1ADC`,
-//     `*(u8*)value`). The walking pointer has to occupy the *same allocno* as
-//     the `value` used by the first switch -- that is what donates it enough
-//     loop-weighted references to keep the s0/s1/s2 ranking right. It is not a
-//     question of style: a separate `u8 *button` is 91, `corner` in place of
-//     `value` is 91, indexing with `value` is 97, indexing with `i` is 120, and
-//     the natural `value = *button;` inside the loop is 180. So the original
-//     used one variable as both an integer and a byte pointer -- the same shape
-//     as func_801D01C8's `s32 _setting` / `u8 *setting` pair further up.
+//   * `value` holds case 3's button pointer (`value = (s32)D_801D1ADC`,
+//     `*(u8*)value`). The walking pointer must occupy the *same allocno* as the
+//     `value` the first switch uses -- that is what donates the loop-weighted
+//     references that keep the s0/s1/s2 ranking right. A separate `u8 *button`
+//     is 91, `corner` in its place 91, an index in `value` 97, an index in `i`
+//     120, and the natural `value = *button;` 180. So the original used one
+//     variable as both an integer and a byte pointer, the same shape as
+//     func_801D01C8's `s32 _setting` / `u8 *setting` pair above.
 //
-//   * `w` names the 0x100 that case 3's loop stores into rect.w/rect.h, and
-//     sits in for-init slot 2. Naming it keeps it out of the loop-invariant set
-//     so gcc cannot emit it at the very end of the preheader, which is where
-//     the literal ends up and where the original does not have it. The slot
-//     matters: `w` second scores 12, `w` third scores 19, the literal 26.
+//   * case 2's three loop invariants are *named* -- `pa`, `py`, `pr` -- and all
+//     five preheader initialisers are spelled out in the for-init in the order
+//     loop-invariant motion would have emitted them: i, pa, py, pr, dy. That is
+//     what fixes the preheader ordering. LICM emits each hoisted invariant
+//     immediately before the loop, i.e. after any for-init, so with `dy` in the
+//     for-init its `li 0x21` always takes an early slot and pushes &rect late;
+//     naming the invariants moves them into the for-init region where their
+//     order is ours to choose, and putting dy last reproduces the target.
+//     Naming only &rect and leaving the others hoisted is 14-16.
 //
-//   * The sound case writes Savemap.config with `&=` then `|=`. gcc still folds
-//     it to one `sh`, but the two-statement form is what makes the result
-//     coalesce into the masked value's register rather than setting's.
+//   * `pa` is `s8 *` at `&D_801D24CC[1].unkA`, read as `pa[0]` / `pa[1]`, not a
+//     `Unk80026448 *` read as `pa->unkA` / `pa->unkB` (10). `unkA` and `unkB`
+//     are adjacent `s8` (game.h), so the loads are identical; only the base
+//     register gcc keeps differs.
 //
-//   * The mask loop's counter is `setting`, not a block-local. The counter sits
-//     in a callee-saved register while nothing in the loop nest calls anything,
-//     and gcc only refuses call-clobbered registers for an allocno that crosses
-//     a call -- so the counter must be a variable that is live across calls
-//     elsewhere. This only pays off together with the `value` pointer above:
-//     on its own it costs 50+ rows, because `setting` picks up loop-weighted
-//     references and overtakes `value` in the allocation order.
+//   * `py` is `short *` at `&D_801D24A0[1].y`, not a `RECT *` read as `pw->y`
+//     (149). RECT.y is a `short` at +2, so `*py` is the same `lh`.
 //
-// It also replaced the `i = Savemap.config;` hack that used to sit in the
-// magic-order case: that existed only to force an i/setting conflict, and the
-// mask loop now creates the real one.
+//   * `x` is declared once at function scope rather than in both case 2 and
+//     case 3. They are mutually exclusive arms of the same switch, both assign
+//     x before reading it, and nothing after the switch reads it -- but sharing
+//     the allocno is what clears the case-2 load ordering.
 //
-// WHAT IS LEFT, all instruction scheduling in case 2 except the last:
-//   * `li s2,0x21` (dy) and `addiu s6,sp,0x20` (&rect) swap places in the loop
-//     preheader. Mechanism understood: the preheader is one ~41-instruction
-//     basic block, the two initialisers tie on scheduling priority, and the
-//     order falls out of their position in the RTL chain. Loop-invariant motion
-//     emits &rect immediately before the loop, i.e. after any for-init, so a
-//     for-init `dy` always wins the early slot. Writing `dy = i * 12 + 0x21;`
-//     in the loop body makes dy a strength-reduced induction variable, whose
-//     initialiser is emitted after the invariants -- that reproduces the
-//     target's order exactly and clears these rows. It costs 8 elsewhere,
-//     because strength reduction allocates a fresh pseudo that loses the two
-//     references the `x = ...; dy = ...;` hoist donates, dropping dy below x
-//     and rowY. Adding one in-loop reference restores the exact target
-//     allocation, so a zero-cost way to donate ~2 references to that giv closes
-//     both this and the next item.
-//   * The `D_801D24A0[1].x` and `.y` loads, and `x` versus `rowY`, come out in
-//     the opposite order. Not reachable by statement order: gcc has already
-//     CSE'd both loads before the scheduler runs, and x-first, rowY-first and
-//     rowY-inlined all produce byte-identical output.
-//   * `sh zero,0x20(sp)` in the block after case 2's loop. These 2 rows are a
-//     conserved quantity: writing the block so it clears entirely moves the
-//     cost to the loop back-edge, where the store takes the branch delay slot.
-//     Only something that changes what fills that slot can spend them.
-//   * The ATB case's delay slot (`li a0,0x1` versus `addiu s0,s0,1`). Every
-//     reordering tried scores 97, alone or on top of everything above, so the
-//     cascade is independent of the rest.
-//   * One row is the compiler-generated jump table, which has no symbol to
-//     align to. The floor is 1, not 0.
+//   * `w` names the 0x100 that case 3's loop stores into rect.w/rect.h and sits
+//     in for-init slot 2, keeping it out of the loop-invariant set. Slot 3 is
+//     15 and the bare literal 14. (An earlier revision of this comment claimed
+//     19 and 26; those were measured on a much earlier baseline and are wrong
+//     for this source.)
 //
-// Also ruled out by measurement: making rowY an induction variable (changes the
-// saved-register count); calling func_801D0040 before the increment in the ATB
-// case; `setting | (Savemap.config & 0xFFFC)` in the sound case; merging
-// `corner` into `value`; declaration order of `value` and `setting`; naming
-// &rect and initialising it in case 2's for-init (15 -- it moves &rect early,
-// but the target wants both it and dy late); and hoisting the
-// `unkA * 3 + unkB * 6` index in case 2, which the target recomputes each
-// iteration rather than hoisting.
+//   * The sound case writes `Savemap.config &= 0xFFFC;` then `|= setting;`.
+//     gcc folds it back to one `sh`; the two-statement form is what makes the
+//     result coalesce into the masked value's register. The mask loop's counter
+//     is `setting` for the same family of reasons -- it has to be an allocno
+//     that crosses a call -- and only pays off together with the `value`
+//     pointer above.
+//
+// WHAT IS LEFT, and why each looks structurally blocked rather than unsearched:
+//
+//   * 2 rows for `sh zero,0x20(sp)` in the block after case 2's loop. The
+//     target schedules that store *before* the call's argument setup. gcc's
+//     list scheduler gives an argument-setup insn priority 1 + P(call) and a
+//     plain store only P(call), so no permutation of four independent stores
+//     can put one ahead of them -- the original's `rect.x = 0` must have a
+//     successor ours does not, or must not be one of the four. These 2 rows are
+//     also a conserved quantity: writing the block so it clears entirely moves
+//     the cost onto the loop back-edge, where the store takes the branch delay
+//     slot. Total is 5 either way.
+//
+//   * 2 rows for the ATB case's delay slot: the target emits `li a0,0x1`, then
+//     `addiu s0,s0,1` in the jal's slot, and we emit the increment first. The
+//     two tie on scheduling priority, so the order falls out of RTL emission
+//     order, and the argument setup is emitted at the call -- so no arrangement
+//     of the ATB statements that leaves the call after the increment can invert
+//     it. Every reordering tried scores 97, alone or combined, with the same 93
+//     changed rows.
+//
+//   * 1 row for the jump table. Unfixable.
+//
+// Several variations are byte-identical to what is here and are free if they
+// help something else: `value++` instead of `value = value + 1` in the ATB
+// case, `rect.y` written first in the second block of case 2's loop, `dy`
+// declared first among case 2's locals, `padding` without `volatile` or as
+// `volatile RECT[2]`, `dy += 12` moved to the end of the loop body, and the
+// ATB store split into `&=` / `|=`.
+//
+// Ruled out by measurement: making rowY an induction variable (changes the
+// saved-register count); `dy = i * 12 + 0x21;` as a strength-reduced induction
+// variable, which also clears the preheader ordering but costs 8 elsewhere
+// because the fresh giv pseudo loses two references and drops below x and rowY
+// -- and cannot regain them, since a giv takes no references from outside the
+// loop and loop.c folds every post-loop use to a constant; hoisting case 2's
+// `unkA * 3 + unkB * 6` index, which the target recomputes each iteration
+// (181); calling func_801D0040 before the increment in the ATB case; merging
+// `corner` into `value`; and the declaration order of `value` and `setting`.
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
 #else
@@ -374,6 +387,7 @@ void func_801D080C(s32 arg0) {
     s32 value;
     u16 setting;
     u16 pad;
+    s32 x;
 
     pad = func_8001C808();
     D_801D24B8.press = pad;
@@ -412,10 +426,12 @@ void func_801D080C(s32 arg0) {
 
     case 2: {
         s32 y;
-        s32 x;
         s32 dy;
         s32 rowY;
         s32 knob;
+        s8* pa;
+        short* py;
+        RECT* pr;
 
         if (arg0 & 2) {
             {
@@ -439,35 +455,33 @@ void func_801D080C(s32 arg0) {
         func_8002708C(x, rowY, D_801D2478[0][0], 2);
         func_8002708C(x, y + 0x2F, D_801D2478[1][0], 4);
         func_8002708C(x, y + 0x3B, D_801D2478[2][0], 1);
-        for (i = 0, dy = 0x21; i < 3; i++, dy += 12) {
+        for (i = 0, pa = &D_801D24CC[1].unkA, py = &D_801D24A0[1].y, pr = &rect,
+            dy = 0x21;
+             i < 3; i++, dy += 12) {
             func_80029114(
-                x + 0x10, rowY,
-                D_801D252C[D_801D24CC[1].unkA * 3 + D_801D24CC[1].unkB * 6 + i],
-                3, 7);
+                x + 0x10, rowY, D_801D252C[pa[0] * 3 + pa[1] * 6 + i], 3, 7);
             rowY += 12;
 
             // the movable knob of one colour slider
-            knob = D_801D252C[D_801D24CC[1].unkA * 3 + D_801D24CC[1].unkB * 6 +
-                              i] >>
-                   1;
-            rect.y = D_801D24A0[1].y + dy;
+            knob = D_801D252C[pa[0] * 3 + pa[1] * 6 + i] >> 1;
+            rect.y = *py + dy;
             rect.h = 11;
             rect.w = 8;
             rect.x = knob + 0xD5;
-            func_80028030(&rect);
+            func_80028030(pr);
 
             // and the bar it slides along
             rect.x = 0xD5;
             rect.w = 0x88;
             rect.h = 11;
-            rect.y = D_801D24A0[1].y + dy;
-            func_80027B84(&rect);
+            rect.y = *py + dy;
+            func_80027B84(pr);
         }
         rect.y = 0;
         rect.w = 0x100;
         rect.x = 0;
         rect.h = 0x100;
-        func_80026A34(0, 1, 0x1F, &rect);
+        func_80026A34(0, 1, 0x1F, pr);
 
         func_8001DE0C(&window, D_801D24A0[1].x + 0xA5, D_801D24A0[1].y + 0x1D,
                       0xC0, 0x2B);
@@ -487,7 +501,6 @@ void func_801D080C(s32 arg0) {
 
     case 3: {
         s32 rowY;
-        s32 x;
         s32 y;
         s32 dy;
         s32 labelDy;
