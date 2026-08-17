@@ -78,7 +78,8 @@ extern s8 D_800E0630;
 extern u16 D_8009AC0A; // camera height bias applied to the tracked entity
 extern volatile u8 D_8009AC12; // entity the background scroll tracks
 extern u32 D_80114454;         // last raw pad state read this frame
-extern u32 D_8009AC5C; // pad 1: state, previous, newly pressed, newly released
+extern u32 D_8009AC5C;  // pad 1: state, previous, newly pressed, newly released
+extern u8 D_8009ACE6[]; // per-entity background-trigger bits, one byte each
 extern u32 D_8009AC60;
 extern u32 D_8009AC64;
 extern u32 D_8009AC68;
@@ -175,6 +176,10 @@ extern s16 D_8009A162;
 extern u8 D_8009A15C;
 
 void SystemRefreshParty(void);
+/* Handwritten assembly. The s16 colour params are load-bearing: they put the
+ * truncation at the call site, which is what splits `sll`/`sra` across the
+ * loop preheader and body in KawaiSetColorToModelPkts. */
+void KawaiSetColorToPartPkts(u8* part, s16 r, s16 g, s16 b);
 void func_80025648(u32 materia, u8 slot);
 void FieldDialogSetWindowStyleCbc(s16 window, u8 style, s16 preventClose);
 void FieldDialogSetWindowHeight(s16 window, s16 height);
@@ -218,7 +223,7 @@ void FieldEventOpcodeCycle(void);
 void FieldUpdateAnimationState(void);
 u8 FieldEventRequestRun(s16 entityId, s16 priority, s16 scriptId);
 void DebugUpdateActor(s32 arg0, u8 actorId);
-void DebugPrintOpcode(char* arg0, s32 arg1);
+void DebugPrintOpcode(char* arg0, u32 arg1);
 u8 FieldEventReadMemoryU8(s16 arg0, s16 arg1);
 void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value);
 s32 FieldDialogAskUpdateStates(
@@ -591,7 +596,39 @@ s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAutoMove);
+u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist);
+
+/* One step of "walk towards MoveEnd". Returns 1 while still moving, 0 once the
+ * entity is close enough -- either because it came within `range` of the goal
+ * or because the remaining distance is below one frame of MoveSpeed, in which
+ * case the position is snapped onto the goal exactly. */
+s32 FieldEntityAutoMove(FieldEntity* entity, s16 range) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    s32 reach;
+
+    from.vx = entity->PosX >> 12;
+    from.vy = entity->PosY >> 12;
+    to.vx = entity->MoveEndX >> 12;
+    to.vy = entity->MoveEndY >> 12;
+    reach = entity->SolidRange + range;
+    sqrDist = (to.vx - from.vx) * (to.vx - from.vx) +
+              (to.vy - from.vy) * (to.vy - from.vy);
+    reach = reach * reach + 0x1000;
+    if (range != 0 && reach >= sqrDist) {
+        return 0;
+    }
+    if (sqrDist < (entity->MoveSpeed * entity->MoveSpeed) >> 16 ||
+        sqrDist < 4) {
+        entity->PosX = entity->MoveEndX;
+        entity->PosY = entity->MoveEndY;
+        return 0;
+    }
+    entity->MoveDir =
+        FieldEntityDirByVec(&from, &to, &sqrDist) - entity->MoveDirAdd;
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
 
@@ -601,7 +638,22 @@ static void FieldEntityVectorSub(s32* arg0, s16* arg1, s16* arg2) {
     arg0[2] = arg1[2] - arg2[2];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCalculateZ);
+/* Height of `point` on the triangle plane spanned by edgeA/edgeB through
+ * `vertex`. edgeA doubles as scratch: once the normal is known it is reloaded
+ * with the vertex, so the caller must treat it as clobbered. */
+s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
+    s32 normal[3];
+
+    normal[0] = -edgeA[1] * edgeB[2] + edgeB[1] * edgeA[2];
+    normal[1] = -edgeA[2] * edgeB[0] + edgeA[0] * edgeB[2];
+    normal[2] = -edgeA[0] * edgeB[1] + edgeB[0] * edgeA[1];
+    edgeA[0] = vertex[0];
+    edgeA[1] = vertex[1];
+    edgeA[2] = vertex[2];
+    return (normal[0] * edgeA[0] + normal[1] * edgeA[1] + normal[2] * edgeA[2] -
+            normal[0] * point[0] - normal[1] * point[1]) /
+           normal[2];
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMove);
 
@@ -624,18 +676,8 @@ static void FieldEntityLineClear(FieldLine* lines) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityGatewayCheck);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityBgTriggerActivate);
-
-const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
-
 /* One entry of the map's background-trigger block. Even `type`s arm the
- * trigger, odd ones disarm it.
- *
- * FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
- * the C matches, but gcc precedes the switch's jump table with `.align 3` and
- * the original has it 4-byte aligned at .rodata+0xC4, so the table (and all
- * later .rodata) shifts by 4. Same maspsx limitation as IfCheck and friends. */
+ * trigger, odd ones disarm it. */
 typedef struct {
     /* 0x00 */ u8 unk00[0xC];
     /* 0x0C */ u8 entityId;
@@ -644,11 +686,62 @@ typedef struct {
     /* 0x0F */ u8 unk0F;
 } FieldBgTrigger;
 
+/* Arms (even type) or disarms (odd type) one background trigger, and reports
+ * whether that actually changed the bit -- the caller only redraws when it did.
+ *
+ * Blocked by the same jump-table alignment problem as FieldEntityBgTriggerInit:
+ * the original table sits at .rodata+0xa4 and gcc's `.align 3` puts ours at
+ * +0xa8. Unlike Init this C is not yet instruction-exact either -- gcc
+ * cross-jumps the two arms' shared store tail here and does not in the
+ * original -- so it needs another pass once the file is split. */
+#ifndef NON_MATCHINGS
+INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityBgTriggerActivate);
+#else
+s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
+    s32 changed;
+    s32 bit;
+    s32 old;
+    s32 mask;
+    u8 merged;
+
+    changed = 0;
+    switch (type) {
+    case 0:
+    case 2:
+    case 4:
+        old = D_8009ACE6[trigger->entityId];
+        bit = 1 << trigger->unk0D;
+        if ((old & bit) == 0) {
+            changed = 1;
+        }
+        D_8009ACE6[trigger->entityId] = bit | old;
+        break;
+    case 1:
+    case 3:
+    case 5:
+        mask = ~(1 << trigger->unk0D);
+        old = D_8009ACE6[trigger->entityId];
+        merged = old | mask;
+        if (merged == 0xFF) {
+            changed = 1;
+        }
+        D_8009ACE6[trigger->entityId] = mask & old;
+        break;
+    }
+    return changed;
+}
+#endif
+
+const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
+INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+
+/* FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
+ * the C matches, but gcc precedes the switch's jump table with `.align 3` and
+ * the original has it 4-byte aligned at .rodata+0xC4, so the table (and all
+ * later .rodata) shifts by 4. Same maspsx limitation as IfCheck and friends. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityBgTriggerInit);
 #else
-
-void FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, s32 on);
 
 void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
     s32 i;
@@ -1052,7 +1145,33 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
 
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToModelPkts);
+#else
+/* Every instruction is in the right place; what is left is register naming
+ * (the target numbers the parts base after the three colour temps) and an
+ * 8-byte larger frame, i.e. the original had 8 bytes of addressable locals
+ * this does not. */
+s32 KawaiSetColorToModelPkts(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    u32 count;
+    u32 i;
+    s32 r;
+    s32 g;
+    s32 b;
+
+    count = model->partCount;
+    parts = model->modelData + model->partsOffset;
+    r = data[0] | (data[1] << 8);
+    g = data[2] | (data[3] << 8);
+    b = data[4] | (data[5] << 8);
+    *(u32*)0x1F800200 = data[6];
+    for (i = 0; i < count; i++) {
+        KawaiSetColorToPartPkts(&parts[i * 32], r, g, b);
+    }
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPkts);
 
@@ -1500,7 +1619,43 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", DebugUpdateActor);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", DebugPrintOpcode);
+/* Traces one field-script opcode to debug page 3 and/or the on-screen window:
+ * the mnemonic first, then one "arg<n>=<byte>" line per operand read straight
+ * back out of the script stream. Bit 4 of D_80071E24 restricts tracing to the
+ * entities flagged in D_80114498. */
+void DebugPrintOpcode(char* name, u32 numArgs) {
+    u32 total;
+    u32 i;
+
+    if ((D_80071E24 & 4) && !D_80114498[g_CurrentEntity]) {
+        return;
+    }
+    FieldDebugStringCopy(g_DebugText, &D_800E0630);
+    FieldDebugStringConcat(g_DebugText, name);
+    if (g_DebugLevel & 1) {
+        SetStrToDebugRow(3, 0, g_DebugText);
+    }
+    if (g_DebugLevel & 2) {
+        DebugPrintToFieldWindow(g_DebugText);
+    }
+    total = numArgs + 1;
+    while (numArgs != 0) {
+        i = total - numArgs;
+        FieldDebugStringCopy(g_DebugText, "arg");
+        FieldDebugStringU8hex(i, g_DebugMessageBuffer);
+        FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
+        FieldDebugStringConcat(g_DebugText, "=");
+        FieldDebugStringU16hex(GET_PARAM_U8(i), g_DebugMessageBuffer);
+        FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
+        if (g_DebugLevel & 1) {
+            SetStrToDebugRow(3, i, g_DebugText);
+        }
+        if (g_DebugLevel & 2) {
+            DebugPrintToFieldWindow(g_DebugText);
+        }
+        numArgs--;
+    }
+}
 
 static void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
     if (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity]) {
