@@ -133,10 +133,19 @@ extern s16 g_WindowBufferPos[4];
 extern u8 g_WindowBuffer[4][16];
 extern s16 g_WindowTotalRowsHeight[4];
 
-extern u16 D_80114488;
+/* volatile: the movie stream sets this from an interrupt callback, and it is
+ * what keeps the s16 conversion in FieldUpdateMovieStream a separate
+ * sign-extension instead of folding into a signed load. */
+extern volatile u16 D_80114488;
 extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
+extern u8 D_80071C1C;  // set while a movie opcode is driving playback
+extern u32 D_80075E10; // top of the buffer the movie stream decodes into
+extern s16 D_801142C8;
+void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
+void func_800354CC(void);                    // STR playback start
+void func_80035658(void);                    // STR playback stop
 extern s32 D_8009A010;
 extern s32 D_8009A014;
 extern s16 D_801144D4;
@@ -683,7 +692,57 @@ void FieldCameraAssign(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldUpdateMovieStream);
+/* Drive the CD stream that feeds the MDEC. While a field map is still loading
+ * the stream is not touched at all; otherwise the chain reader's status decides
+ * whether to arm the ring buffer, start playback, or tear it down. */
+void FieldUpdateMovieStream(void) {
+    u32 status;
+
+    if (g_isFieldLoading == 1) {
+        if (SystemCdromReadChain() == 0) {
+            g_isFieldLoading = 2;
+        }
+        return;
+    }
+    if (D_8009ABF4.eventCmd == EVTCMD_UNK14) {
+        func_80035658();
+        D_80114488 = 0;
+        g_FieldMoviePlayed = 0;
+        D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        return;
+    }
+    status = SystemCdromReadChain();
+    switch (status) {
+    case 0:
+        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE &&
+            D_8009ABF4.movieCommandState == MOVCMD_IDLE) {
+            if (D_80075E10 <= 0x801AFFFF) {
+                func_80034FC8(D_80075E10, D_8009ABF4.eventCmdParam);
+            } else {
+                func_80034FC8(0x801B0000, D_8009ABF4.eventCmdParam);
+            }
+            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+            g_FieldMoviePlayed = 1;
+        }
+        if ((s16)D_80114488 == 1) {
+            D_801142C8 = 1;
+            D_80114488 = 0;
+            g_FieldMoviePlayed = 0;
+            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        }
+        break;
+    case 0xA:
+        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE) {
+            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        }
+        if (D_8009ABF4.eventCmd == EVTCMD_PLAY_MOVIE) {
+            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+            func_800354CC();
+            D_80114488 = 1;
+        }
+        break;
+    }
+}
 
 /////////////////////////////////////////////////
 // Begin of field_rain.c
@@ -3906,28 +3965,55 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstw);
+/* Block until this entity's offset animation finishes. OfsType 3 means the last
+ * step ran, so clear it and fall through; 0 means there was never one. */
+s32 OpcodeFuncOfstw(void) {
+    FieldEntity* model;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ofstw", 0);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(1);
+        return 0;
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->OfsType != 0 && model->OfsType != 3) {
+        return 1;
+    }
+    model->OfsType = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStep = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetSteps = 0;
+    PC_INC(1);
+    return 0;
+}
 
 /* Block until this entity's turn finishes. Returning 1 without advancing the
  * PC re-runs the opcode next frame; TurnType 3 means the turn just completed,
  * so clear it and fall through.
  *
- * Instruction-for-instruction identical, but the original keeps the entity id
- * loaded at the top of the function live in $a0 and lets the model == 0xFF path
- * fall into the PC_INC tail without reloading it; gcc reloads on both paths. */
+ * Instruction-for-instruction identical; what is left is where gcc cross-jumps
+ * the PC_INC tail. The original merges the three paths *after* the reload of
+ * g_CurrentEntity, so the model == 0xFF path reuses the copy loaded at the top
+ * of the function; gcc merges two instructions earlier and reloads. Writing the
+ * tail out twice stops it cross-jumping at all (9 extra instructions), and
+ * inverting the test to an early return flips the branch to `bne`. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnw);
 #else
 s32 OpcodeFuncTurnw(void) {
+    FieldEntity* model;
+
     if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("turnw", 0);
         }
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 0) {
-            if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 3) {
+        model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+        if (model->TurnType != 0) {
+            if (model->TurnType != 3) {
                 return 1;
             }
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
+            model->TurnType = 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
         }
@@ -4343,7 +4429,29 @@ s32 OpcodeFuncWsizw(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsize);
+s32 OpcodeFuncWsize(void) {
+    s16 x;
+    s16 y;
+    s16 w;
+    s16 h;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wsize", 8);
+    }
+    GET_PARAM_S16(x, 2);
+    GET_PARAM_S16(y, 4);
+    GET_PARAM_S16(w, 6);
+    GET_PARAM_S16(h, 8);
+    FieldDialogSetSize(GET_PARAM_U8(1), x, y, w, h);
+    PC_INC(10);
+    /* Not cosmetic: the statement boundary stops gcc sinking `move v0,zero`
+     * into the load delay slot of the PC_INC read, which is what forces the
+     * original's $v0 for the incremented value and its trailing `nop`.
+     * Most likely a macro in the original. Found by decomp-permuter. */
+    do {
+        return 0;
+    } while (0);
+}
 
 s32 OpcodeFuncWrow(void) {
     if (g_DebugLevel & 3) {
@@ -5368,9 +5476,75 @@ s32 OpcodeFuncBgrol2(void) {
 // Begin of field_opcode_movie.c
 ////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmvie);
+/* Preload the movie named by the parameter, blocking until the load finishes.
+ * Same post-then-poll shape as OpcodeFuncMovie, one event command earlier. */
+s32 OpcodeFuncPmvie(void) {
+    s16 movieId;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMovie);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pmvie", 1);
+    }
+    if (D_800716CC != 0) {
+        PC_INC(2);
+        return 0;
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_LOAD_MOVIE:
+        switch (g_FieldState->movieCommandState) {
+        case MOVCMD_ACTIVE:
+            break;
+        case MOVCMD_DONE:
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            PC_INC(2);
+            return 0;
+        }
+        return 1;
+    case EVTCMD_NONE:
+        g_FieldState->eventCmd = EVTCMD_LOAD_MOVIE;
+        movieId = GET_PARAM_U8(1);
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        g_FieldState->eventCmdParam = movieId;
+        break;
+    }
+    return 1;
+}
+
+/* Play the field map's movie, blocking until it finishes. Returning 1 without
+ * advancing the PC re-runs the opcode next frame, so the request is posted once
+ * as an event command and then polled. */
+s32 OpcodeFuncMovie(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("movie", 0);
+    }
+    D_80071C1C = 1;
+    if (D_800716CC != 0) {
+        D_801144D4 = 0;
+        PC_INC(1);
+        return 0;
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_PLAY_MOVIE:
+        switch (g_FieldState->movieCommandState) {
+        case MOVCMD_ACTIVE:
+            break;
+        case MOVCMD_DONE:
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case EVTCMD_UNK14:
+        PC_INC(1);
+        return 0;
+    case EVTCMD_NONE:
+        g_FieldState->eventCmd = EVTCMD_PLAY_MOVIE;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        break;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncMvief(void) {
     if (g_DebugLevel & 3) {
@@ -5425,7 +5599,24 @@ s32 OpcodeFuncScrlc(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrla);
+/* Scroll the camera to an entity over a number of frames. Unlike SCR2D the
+ * target is an entity id, so a missing model makes the opcode a no-op. */
+s32 OpcodeFuncScrla(void) {
+    u8 entityId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrla", 0);
+    }
+    entityId = GET_PARAM_U8(4);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        g_FieldState->cameraScrollMode = GET_PARAM_U8(5);
+        g_FieldState->cameraScrollTargetId = g_EntityToModel[entityId];
+        g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(2, 2);
+        g_FieldState->cameraScrollState = 0;
+    }
+    PC_INC(6);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
 
@@ -5580,9 +5771,81 @@ static void FieldEventRectClear(s16* arg0) {
     arg0[3] = 0;
 }
 
+/* Copy the first `count` entries of one 16-colour palette over another. The
+ * palette store is a flat byte array of 32-byte pages, so both ends have to be
+ * re-cast to u16 to walk entries rather than bytes. Declaring the two pointers
+ * inside the loop is what makes gcc hoist each as one invariant; written above
+ * the loop they land ahead of the zero-trip guard, and written inline gcc
+ * reassociates the base out and the body needs a third `addu`.
+ *
+ * One instruction from matching: the original materialises &D_80095DE0 between
+ * the `andi` that widens the palette id and the `sll` that scales it, gcc after
+ * both. The two are a .rodata unit -- OpcodeFuncCppal owns the "cppal" string
+ * that OpcodeFuncCppal2 prints -- so neither can land without the other. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCppal);
+#else
+s32 OpcodeFuncCppal(void) {
+    s16 count;
+    u8 src;
+    u8 dst;
+    s16 i;
 
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cppal", 4);
+    }
+    count = GET_PARAM_U8(4) + 1;
+    src = FieldEventReadMemoryU8(1, 2);
+    dst = FieldEventReadMemoryU8(2, 3);
+    for (i = 0; i < count; i++) {
+        u16* dstPal = (u16*)(D_80095DE0 + dst * 32);
+        u16* srcPal = (u16*)(D_80095DE0 + src * 32);
+
+        dstPal[i] = srcPal[i];
+    }
+    PC_INC(5);
+    return 0;
+}
+#endif
+
+/* As CPPAL, but source and destination each get their own start entry, so the
+ * copy can shift a run of colours within or between palettes.
+ *
+ * Instruction-for-instruction identical; the preheader swaps $v0 and $v1
+ * between the scaled index and the base address. Reversing the operand order in
+ * the C does not move it. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCppal2);
+#else
+s32 OpcodeFuncCppal2(void) {
+    s16 count;
+    s16 srcPal;
+    s16 dstPal;
+    s16 src;
+    s16 dst;
+    s16 end;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cppal", 7);
+    }
+    count = FieldEventReadMemoryU8(4, 7) + 1;
+    srcPal = GET_PARAM_U8(3);
+    dstPal = GET_PARAM_U8(4);
+    src = FieldEventReadMemoryU8(1, 5);
+    dst = FieldEventReadMemoryU8(2, 6);
+    end = src + count;
+    while (src < end) {
+        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+
+        to[dst] = from[src];
+        src++;
+        dst++;
+    }
+    PC_INC(8);
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncRtpal);
 
@@ -6049,7 +6312,29 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinEndTurn);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
 
+/* Every instruction matches except one: the original leaves the delay slot of
+ * the first FieldEventReadMemoryU8 call empty and stores fadeType ahead of it,
+ * where gcc sinks that store into the slot and comes out one instruction short.
+ * It fills the slot the same way for the later three calls. Neither a temp for
+ * the parameter nor the do/while barrier that fixes OpcodeFuncWsize helps --
+ * the barrier costs six more instructions by breaking the g_FieldState CSE. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncNfade);
+#else
+s32 OpcodeFuncNfade(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("nfade", 8);
+    }
+    g_FieldState->fadeType = GET_PARAM_U8(3);
+    g_FieldState->nFadeRedTarget = FieldEventReadMemoryU8(1, 4);
+    g_FieldState->nFadeGreenTarget = FieldEventReadMemoryU8(2, 5);
+    g_FieldState->nFadeBlueTarget = FieldEventReadMemoryU8(3, 6);
+    g_FieldState->fadeAdjust = 0;
+    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(4, 7);
+    PC_INC(9);
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
 
@@ -8256,7 +8541,31 @@ void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
 
 bool FieldDebugPageIsRender(s16 arg0) { return D_800E08C0[arg0 * 378] == 0; }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageResetStrings);
+/* Blank all 24 rows of a debug page and restore its default colour. The row
+ * text is a 14-byte record per row, the per-row colour a single byte, so the
+ * two arrays walk the page at different strides. */
+void FieldDebugPageResetStrings(s16 page) {
+    s32 i;
+    s32 off;
+    u8* colors;
+
+    i = 0;
+    colors = &D_800E08A8[page * 378];
+    off = page * 378;
+    while (i < 24) {
+        D_800E0758[off] = 0;
+        *colors++ = 0;
+        i++;
+        off += 14;
+    }
+    D_800E0750[page * 378] = 7;
+    D_800E0751[page * 378] = 0xF;
+    D_800E0752[page * 378] = 0x1F;
+    D_800E0756[page * 189] = 0;
+    D_800E0754[page * 189] = 0;
+    D_800E08C0[page * 378] = 0;
+    D_8009D824 = 1;
+}
 
 static void FieldDebugRenderClear(void) {
     g_FieldDebugRChars = 0;
