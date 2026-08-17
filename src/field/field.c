@@ -810,7 +810,31 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelStructInit);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadGlobalModels);
+extern u_long* D_800DFCA0;
+u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);
+
+/* Loads every global (BCX) model in the header, then optionally kicks off the
+ * next streamed read. Scratchpad word 0 is clobbered by each load and restored
+ * before the next one; word 1 holds the sector/size pair for that read. */
+u8* FieldModelLoadGlobalModels(
+    FieldModelData* data, s32 arg1, u8* pkts, s32 readFile) {
+    u32* fileInfo;
+    s32 saved;
+    u32 i;
+
+    saved = ((s32*)0x1F800000)[0];
+    fileInfo = (u32*)((s32*)0x1F800000)[1];
+    for (i = 0; i < data->unk2; i++) {
+        ((s32*)0x1F800000)[0] = saved;
+        pkts = FieldModelLoadBcx(data, arg1, pkts, i);
+    }
+    if (readFile) {
+        DS_read(fileInfo[0], fileInfo[1], D_800DFCA0, NULL);
+        while (SystemCdromReadChain() != 0) {
+        }
+    }
+    return pkts;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadBcx);
 
@@ -911,7 +935,51 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiAnimatedPointLight);
 // Begin of field_event.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventInit);
+extern u8 D_800716D4;
+void FieldWindowResetAll(void);
+void FieldInitDefaultValues(void);
+void FieldEventRunInit(void);
+
+/* Installs the field's state, model and script pointers, checks the script
+ * header's version bytes, then brings the event system up. */
+void FieldEventInit(
+    FieldState* state, FieldEntity* models, FieldScriptHeader* scripts) {
+    s32 flags;
+
+    /* The high half of FieldState's 0x68 word. The low half is the
+     * controller-1 key bits (see OpcodeFuncKeyEx, which matches against
+     * activeKeys as a u32), so this cannot be a named field without splitting
+     * that member. Widening to s32 is what makes the load lh rather than lhu:
+     * held in an s16 the value is only ever masked, and gcc narrows it. */
+    flags = *(s16*)((u8*)state + 0x6A);
+    g_FieldState = state;
+    g_FieldModels = models;
+    g_FieldScripts = scripts;
+    D_80095DCC = 0;
+    D_8007EBE0 = 1;
+    D_8009FE8C = 0;
+    if (flags & 0x100) {
+        D_80095DCC = 1;
+        D_80099FFC = 4;
+    }
+    if (scripts->eventDataVersion < 2) {
+        SystemError('K', 10);
+    }
+    if (scripts->eventDataVersion > 2 || scripts->eventVersion > 5) {
+        SystemError('K', 12);
+    }
+    if (scripts->eventVersion < 5) {
+        SystemError('K', 11);
+    }
+    FieldWindowResetAll();
+    FieldInitDefaultValues();
+    FieldEventRunInit();
+    if (D_800716D4 == 0) {
+        FieldEventClearAkaoStruct();
+        *D_8009A000 = 0xF2;
+        SystemAkaoExecute();
+    }
+}
 
 static void InitFieldDebugPages(void);
 void FieldEventUpdate(s32 arg0) {
