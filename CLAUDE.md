@@ -150,7 +150,7 @@ otherwise byte-for-byte correct, so they stay `INCLUDE_ASM`:
 `FieldDebugPagesResetPosSize` (2 extra instructions) and
 `AddStrNextDebugRow`.
 
-#### Three ways a clean-looking diff lies
+#### Four ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -185,6 +185,18 @@ The usual way to trip this is a symbol declared only inside a
 `#else /* NON_MATCHINGS */` block — `PreloadNextFieldMap`'s externs near the top
 of `src/field/field.c` are not compiled in the matching build. Declare the
 symbol in the real extern block instead.
+
+**A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
+truncates silently: on a longer function the tail simply never enters the
+comparison, so it can differ freely while the visible rows look perfect.
+`func_801D080C` is 1205 instructions, and its last ~150 — including a whole
+loop that did not match — were invisible for as long as nobody passed the flag.
+`checkfn.py` now sizes `--max-lines` from the target's instruction count and
+refuses to give a verdict if it gets back fewer instructions than the `.s`
+declares. Passing the flag by hand has a trap of its own: it must come *after*
+the function name, because `diff.py -o --max-lines 2000 <fn>` binds `<fn>` to
+the end-address positional and returns an empty diff with score 0 — which reads
+as a flawless match.
 
 ### 3b. Check .rodata ownership before writing the C
 

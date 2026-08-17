@@ -213,8 +213,19 @@ def calibrate_sections(rows, syms):
 
 def check(source, func, syms):
     want = target_insn_count(source, func)
+    # diff.py truncates at --max-lines, which defaults to 1024. A function
+    # longer than that would silently be judged on its first 1024 instructions
+    # only: the tail never enters the comparison, so it can differ freely and
+    # still be reported as a match. Ask for the whole thing, with headroom for
+    # the insertions and the label rows diff.py interleaves.
+    #
+    # The flag has to come *after* the function name: given it before, argparse
+    # binds the function to `end` rather than `start` and diff.py returns an
+    # empty diff -- score 0, no rows, indistinguishable from a match to anything
+    # that does not count instructions.
     proc = subprocess.run(
-        [PYTHON, DIFF, "-o", "--format=json", func],
+        [PYTHON, DIFF, "-o", "--format=json", func,
+         "--max-lines", str(want * 2 + 128)],
         cwd=REPO, capture_output=True, text=True)
     if proc.returncode != 0:
         die("diff.py failed for %s:\n%s" % (func, proc.stderr.strip()))
@@ -229,6 +240,10 @@ def check(source, func, syms):
         scoped.append(row)
         if row.get("base"):
             seen += 1
+    if seen < want:
+        die("diff.py returned only %d of %s's %d instructions -- the verdict "
+            "would cover\n         part of the function. Raise --max-lines."
+            % (seen, func, want))
 
     bases = calibrate_sections(scoped, syms)
     real, alias, ins, dele = 0, 0, 0, 0

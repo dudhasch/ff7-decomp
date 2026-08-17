@@ -280,21 +280,47 @@ void func_801D069C(void) {
 // for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
 // clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
 //
-// 1169 of the 1189 instructions match. Everything structural is right: same
+// 1179 of the 1205 instructions match. Everything structural is right: same
 // instruction count, byte-identical .data/.rodata/.bss, and every saved
 // register lands where the original put it. What is left is instruction
-// *scheduling* in seven small spots -- gcc picking a different order between
+// *scheduling* in a few small spots -- gcc picking a different order between
 // two independent instructions, e.g. `li s2,0x21` and `addiu s6,sp,0x20`
-// swapping places in the case-2 loop preheader. Run tools/checkfn.py to see
-// them.
+// swapping places in the case-2 loop preheader -- plus the mask loop below.
+// Run tools/checkfn.py to see them.
 //
 // Two things in here are known not to be the original phrasing, but removing
 // either costs 60+ instructions of diff, so they are load-bearing until the
 // real form is found:
-//   * `i = Savemap.config;` in the magic-order case. A fresh temp there does
-//     not work -- it has to be `i` specifically, which suggests the original
-//     keeps the loop counter live across that region for some other reason.
+//   * `i = Savemap.config;` in the magic-order case. It is not there for its
+//     value: it makes `i` conflict with `setting`, which pushes `setting` off
+//     s1 and lets the sound case's &Savemap.config pseudo have it. Without the
+//     conflict the whole first switch reallocates. A fresh temp does not work
+//     -- it has to be an allocno that already outranks `setting`.
 //   * `x = ...; dy = ...;` hoisted out of the func_8001EB2C calls in case 2.
+//
+// The mask loop is the clearest lead. The original's outer counter is a u16 in
+// s2 -- the register `setting` holds -- and its `D_801D24C0[j]` lands in a
+// scratch a0, not in `value`. s2 means the allocno crosses a call, which no
+// variable local to that block does, so the counter really is `setting`. But
+// writing it that way inverts the whole s0/s1/s2 assignment (`setting` picks up
+// loop-depth-weighted refs and outranks `value`), costing 50+ rows. Whatever
+// keeps `setting` ranked third in the original is the same thing the
+// `i = Savemap.config` hack is standing in for.
+//
+// Also established, and reverted because each costs more than it fixes:
+//   * `dy` in case 2 is a strength-reduced induction variable, not a for-init
+//     local: writing `dy = i * 12 + 0x21;` in the body puts `li 0x21` after the
+//     invariant hoists, exactly where the original has it. It costs an
+//     s2/s3/s4 rotation between dy, x and rowY (31 changed, 3 inserted), so the
+//     for-init form stays until dy can be made to outrank x.
+//   * Making rowY an induction variable too changes the saved-register count.
+//
+// Ruled out by measurement, all worse than what is here: swapping the `y = ...`
+// / `x = ...` statements at the top of case 2 (no codegen change at all -- only
+// the line attribution moves); calling func_801D0040 before `value = value + 1`
+// in the ATB case; writing `setting | (Savemap.config & 0xFFFC)` for the sound
+// case's store; merging `corner` into `value`; and the declaration order of
+// `value` and `setting`.
 //
 // Directed searches already tried and exhausted, all still 805: statement order
 // in the case-2 preheader and where `dy` is initialised (8), function-level
@@ -302,7 +328,10 @@ void func_801D069C(void) {
 // loop's temp plus three forms of that loop (576), the field-assignment order
 // of both 4-field rect blocks (576), and &rect as an explicit pointer with the
 // three call sites and three landing sites swept (4608). None of the residue is
-// reachable from the C's shape at those points.
+// reachable from the C's shape at those points. Note that those searches, and
+// the "1169 of 1189" this comment used to claim, predate the checkfn.py fix for
+// diff.py's 1024-line truncation -- they never saw the last ~150 instructions,
+// which is where the mask loop lives.
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
 #else
