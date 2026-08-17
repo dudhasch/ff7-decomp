@@ -435,7 +435,34 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGClampPos);
+/* Scroll limits at the head of the field's trigger block. g_FieldTriggers is
+ * typed s32 because it is assigned as a raw word on load. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ s16 minX;
+    /* 0x0E */ s16 minY;
+    /* 0x10 */ s16 maxX;
+    /* 0x12 */ s16 maxY;
+} FieldScrollLimits;
+
+#define FIELD_SCROLL_LIMITS ((FieldScrollLimits*)g_FieldTriggers)
+
+/* Keeps a background scroll position half a screen (0xA0 x 0x78) inside the
+ * map's scroll limits. */
+void FieldBGClampPos(s16* pos) {
+    if (FIELD_SCROLL_LIMITS->maxX - 0xA0 < pos[0]) {
+        pos[0] = FIELD_SCROLL_LIMITS->maxX - 0xA0;
+    }
+    if (pos[0] < FIELD_SCROLL_LIMITS->minX + 0xA0) {
+        pos[0] = FIELD_SCROLL_LIMITS->minX + 0xA0;
+    }
+    if (FIELD_SCROLL_LIMITS->maxY - 0x78 < pos[1]) {
+        pos[1] = FIELD_SCROLL_LIMITS->maxY - 0x78;
+    }
+    if (pos[1] < FIELD_SCROLL_LIMITS->minY + 0x78) {
+        pos[1] = FIELD_SCROLL_LIMITS->minY + 0x78;
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGGetEntityScreenPos);
 
