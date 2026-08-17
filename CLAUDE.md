@@ -222,9 +222,39 @@ ninja build/us/src/battle/battle.c.o
 export PATH="$PWD/tools/permuter-bin:$PATH"   # see "Toolchain overrides" below
 .venv/bin/python3 ../decomp-permuter/import.py src/battle/battle.c \
     asm/us/battle/nonmatchings/battle/func_800A85FC.s
+.venv/bin/python3 tools/permuter_strip_asm.py nonmatchings/func_800A85FC
 .venv/bin/python3 ../decomp-permuter/permuter.py nonmatchings/func_800A85FC \
     -j"$(($(nproc) - 2))"
 ```
+
+**The `permuter_strip_asm.py` step is not optional**, and skipping it is not
+obvious from the output — the search just never converges. `import.py`
+preprocesses the `.c`, so every `INCLUDE_ASM` has already expanded into a
+`__maspsx_include_asm_hack_*` function holding `.include "<fn>.s"`, and those
+land in `base.c` as `#pragma _permuter b64literal` blobs. The permuter decodes
+them into every candidate, so each candidate object carries the whole overlay's
+assembly — ~44,000 instructions for `src/field/field.c` — while `target.o` holds
+only the function being permuted. The score is then almost entirely code the
+permuter cannot affect.
+
+The signature is a base score in the millions, and — the giveaway — base scores
+that agree to within a percent across completely unrelated functions:
+
+```
+[FieldDebugPageAddPos]   base score = 4446740
+[OpcodeFuncMpPlus]       base score = 4422490
+[UpdateFieldExitArrows]  base score = 4361645   <- 45 after stripping
+```
+
+**Sanity-check the base score before trusting a run.** A correctly imported
+scratch scores in the tens or low hundreds; `asm-differ` and `checkfn.py` tell
+you roughly how far off the function is, and the base score should agree. If it
+is in the millions, stop and strip.
+
+Adding `-DSKIP_ASM=1` to the scratch's `compile.sh` does **not** fix this — cpp
+consumed the macro at import time. It only ever appeared to help by accident,
+when an import ran while `make report` had left `build.ninja` in its SKIP_ASM
+configuration.
 
 `import.py` takes `<c_file> <asm_file|func_name>` — there is no `-o` flag. The
 `func_name` form only works if the function still has a `GLOBAL_ASM` stub, which
