@@ -122,6 +122,7 @@ extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
+extern u8 D_8009AD30[];
 extern FieldState D_8009ABF4;
 extern u8 D_8009C540;
 extern u8 D_8009AD2C;
@@ -134,6 +135,9 @@ extern s16 D_8009A162;
 extern u8 D_8009A15C;
 
 void SystemRefreshParty(void);
+void func_80025648(u32 materia, u8 slot);
+void FieldDialogSetWindowStyleCbc(s16 window, u8 style, s16 preventClose);
+void FieldDialogSetWindowHeight(s16 window, s16 height);
 void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h);
 void FieldDebugPageResetStrings(s16 page);
 u16 func_80025310(u16 itemId);
@@ -3403,7 +3407,21 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLader);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmova);
+void OpcodeFuncPmova(void) {
+    u8 partyId;
+    u8 actorId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pmova", 1);
+    }
+    partyId = D_8009D391[GET_PARAM_U8(1)];
+    if (partyId == 0xFF) {
+        actorId = 0xFF;
+    } else {
+        actorId = D_8009AD30[partyId];
+    }
+    FieldMoveToEntityUpdate(actorId);
+}
 
 void OpcodeFuncMova(void) {
     if (g_DebugLevel & 3) {
@@ -3421,7 +3439,21 @@ void OpcodeFuncDira(void) {
     FieldEventSetDirByActorId(GET_PARAM_U8(1));
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPdira);
+void OpcodeFuncPdira(void) {
+    u8 partyId;
+    u8 actorId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pdira", 1);
+    }
+    partyId = D_8009D391[GET_PARAM_U8(1)];
+    if (partyId == 0xFF) {
+        actorId = 0xFF;
+    } else {
+        actorId = D_8009AD30[partyId];
+    }
+    FieldEventSetDirByActorId(actorId);
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
 
@@ -3432,7 +3464,21 @@ void OpcodeFuncTura(void) {
     FieldEntityTurnToEntity(GET_PARAM_U8(1));
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPtura);
+void OpcodeFuncPtura(void) {
+    u8 partyId;
+    u8 actorId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ptura", 3);
+    }
+    partyId = D_8009D391[GET_PARAM_U8(1)];
+    if (partyId == 0xFF) {
+        actorId = 0xFF;
+    } else {
+        actorId = D_8009AD30[partyId];
+    }
+    FieldEntityTurnToEntity(actorId);
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
 
@@ -3507,7 +3553,21 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsk);
 // Start of field_opcode_window.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWclsEx);
+s32 OpcodeFuncWclsEx(void) {
+    s16 window;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wcls!", 0);
+    }
+    window = GET_PARAM_U8(1);
+    if (D_8008326C[window] == 0xFF) {
+        PC_INC(2);
+        return 0;
+    }
+    FieldWindowSetStateToClose(window);
+    FieldDialogMessageUpdateStates(window, 0);
+    return 1;
+}
 
 s32 OpcodeFuncWsizw(void) {
     s16 window;
@@ -3528,15 +3588,37 @@ s32 OpcodeFuncWsizw(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsize);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWrow);
+s32 OpcodeFuncWrow(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wrow", 2);
+    }
+    FieldDialogSetWindowHeight(GET_PARAM_U8(1), (GET_PARAM_U8(2) << 4) | 9);
+    PC_INC(3);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWmove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWrest);
+s32 OpcodeFuncWrest(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wrest", 1);
+    }
+    FieldWindowReset(GET_PARAM_U8(1));
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWclse);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWmode);
+s32 OpcodeFuncWmode(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wmode", 3);
+    }
+    FieldDialogSetWindowStyleCbc(
+        GET_PARAM_U8(1), GET_PARAM_U8(2), GET_PARAM_U8(3));
+    PC_INC(4);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_math.c
@@ -5154,7 +5236,20 @@ s32 OpcodeFuncSmtra(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDmtra);
+s32 OpcodeFuncDmtra(void) {
+    u32 materia;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("dmtra", 7);
+    }
+    materia = FieldEventReadMemoryU8(1, 3);
+    materia |= FieldEventReadMemoryU8(2, 4) << 8;
+    materia |= FieldEventReadMemoryU8(3, 5) << 16;
+    materia |= FieldEventReadMemoryU8(4, 6) << 24;
+    func_80025648(materia, GET_PARAM_U8(7));
+    PC_INC(8);
+    return 0;
+}
 
 s32 OpcodeFuncCmtra(void) {
     u32 materia;
@@ -5754,7 +5849,7 @@ s32 FieldWindowSetStateToClose(s16 window) {
     return 1;
 }
 
-void FieldDialogSetWindowStyleCbc(s16 window, s8 style, s16 preventClose) {
+void FieldDialogSetWindowStyleCbc(s16 window, u8 style, s16 preventClose) {
     g_WindowData[window].style = style;
     g_WindowData[window].preventClose = preventClose;
 }
