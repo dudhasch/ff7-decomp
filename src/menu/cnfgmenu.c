@@ -281,13 +281,16 @@ void func_801D069C(void) {
 //
 // Two things about running it here, both of which differ from a normal run:
 //
-//   * Re-measure the floor first. An older revision of this comment quoted a
-//     base of 805 against a floor of 280, but that was measured when the
-//     function was hundreds of rows out; at four rows the base sits just above
-//     the floor. The floor itself is nonzero and permanent -- Savemap struct
-//     interiors and two compiler-generated jump tables have no name for `align`
-//     to match -- so --stop-on-zero can never fire. Take the floor from the
-//     `--debug` two-column diff and watch for that number.
+//   * Run `permuter_macros.py retarget` after `align`, then measure the floor.
+//     Retarget rewrites the scratch's own target.s so the Savemap interiors are
+//     spelled the way the C spells them; here that is 44 references and takes
+//     the base score from 596 to 220, with the floor dropping from ~276 to ~40
+//     (what is left is the two jump tables, which have no name either side).
+//     --stop-on-zero still cannot fire, so watch for the floor. Measured
+//     without retarget, 46% of the score is naming noise the search can nudge
+//     without improving anything -- which is exactly what happened on the first
+//     attempt: a 156-point "improvement" that was worth zero real rows and
+//     whose candidate read an uninitialised variable.
 //
 //   * Scope the randomization to the two arms that diverge, never the whole
 //     function. 1201 of 1205 instructions already match, so an unscoped run

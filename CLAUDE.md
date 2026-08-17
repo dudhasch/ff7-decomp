@@ -305,6 +305,7 @@ export PATH="$PWD/tools/permuter-bin:$PATH"   # see "Toolchain overrides" below
     asm/us/battle/nonmatchings/battle/func_800A85FC.s
 .venv/bin/python3 tools/permuter_strip_asm.py nonmatchings/func_800A85FC
 .venv/bin/python3 tools/permuter_macros.py align nonmatchings/func_800A85FC --strings
+.venv/bin/python3 tools/permuter_macros.py retarget nonmatchings/func_800A85FC
 .venv/bin/python3 ../decomp-permuter/permuter.py nonmatchings/func_800A85FC \
     -j"$(($(nproc) - 2))"
 ```

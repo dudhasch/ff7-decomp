@@ -48,6 +48,7 @@ So, once per scratch:
 
 ```bash
 .venv/bin/python3 tools/permuter_macros.py align nonmatchings/<Func> --strings
+.venv/bin/python3 tools/permuter_macros.py retarget nonmatchings/<Func>
 ```
 
 It rewrites only the scratch's `base.c` (keeping the original as
@@ -345,6 +346,43 @@ which is the only gate that counts.
 buried in b64 literals, unknown `PERM_` names, single-site `PERM_ONCE`, a space
 that describes exactly one candidate, and a `func_name` that isn't in `base.c`
 at all.
+
+## `retarget`: fixing the side you are allowed to change
+
+`align` makes the *candidate* use the target's names. It cannot help when the
+target names an **interior of a named struct**: splat calls the halfword at
+0x8009D7BE `D_8009D7BE`, the C calls it `Savemap.config`, and rewriting the C to
+reach it through a standalone extern stops gcc caching the struct base in a
+register — the score goes up, not down, because the codegen genuinely changed.
+Alignment must never change codegen.
+
+The scratch's `target.s` is not a generated file of this repo, though; it is
+ours. Rewriting `D_8009D7BE` there to `Savemap+0x10da` leaves an identical
+relocation against an identical address, so both sides render the same text and
+those rows stop being scored — with no effect on the candidate whatsoever.
+
+```shell
+.venv/bin/python3 tools/permuter_macros.py retarget nonmatchings/<Func>
+```
+
+Which addresses get rewritten is read out of the candidate object, never
+guessed from the symbol table. That matters: on `func_801D080C` the nearest
+symbol preceding `Savemap+0x10da` is `g_RainControl`, an unrelated object 0xb1
+bytes earlier, so a nearest-preceding heuristic would have produced a confidently
+wrong `g_RainControl+0xb3`. Instead the map comes from the R_MIPS_LO16
+relocations in `base.o`, whose addends live in the instruction immediates
+(MIPS o32 is REL). An address the candidate does not already spell as
+`NAME+0xOFF` is left alone, so the command can only ever make the two sides
+agree on something they already agree on numerically. Symbols `align` has
+already handled are skipped, and `target.o` is reassembled — it is what the
+permuter actually scores against, so a rewrite that skipped it would do nothing.
+
+On `func_801D080C` this rewrote 44 references and took the base score from 596
+to 220: register differences 54 → 8, stack differences 6 → 0, and an
+insertion/deletion pair collapsed into a reordering because the two sides now
+line up. The share of the score that is real rather than naming noise went from
+54% to 82%. Do this before measuring the floor, or the floor you measure is
+mostly noise you could have removed.
 
 ## What the permuter is not
 

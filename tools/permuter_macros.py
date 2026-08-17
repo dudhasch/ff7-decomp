@@ -41,6 +41,7 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import sys
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -1049,6 +1050,151 @@ def plan_alignment(
     return renames, interior, unresolved
 
 
+
+# --------------------------------------------------------------------------
+# retarget
+# --------------------------------------------------------------------------
+
+def cmd_retarget(args: argparse.Namespace) -> int:
+    """Rewrite target.s's symbol names to the spellings base.c's object uses.
+
+    `align` fixes the candidate side, which works when the two names denote the
+    same object under different names. It cannot fix an *interior* of a named
+    struct: splat calls the halfword at 0x8009D7BE `D_8009D7BE`, the C calls it
+    `Savemap.config`, and rewriting the C to reach it through a standalone
+    extern stops gcc caching the struct base in a register -- codegen changes,
+    which is the one thing alignment must never do.
+
+    The scratch's target.s is ours, though. Rewriting `D_8009D7BE` there to
+    `Savemap+0x10da` leaves an identical relocation against an identical
+    address, so both sides of the diff render the same text and the rows stop
+    being scored -- with no effect on the candidate at all.
+
+    Which addresses get rewritten is taken from the candidate object rather
+    than guessed from a symbol table: whatever base.o spells as `NAME+0xOFF` is
+    what target.s should say for that address. So this can only ever make the
+    two sides agree on something they already agree on numerically.
+    """
+    path = resolve_base_c(args.path)
+    scratch = os.path.dirname(path)
+    target_s = os.path.join(scratch, "target.s")
+    base_o = os.path.join(scratch, "base.o")
+    target_o = os.path.join(scratch, "target.o")
+    for needed in (target_s, base_o):
+        if not os.path.isfile(needed):
+            print(f"{scratch}: no {os.path.basename(needed)}", file=sys.stderr)
+            return 1
+
+    objdump = "mipsel-linux-gnu-objdump -drz -m mips:3000"
+    settings = os.path.join(scratch, "settings.toml")
+    if os.path.isfile(settings):
+        m = re.search(r'objdump_command\s*=\s*"([^"]+)"', read_text(settings))
+        if m:
+            objdump = m.group(1)
+
+    syms = load_symbol_map()
+
+    def address_of(name: str, off: int) -> Optional[int]:
+        if name in syms:
+            return syms[name] + off
+        m = ADDR_NAME_RE.match(name)
+        return int(m.group(1), 16) + off if m else None
+
+    try:
+        dump = subprocess.run(
+            objdump.split() + [base_o],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print(f"objdump failed: {exc}", file=sys.stderr)
+        return 1
+
+    # MIPS o32 is REL: objdump prints the relocation's symbol on its own line
+    # and leaves the addend in the instruction's immediate, so the offset has
+    # to be read back out of the operand. Only R_MIPS_LO16 is used -- it is the
+    # half that carries the low 16 bits, which is the whole addend for every
+    # offset under 0x8000. A larger one would need its HI16 partner too; rather
+    # than reconstruct that, the computed address simply fails to match any
+    # target symbol and nothing is rewritten, which is the safe way to be wrong.
+    insn_re = re.compile(r"^\s*([0-9a-f]+):	[0-9a-f ]+	\s*\S+\s+(.*?)\s*$")
+    reloc_re = re.compile(r"^\s*([0-9a-f]+): (R_MIPS_\w+)\s+(\S+)")
+    imm_res = (
+        re.compile(r",\s*(-?\d+)\((?:\$?\w+)\)$"),
+        re.compile(r",\s*(-?\d+)$"),
+    )
+    spelling: Dict[int, str] = {}
+    operands: Dict[str, str] = {}
+    for line in dump.splitlines():
+        m = insn_re.match(line)
+        if m:
+            operands[m.group(1)] = m.group(2)
+            continue
+        m = reloc_re.match(line)
+        if not m or m.group(2) != "R_MIPS_LO16":
+            continue
+        ops = operands.get(m.group(1))
+        if ops is None:
+            continue
+        imm = next((r.search(ops) for r in imm_res if r.search(ops)), None)
+        if imm is None:
+            continue
+        off = int(imm.group(1))
+        addr = address_of(m.group(3), off)
+        if addr is not None and off:
+            spelling.setdefault(addr, f"{m.group(3)}+0x{off:x}")
+
+    text = read_text(target_s)
+    source = read_text(path)
+    rewrites: List[Tuple[str, str, int]] = []
+    for sym in sorted(target_symbols(text)):
+        m = ADDR_NAME_RE.match(sym)
+        if not m:
+            continue
+        want = spelling.get(int(m.group(1), 16))
+        if not want or want == sym:
+            continue
+        # `align` may already have rewritten base.c to use this very name --
+        # the array-interior case, `(&D_801D252D)[...]`. The two sides then
+        # agree, and "correcting" the target would break that agreement.
+        if re.search(r"\b" + re.escape(sym) + r"\b", source):
+            print(f"skip     {sym}: base.c already names it")
+            continue
+        pattern = r"\b" + re.escape(sym) + r"\b"
+        count = len(re.findall(pattern, text))
+        text = re.sub(pattern, want, text)
+        rewrites.append((sym, want, count))
+
+    if not rewrites:
+        print("nothing to retarget -- target.s already agrees with base.o")
+        return 0
+    for sym, want, count in rewrites:
+        print(f"retarget {sym} -> {want}  ({count} references)")
+    if args.dry_run:
+        return 0
+
+    if not os.path.exists(target_s + ".preretarget"):
+        shutil.copyfile(target_s, target_s + ".preretarget")
+    write_text(target_s, text)
+
+    # target.o is what the permuter actually scores against, so it has to be
+    # rebuilt or the rewrite changes nothing.
+    shim = os.path.join(REPO_ROOT, "tools", "permuter-bin", "mips-linux-gnu-as")
+    try:
+        subprocess.run(
+            [shim, target_s, "-o", target_o],
+            check=True, capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        print(f"reassembling target.o failed: {detail}", file=sys.stderr)
+        print(f"target.s kept at {target_s}.preretarget", file=sys.stderr)
+        return 1
+    total = sum(n for _, _, n in rewrites)
+    print(f"rewrote {total} references and rebuilt target.o")
+    print("Re-measure the base score: those rows should stop being counted.")
+    return 0
+
+
 def cmd_align(args: argparse.Namespace) -> int:
     path = resolve_base_c(args.path)
     scratch = os.path.dirname(path)
@@ -1236,6 +1382,13 @@ def main(argv: List[str]) -> int:
     )
     p.add_argument("-n", "--dry-run", action="store_true")
     p.set_defaults(func=cmd_align)
+
+    p = sub.add_parser(
+        "retarget", help="make target.s's symbol names match base.c's object"
+    )
+    p.add_argument("path", help="scratch directory or base.c")
+    p.add_argument("-n", "--dry-run", action="store_true")
+    p.set_defaults(func=cmd_retarget)
 
     args = parser.parse_args(argv)
     return args.func(args)
