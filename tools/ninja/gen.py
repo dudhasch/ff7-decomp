@@ -13,6 +13,8 @@ LD_FLAGS = ""
 
 nw: ninja_syntax.Writer = None
 objs: list[str] = []
+# unit name -> its .rodata offset within the overlay, filled per splat config
+rodata_phase: dict[str, int] = {}
 work_dir = "build/us"
 if len(sys.argv) > 1:
     work_dir = sys.argv[1]
@@ -184,16 +186,22 @@ def add_c(cfg: any, file_name: str):
         return
     compiler_flags = get_compiler_params(in_path)
     objs.append(out_path)
+    variables = {
+        "cc1": compiler_flags.cc1,
+        "as_flags": compiler_flags.as_flags,
+        "cc_flags": f"{compiler_flags.cc_opt} {compiler_flags.cc_gp} {compiler_flags.g_opt} {compiler_flags.gcoff_opt}",
+    }
+    # Overlays are loaded on an 8-byte boundary, so a unit's .rodata offset
+    # within its overlay decides whether the section base is 8-byte aligned --
+    # and that is what a jump table's `.align 3` ends up being measured from.
+    if rodata_phase.get(file_name, 0) % 8:
+        variables["jtbl_flags"] = "--phase 4"
     nw.build(
         rule=f"{platform(cfg)}-cc",
         outputs=[out_path],
         inputs=[in_path],
         implicit=["include/common.h", "include/game.h"],
-        variables={
-            "cc1": compiler_flags.cc1,
-            "as_flags": compiler_flags.as_flags,
-            "cc_flags": f"{compiler_flags.cc_opt} {compiler_flags.cc_gp} {compiler_flags.g_opt} {compiler_flags.gcoff_opt}",
-        },
+        variables=variables,
     )
     nw.build(
         rule="phony",
@@ -230,12 +238,24 @@ def add_splat_config(file_name: str):
         implicit=cfg["options"]["symbol_addrs_path"],
     )
     objs.clear()
+    rodata_phase.clear()
     is_main = basename(cfg) == "main"
     is_battle = basename(cfg) == "battle"
     is_batini = basename(cfg) == "batini"
     is_magic = "/magic" in src_path(cfg)
     if platform(cfg) == "psx" and is_main:
         add_s(cfg, "header")
+    # Where each unit's .rodata starts, so add_c below can tell whether that
+    # base is 8-byte aligned. Collected up front: a unit's `.rodata` and `c`
+    # subsegments are not guaranteed to be adjacent, or in that order.
+    for segment in cfg["segments"]:
+        if not "type" in segment:
+            continue
+        if segment["type"] != "code":
+            continue
+        for sub in segment["subsegments"]:
+            if len(sub) > 2 and str(sub[1]) == ".rodata":
+                rodata_phase[str(sub[2])] = int(sub[0])
     for segment in cfg["segments"]:
         if not "type" in segment:
             continue
@@ -365,6 +385,10 @@ with open("build.ninja", "w") as f:
             " | iconv --from-code=UTF-8 --to-code=Shift-JIS"
             " | bin/$cc1 -quiet -mcpu=3000 -mgas $cc_flags"
             " | python3 tools/maspsx/maspsx.py $as_flags"
+            # cc1 aligns jump tables on the section offset, PSY-Q aligned them
+            # on the address. Only differs for units whose .rodata base is
+            # itself 4 mod 8. See tools/psx_jtbl_align.py.
+            " | python3 tools/psx_jtbl_align.py $jtbl_flags"
             " | mipsel-linux-gnu-as -Iinclude -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 -o $out"
         ),
         depfile="$out.d",

@@ -243,33 +243,42 @@ Some functions cannot be decompiled alone, and the failure shows up as a red
 
 Pass `--all` to triage a whole file at once.
 
-#### Known blocker: a jump table that the original put on a 4-byte boundary
+#### Jump table alignment, and the file splits it implies
 
-gcc emits `.rdata` / `.align 3` before every jump table, so GNU `as` puts the
-table on the next 8-byte boundary. Wherever the original has it at an offset
-that is 4 mod 8, the table lands 4 bytes further on and every later `.rodata`
-item shifts with it. An 8-byte alignment cannot produce that offset, so the
-original toolchain must have used 4-byte alignment plus a real 4-byte item, and
-maspsx has no knob for it (`preprocess_lines` skips `.align` outright). Until
-that is resolved these stay `INCLUDE_ASM` however good the C is.
+gcc emits `.rdata` / `.align 3` before every jump table. GNU `as` honours that
+**relative to the start of the object's `.rodata` section**, so the table lands
+on an 8-byte boundary counted from offset 0. The original aligned on the
+address the table would actually have. The two agree only when the section base
+is itself 8-byte aligned — and four units start 4 bytes off:
 
-The symptom depends on what precedes the table, but the cause is the same:
+| unit | `.rodata` base | | unit | `.rodata` base |
+| --- | --- | --- | --- | --- |
+| `battle1` | `0x800A05DC` | | `18B8` | `0x8001029C` |
+| `battle3` | `0x800A0DD4` | | `savemenu` | `0x801D017C` |
 
-* **a string constant** — the 4 zero bytes in between show up in the `.s` as a
-  stray `.asciz ""`. In `src/field/field.c`: `IfCheck`, `If2CheckSigned`,
-  `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`, `OpcodeFuncSrchx`,
-  `OpcodeFuncFade`, `OpcodeFuncFadew`, `OpcodeFuncSpcal`,
-  `FieldEventWriteMemoryU8` and `FieldEventRequestRun`.
-* **another jump table** — a unit whose `.rodata` is nothing but jump tables
-  packed back to back still lands half of them at 4 mod 8.
-  `func_800E5FB4` in `src/battle/battle3.c` is the worked example: its C
-  reproduces all 17 instructions byte for byte, and the only diff row is
-  `jtbl_800A1068` at `.rodata+0x298` where the original has `+0x294`.
+`tools/psx_jtbl_align.py` handles those: `tools/ninja/gen.py` reads each
+`.rodata` subsegment's offset out of the splat config and passes `--phase 4`
+when it is odd, which demotes a jump table's `.align 3` to `.align 2` so the
+table keeps its natural offset — 8-byte aligned once measured from a base that
+is itself 4 mod 8. Only jump tables are touched; `.align 3` before a `double`
+is left alone. This is what makes `func_800E5FB4` in `src/battle/battle3.c`
+match.
 
-So "no string in this file's `.rodata`" is **not** a clearance. Read the target
-offset off `tools/checkfn.py`, which reports it as `want: .rodata+0x294 / got:
-.rodata+0x298`; if it is 4 mod 8 the function is blocked. Functions whose jump
-table lands on an 8-byte boundary anyway are unaffected and match normally.
+**The residue is a file-split problem, not an alignment one.** The original
+build compiled many small `.c` files, each with its own object and its own
+`.rodata` base, and splat merges them into one unit. `src/field/field.c` is
+several original files glued together — its own comments mark the seams
+(`// Begin of field_event_memory_bank.c`) — so its `.rodata` carries *both*
+phases at once: `jtbl_800A052C` is 4 mod 8 while the tables of already-matched
+functions are 0 mod 8. One `--phase` setting cannot satisfy both, so these stay
+`INCLUDE_ASM` until the file is split on the original boundaries: `IfCheck`,
+`If2CheckSigned`, `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`,
+`OpcodeFuncSrchx`, `OpcodeFuncFade`, `OpcodeFuncFadew`, `OpcodeFuncSpcal`,
+`FieldEventWriteMemoryU8` and `FieldEventRequestRun`.
+
+The tell is `tools/checkfn.py` reporting a `.rodata` offset rather than an
+instruction — `want: .rodata+0x294 / got: .rodata+0x298`. Every instruction can
+be byte-perfect and the function still fails the link check.
 
 ### 4. Last-mile: decomp-permuter
 
@@ -515,6 +524,7 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
+| `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
