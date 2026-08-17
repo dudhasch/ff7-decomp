@@ -104,7 +104,11 @@ extern u8 D_800DFDFC[];
 extern u8 D_80071C20;
 extern u8 g_EntityForSplitJoin;
 extern s16 D_800DF120[][2];
-extern u16 g_FieldDebugRb;
+extern s16 g_FieldDebugRb;
+/* Double-buffered 7-entry ordering table for the debug overlay. Entry 6 is the
+ * tail the overlay's primitives hang off, entry 0 the head linked into the
+ * caller's OT. */
+extern u_long D_800E41C8[2][7];
 extern s16 g_FieldDebugRChars;
 extern s16 g_FieldDebugRLines;
 extern s16 g_FieldDebugRRect;
@@ -5774,7 +5778,37 @@ s32 OpcodeFuncScrla(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
+/* SCRLP is SCRLA addressed by party slot rather than by entity: the slot picks
+ * a character, the character picks the field entity that represents them.
+ *
+ * The copy back into partyId is load-bearing, not redundant. Indexing
+ * g_EntityToModel with actorId directly widens it in place as
+ * `andi a1,v0,0xff`, where the original holds the resolved actor in v0 and
+ * copies it out with a plain `move`. Going through the (by now dead) slot
+ * variable is what produces that copy. Found by decomp-permuter. */
+s32 OpcodeFuncScrlp(void) {
+    u8 partyId;
+    u8 actorId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrlp", 0);
+    }
+    partyId = D_8009D391[GET_PARAM_U8(4)];
+    if (partyId == 0xFF) {
+        actorId = 0xFF;
+    } else {
+        actorId = D_8009AD30[partyId];
+    }
+    partyId = actorId;
+    if (g_EntityToModel[partyId] != 0xFF) {
+        g_FieldState->cameraScrollMode = GET_PARAM_U8(5);
+        g_FieldState->cameraScrollTargetId = g_EntityToModel[partyId];
+        g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(2, 2);
+        g_FieldState->cameraScrollState = 0;
+    }
+    PC_INC(6);
+    return 0;
+}
 
 s32 OpcodeFuncScrcc(void) {
     if (g_DebugLevel & 3) {
@@ -8780,7 +8814,38 @@ static void FieldDebugRenderClear(void) {
     g_FieldDebugRb ^= 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRender);
+void FieldDebugRenderPage(s16 page);
+
+/* Rebuilds the debug overlay into this frame's ordering table when anything
+ * marked it dirty, then links that table into the caller's OT.
+ *
+ * The page counter and the byte offset have to be two independent induction
+ * variables, and the visibility byte reached by bare subscript. Anything that
+ * derives the offset from the counter (`D_800E08C0[page * 378]`, with or
+ * without a pointer local) lets gcc strength-reduce the two into one walking
+ * pointer with the symbol folded into its start value; giving it a plain
+ * register index instead leaves the `symbol(reg)` addressing the original has,
+ * which maspsx rematerialises through $at every iteration. */
+void FieldDebugRender(u_long* ot) {
+    s32 page;
+    s32 off;
+
+    if (D_8009D824) {
+        FieldDebugRenderClear();
+        page = 0;
+        off = 0;
+        ClearOTag(D_800E41C8[g_FieldDebugRb], 7);
+        do {
+            if (D_800E08C0[off] == 0) {
+                FieldDebugRenderPage(page);
+            }
+            off += 378;
+            page++;
+        } while (page < 6);
+        D_8009D824 = 0;
+    }
+    addPrims(ot, D_800E41C8[g_FieldDebugRb], &D_800E41C8[g_FieldDebugRb][6]);
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderPage);
 
