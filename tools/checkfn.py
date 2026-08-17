@@ -34,7 +34,12 @@ DIFF = os.path.join(REPO, "tools", "asm-differ", "diff.py")
 INSN_RE = re.compile(r"^\s+/\* [0-9A-Fa-f]+ [0-9A-Fa-f]{8} [0-9A-Fa-f]{8} \*/")
 SYM_DEF_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*0x([0-9A-Fa-f]+)\s*;")
 ADDR_NAME_RE = re.compile(r"^(?:D_|jtbl_|func_|D)([0-9A-Fa-f]{8})$")
-SECTION_REF_RE = re.compile(r"^\.([a-z]+)\+0x([0-9A-Fa-f]+)$")
+# `.rodata+0x18`, and also a bare `.rodata` -- objdump omits the `+0x0` for a
+# reference to the very start of a section. Without the optional group, an
+# item at offset 0 never resolves, so it can neither be recognised as an alias
+# nor contribute its section's base to the calibration below. A jump table is
+# usually the first thing in .rodata, which is exactly that case.
+SECTION_REF_RE = re.compile(r"^\.([a-z]+)(?:\+0x([0-9A-Fa-f]+))?$")
 
 
 def die(msg):
@@ -154,7 +159,8 @@ def resolve(token, syms, section_bases):
     m = SECTION_REF_RE.match(token)
     if m:
         base = section_bases.get(m.group(1))
-        return None if base is None else base + int(m.group(2), 16)
+        off = int(m.group(2), 16) if m.group(2) else 0
+        return None if base is None else base + off
     # `D_80049208+0x1` and `D_80049209` are the same address written two ways;
     # gcc emits the former when you index one array, the .s names the latter.
     m = re.match(r"^(.+?)\+0x([0-9A-Fa-f]+)$", token)
@@ -199,15 +205,23 @@ def calibrate_sections(rows, syms):
         bsym, csym = base.get("symbol"), cur.get("symbol")
         if not bsym or not csym:
             continue
+        # A %hi operand never carries an offset -- objdump prints `%hi(.rodata)`
+        # whether the item is at +0 or +0x18 -- so it cannot say where the
+        # section starts, only that the reference is somewhere inside it.
+        # Letting it vote would put the base at addr(symbol) for any item, and
+        # a wrong base makes an unrelated address compare equal, i.e. reports a
+        # genuine difference as an alias. Only %lo rows carry the offset.
+        if csym.startswith("%hi("):
+            continue
         m = SECTION_REF_RE.match(re.sub(r"^%(?:hi|lo)\((.*)\)$", r"\1", csym))
         if not m:
             continue
         addr = resolve(bsym, syms, {})
         if addr is None:
             continue
-        votes.setdefault(m.group(1), {}).setdefault(
-            addr - int(m.group(2), 16), 0)
-        votes[m.group(1)][addr - int(m.group(2), 16)] += 1
+        off = int(m.group(2), 16) if m.group(2) else 0
+        votes.setdefault(m.group(1), {}).setdefault(addr - off, 0)
+        votes[m.group(1)][addr - off] += 1
     return {sect: max(cands, key=cands.get) for sect, cands in votes.items()}
 
 

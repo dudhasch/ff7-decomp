@@ -280,12 +280,21 @@ void func_801D069C(void) {
 // for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
 // clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
 //
-// 5 rows of 1205 instructions still differ, and the floor is 1, not 0: one of
-// them is a compiler-generated jump table, which has no symbol to align to.
-// Everything else in the function is byte-identical -- same instruction count,
-// same .data/.rodata/.bss, every register where the original put it.
+// 4 rows of 1205 instructions still differ, and the floor is 0 -- a match is
+// reachable. 1201 instructions are byte-identical, as are .data/.rodata/.bss
+// and every register assignment. What is left is two pairs, each a scheduling
+// order between two instructions: no wrong value, no wrong register, no
+// difference in instruction count.
+//
+// (An earlier revision claimed 5 rows and a floor of 1, counting a jump-table
+// relocation as unfixable. That was a scorer artefact: jtbl_801D0000 is at
+// .rodata+0x0, so %lo(jtbl_801D0000) and %lo(.rodata) are the same address and
+// the same bytes -- verified at object level, same relocation types and sites,
+// identical instruction words. checkfn.py now handles offset-0 section
+// references.)
 //
 // Measure variants with tools/variant_eval.py, not checkfn.py: it scores
+// against a private object, so many run at once, ~3 seconds each. Baseline 4.
 // against a private object, so many run at once, ~3 seconds each. Baseline 5.
 //
 // SEVEN THINGS HERE LOOK ODD AND ARE ALL LOAD-BEARING. Every one was measured
@@ -337,28 +346,61 @@ void func_801D069C(void) {
 //     that crosses a call -- and only pays off together with the `value`
 //     pointer above.
 //
-// WHAT IS LEFT, and why each looks structurally blocked rather than unsearched:
+// WHAT IS LEFT. Three rounds of parallel search -- roughly 1700 measured
+// variants -- have not moved either pair, and both now have a mechanism
+// argument for why source-level rearrangement cannot reach them. Read these
+// before spending more time here.
 //
-//   * 2 rows for `sh zero,0x20(sp)` in the block after case 2's loop. The
-//     target schedules that store *before* the call's argument setup. gcc's
-//     list scheduler gives an argument-setup insn priority 1 + P(call) and a
-//     plain store only P(call), so no permutation of four independent stores
-//     can put one ahead of them -- the original's `rect.x = 0` must have a
-//     successor ours does not, or must not be one of the four. These 2 rows are
-//     also a conserved quantity: writing the block so it clears entirely moves
-//     the cost onto the loop back-edge, where the store takes the branch delay
-//     slot. Total is 5 either way.
+//   * 2 rows after case 2's loop: the target emits `sh zero,0x20(sp)`
+//     (rect.x = 0) as the first instruction of the block, ahead of the call's
+//     argument setup; we emit it with the other three stores. gcc 2.7.2's
+//     scheduler is bottom-up: it repeatedly places the highest-priority ready
+//     insn at the current tail, so the first-picked lands last, and ties break
+//     on the lowest LUID. The call's argument moves are generated last and so
+//     have the highest LUIDs, which is exactly why they always end up first.
+//     A store's only successor in the block is the call, reached by a memory
+//     dependence of cost 0, while an argument move reaches it by a data
+//     dependence with a cycle of latency -- so an argument move outranks every
+//     store feeding the same call, and no successor can lift a store above it
+//     (a successor placed later necessarily has a shorter remaining path than
+//     the call). Every attempt to give the x store a real successor is folded
+//     by CSE, which knows the value it just stored; anything CSE cannot fold
+//     costs an instruction. Confirmed by the rest of the function: there are
+//     four other RECT-fill-then-call blocks here, all matching, and one of them
+//     -- the block after the switch -- is this block's structural twin, four
+//     stores plus a shared constant register feeding the same func_80026A34.
+//     The original's own compiler puts every store after the arguments there.
+//     So the hoisted store in case 2 probably is not one of that block's four
+//     at all, and the answer is a different block structure rather than a
+//     different statement order.
+//     Sinking `rect.x = 0;` to the end of the loop body does clear these two
+//     rows, but reorg then takes the store for the loop branch's delay slot
+//     instead of `addiu s2,s2,0xc`, costing two rows at the back-edge. The
+//     pair is conserved; total is 4 either way. That holds with `pr` present,
+//     across every back-edge form, and in the induction-variable world.
+//     Writing the block through `pr` does not help and is measurable harm:
+//     `pr->x = 0` compiles to `sh zero,0(a3)`, reusing the call's own argument
+//     register, which adds a dependence on `move a3,s6` and pins the store
+//     harder behind the arguments -- +1 row per field routed that way.
 //
-//   * 2 rows for the ATB case's delay slot: the target emits `li a0,0x1`, then
-//     `addiu s0,s0,1` in the jal's slot, and we emit the increment first. The
-//     two tie on scheduling priority, so the order falls out of RTL emission
-//     order, and the argument setup is emitted at the call -- so no arrangement
-//     of the ATB statements that leaves the call after the increment can invert
-//     it. Every reordering tried scores 97, alone or combined, with the same 93
-//     changed rows.
-//
-//   * 1 row for the jump table. Unfixable.
-//
+//   * 2 rows in the ATB case: the target fills the `beq`'s delay slot with
+//     `li a0,0x1` and the `jal`'s with `addiu s0,s0,1`; we fill them the other
+//     way round. Both slots are filled in both builds -- the two instructions
+//     are simply swapped. `li a0,0x1` is emitted at the call, so it is always
+//     the instruction immediately before the `jal`, and reorg's backward scan
+//     always takes it for the call's slot; the branch then gets whatever is
+//     left. Adding a third instruction to the pre-call region does not change
+//     that. Lengthening the increment's dependence chain is capped: `li a0`'s
+//     height is 1 + height(jal), and the increment's chain joins the call's
+//     own `lhu -> andi -> or -> sh` two edges downstream, so it cannot
+//     overtake. Routing the shift through `setting` does not even buy that
+//     edge, because gcc CSEs it back to `value`. Any form that puts the call
+//     before the increment leaves the `beq` slot empty and adds a `nop` -- the
+//     "cascade" earlier rounds saw is that one extra instruction shifting every
+//     later branch, not a register or layout problem. The cursor case confirms
+//     the model from the other side: its increment lands in caller-saved v1, so
+//     it can never take the call's slot, and the target carries a `nop` in the
+//     branch slot there.
 // Several variations are byte-identical to what is here and are free if they
 // help something else: `value++` instead of `value = value + 1` in the ATB
 // case, `rect.y` written first in the second block of case 2's loop, `dy`
