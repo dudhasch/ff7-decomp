@@ -523,6 +523,7 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `config/permuter_settings.toml` | Auto-discovered by decomp-permuter (see step 4) |
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
+| `tools/worklist.py` | Coarse work queue when `mako.sh rank` can't run for want of `disks/`; see [docs/WORKLIST.md](docs/WORKLIST.md) |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
