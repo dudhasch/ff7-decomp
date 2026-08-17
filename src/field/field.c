@@ -122,6 +122,7 @@ extern u8 g_WindowBuffer[4][16];
 extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
+extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
 extern s32 D_8009A010;
@@ -1314,7 +1315,21 @@ void ResetFieldRenderState(void) {
     D_800E48F4[1].b0 = 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", UpdateFieldExitArrows);
+/* Unprototyped on purpose: the original passes nothing, but arg0 has to stay
+ * live across the call for the cached &D_8009D5A6 to land in $a1. */
+void DrawFieldExitArrow();
+
+/* Select toggles the exit arrows on and off (bit 0); bit 1 is a debug override
+ * that shows them regardless of the toggle and of the movement lock. */
+void UpdateFieldExitArrows(s32 arg0) {
+    if (g_FieldState->newActiveKeys2 & (1 << 8)) {
+        D_8009D5A6[0] ^= 1;
+    }
+    if (((D_8009D5A6[0] == 1) && (g_FieldState->characterLock == 0)) ||
+        (D_8009D5A6[0] & 2)) {
+        DrawFieldExitArrow(arg0);
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
 
