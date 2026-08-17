@@ -100,8 +100,13 @@ struct Pad {
     u16 prev;
 };
 static struct Pad D_801D24B8 = {0, 0};
+// Deliberately not a third member of struct Pad: as a member gcc caches the
+// address in a saved register across the reads in switch case 3, and the
+// original reloads it each time.
 static u16 D_801D24BC = 0;
-static u8 D_801D24C0[] = {4, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0};
+// The three button ids (Left1, Right1, Menu) that must stay mapped for a
+// customized controller layout to be accepted.
+static s32 D_801D24C0[] = {4, 5, 6};
 
 // from now on this is the BSS section; this can be moved up if necessary
 static Unk80026448 D_801D24CC[4];
@@ -147,11 +152,14 @@ static u8 func_801D0118(u16 arg0) {
     return 0xFF;
 }
 
-static void func_801D014C(s16 x, s16 y, s32 value) {
+// x and y reach func_80028CA0 as 16-bit values; the casts are what produce the
+// sign-extension on entry. They cannot be s16 parameters instead: that would
+// make func_801D080C narrow every argument at the call site, which it does not.
+static void func_801D014C(s32 x, s32 y, s32 value) {
     u8 uv = D_801D1AAC[value * 2 + 0];
     u8 page = D_801D1AAC[value * 2 + 1];
-    func_80028CA0(
-        x, y, (uv & 3) * 16 + 96, (uv >> 2) * 16 + 64, 16, 16, page, 0);
+    func_80028CA0((s16)x, (s16)y, (uv & 3) * 16 + 96, (uv >> 2) * 16 + 64, 16,
+                  16, page, 0);
 }
 
 static void func_801D01C8(void) {
@@ -262,6 +270,493 @@ void func_801D069C(void) {
 }
 
 // exported, see 8004941C
+//
+// SCRATCH SETUP (docs/PERMUTER_MACROS.md, plus tools/permuter_externise.py):
+//   import.py -> permuter_strip_asm.py -> permuter_macros.py align --strings
+//   -> permuter_externise.py <scratch>/base.c
+// Aligned that way the base scores 805 against a noise floor of 280 -- 48 rows
+// of Savemap interiors and compiler-generated jump tables that have no name to
+// align to, plus 8 for D_801D24BC. So --stop-on-zero cannot fire here; watch
+// for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
+// clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
+//
+// 1169 of the 1189 instructions match. Everything structural is right: same
+// instruction count, byte-identical .data/.rodata/.bss, and every saved
+// register lands where the original put it. What is left is instruction
+// *scheduling* in seven small spots -- gcc picking a different order between
+// two independent instructions, e.g. `li s2,0x21` and `addiu s6,sp,0x20`
+// swapping places in the case-2 loop preheader. Run tools/checkfn.py to see
+// them.
+//
+// Two things in here are known not to be the original phrasing, but removing
+// either costs 60+ instructions of diff, so they are load-bearing until the
+// real form is found:
+//   * `i = Savemap.config;` in the magic-order case. A fresh temp there does
+//     not work -- it has to be `i` specifically, which suggests the original
+//     keeps the loop counter live across that region for some other reason.
+//   * `x = ...; dy = ...;` hoisted out of the func_8001EB2C calls in case 2.
+//
+// Directed searches already tried and exhausted, all still 805: statement order
+// in the case-2 preheader and where `dy` is initialised (8), function-level
+// declaration order (120), the type of every case-2 local and of the mask
+// loop's temp plus three forms of that loop (576), the field-assignment order
+// of both 4-field rect blocks (576), and &rect as an explicit pointer with the
+// three call sites and three landing sites swept (4608). None of the residue is
+// reachable from the C's shape at those points.
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
+#else
+void func_801D080C(s32 arg0) {
+    RECT window;
+    RECT rect;
+    volatile s32 padding[4];
+    s32 i;
+    s32 corner;
+    s32 value;
+    u16 setting;
+    u16 pad;
+
+    pad = func_8001C808();
+    D_801D24B8.press = pad;
+    D_801D24BC = pad & (D_801D24B8.prev ^ pad);
+    func_800230C4(D_80062F58);
+
+    switch (D_801D1AA8) {
+    case 0:
+        func_80026F44(
+            0x10, 0xB, func_80015248(8, D_801D24CC[0].unkB + 0x37, 8), 7);
+        if (D_801D24CC[0].unkB == 0) {
+            func_8001EB2C(0xC, D_801D24A0[1].y + 0x10);
+        } else {
+            s32 rowTop = D_801D24A0[1].y;
+            s32 cursorY = (D_801D24CC[0].unkB - 1) * 18 + 0x23;
+            func_8001EB2C(0xC, cursorY + rowTop);
+        }
+        break;
+
+    case 1:
+        if (arg0 & 2) {
+            if (D_801D24CC[0].unkB == 0) {
+                func_8001EB2C(0xC, D_801D24A0[1].y + 0x10);
+            } else {
+                s32 rowTop = D_801D24A0[1].y;
+                s32 cursorY = (D_801D24CC[0].unkB - 1) * 18 + 0x25;
+                func_8001EB2C(0xC, rowTop + cursorY);
+            }
+        }
+        {
+            s32 cursorY = D_801D24CC[1].unkB * 18 + 4;
+            func_8001EB2C(
+                D_801D24CC[1].unkA * 61 + 0x8D, D_801D24A0[1].y + cursorY);
+        }
+        break;
+
+    case 2: {
+        s32 y;
+        s32 x;
+        s32 dy;
+        s32 rowY;
+        s32 knob;
+
+        if (arg0 & 2) {
+            {
+                s32 cursorY = D_801D24CC[0].unkB * 18 + 0x10;
+                func_8001EB2C(0xC, D_801D24A0[1].y + cursorY);
+            }
+            {
+                s32 valueY = D_801D24CC[1].unkB * 19 + 4;
+                x = D_801D24CC[1].unkA * 61 + 0x8D;
+                dy = D_801D24A0[1].y + valueY;
+                func_8001EB2C(x, dy);
+            }
+        }
+        {
+            s32 channelY = D_801D24CC[2].unkB * 12 + 0x24;
+            func_8001EB2C(0x93, D_801D24A0[1].y + channelY);
+        }
+        y = D_801D24A0[1].y;
+        x = D_801D24A0[1].x + 0xAD;
+        rowY = y + 0x23;
+        func_8002708C(x, rowY, D_801D2478[0][0], 2);
+        func_8002708C(x, y + 0x2F, D_801D2478[1][0], 4);
+        func_8002708C(x, y + 0x3B, D_801D2478[2][0], 1);
+        for (i = 0, dy = 0x21; i < 3; i++, dy += 12) {
+            func_80029114(
+                x + 0x10, rowY,
+                D_801D252C[D_801D24CC[1].unkA * 3 + D_801D24CC[1].unkB * 6 + i],
+                3, 7);
+            rowY += 12;
+
+            // the movable knob of one colour slider
+            knob = D_801D252C[D_801D24CC[1].unkA * 3 + D_801D24CC[1].unkB * 6 +
+                              i] >>
+                   1;
+            rect.y = D_801D24A0[1].y + dy;
+            rect.h = 11;
+            rect.w = 8;
+            rect.x = knob + 0xD5;
+            func_80028030(&rect);
+
+            // and the bar it slides along
+            rect.x = 0xD5;
+            rect.w = 0x88;
+            rect.h = 11;
+            rect.y = D_801D24A0[1].y + dy;
+            func_80027B84(&rect);
+        }
+        rect.x = 0;
+        rect.y = 0;
+        rect.w = 0x100;
+        rect.h = 0x100;
+        func_80026A34(0, 1, 0x1F, &rect);
+
+        func_8001DE0C(&window, D_801D24A0[1].x + 0xA5, D_801D24A0[1].y + 0x1D,
+                      0xC0, 0x2B);
+        func_8001E040(&window);
+        func_8001DE0C(
+            &window, D_801D24A0[1].x + 0xF8, D_801D24A0[1].y + 7, 0x1A, 0x12);
+        {
+            s32 rgb = D_801D24CC[1].unkB * 6 + D_801D24CC[1].unkA * 3;
+            func_8001DF24(&window, D_801D252C[rgb], D_801D252C[rgb + 1],
+                          D_801D252C[rgb + 2]);
+        }
+        func_8001DE0C(
+            &window, D_801D24A0[1].x + 0xF5, D_801D24A0[1].y + 4, 0x20, 0x18);
+        func_8001E040(&window);
+        break;
+    }
+
+    case 3: {
+        s32 rowY;
+        s32 x;
+        s32 y;
+        s32 dy;
+        s32 labelDy;
+        u8* button;
+
+        if (arg0 & 2) {
+            s32 cursorY = D_801D24CC[0].unkB * 21 + 0xA;
+            func_8001EB2C(0xC, D_801D24A0[1].y + cursorY);
+        }
+        if (D_801D2528 == 0) {
+            func_80026F44(0x10, 0xB, D_801D23E8[0], 7);
+        } else {
+            func_80026F44(0x10, 0xB, D_801D2418[0], 7);
+        }
+        x = D_801D24A0[1].x + 0x8C;
+        y = D_801D24A0[1].y + 3;
+        if (D_801D2528 != 0) {
+            s32 cursorY = (D_801D2528 - 1) * 18 + 0xA;
+            func_8001EB2C(D_801D24A0[1].x + 0x78, y + cursorY);
+        }
+        for (i = 0, dy = 0xA; i < 10; i++, dy += 18) {
+            func_8002708C(x + 0x22, y + dy, 0xDA, 5);
+        }
+        func_8001DE0C(&window, x, y, 0x78, 0xBB);
+        y += 6;
+        x += 0xA;
+        for (i = 0, button = D_801D1ADC, labelDy = 4, rowY = y; i < 10; i++,
+            labelDy += 18) {
+            func_801D014C(x, rowY, *button);
+            func_801D014C(x + 0x2C, rowY, Savemap.button_config[*button]);
+            rowY += 18;
+            rect.x = 0;
+            rect.y = 0;
+            rect.w = 0x100;
+            rect.h = 0x100;
+            func_80026A34(0, 1, 0x1F, &rect);
+            func_80026F44(x + 0x3E, y + labelDy - 2,
+                          D_801D2238[Savemap.button_config[*button]], 6);
+            button++;
+        }
+        func_8001E040(&window);
+        break;
+    }
+    }
+
+    func_801D01C8();
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = 0xFF;
+    rect.h = 0xFF;
+    func_80026A34(0, 1, 0x1F, &rect);
+    func_8001DE70();
+    func_8001DEF0(D_801D252C);
+    func_8001DE0C(
+        &window, D_801D24A0[1].x + 0xA5, D_801D24A0[1].y + 4, 0x40, 0x18);
+    func_8001E040(&window);
+    func_8001DEB0();
+    for (i = 0; i < 2; i++) {
+        func_8001E040(&D_801D24A0[i]);
+    }
+
+    if (func_80023050() == 0) {
+        func_800264A8(&D_801D24CC[D_801D1AA8]);
+        switch (D_801D1AA8) {
+        case 0:
+            if (D_80062D7E & 0x40) {
+                func_801D0040(4);
+                func_8002305C(5, 0);
+                func_8002120C(0);
+                break;
+            }
+            switch (D_801D24CC[0].unkB) {
+            case 0: // window colour
+                if (D_80062D7C & 0x20) {
+                    D_801D1AA8 = 1;
+                    func_801D0040(1);
+                }
+                break;
+
+            case 1: // sound
+                value = Savemap.config & 3;
+                setting = value;
+                if ((D_80062D7E & 0x2000) && setting != 1) {
+                    func_801D0040(1);
+                    setting = value + 1;
+                    Savemap.config = (Savemap.config & 0xFFFC) | (value + 1);
+                    func_801D0080(setting);
+                }
+                if ((D_80062D7E & 0x8000) && setting != 0) {
+                    func_801D0040(1);
+                    setting = setting - 1;
+                    Savemap.config = (Savemap.config & 0xFFFC) | setting;
+                    func_801D0080(setting);
+                }
+                break;
+
+            case 2: // controller
+                value = (Savemap.config >> 2) & 3;
+                setting = value;
+                if (D_80062D7C & 0x20) {
+                    if (setting == 1) {
+                        func_801D0040(1);
+                        D_801D1AA8 = 3;
+                        D_801D2528 = 0;
+                    }
+                } else {
+                    if ((D_80062D7E & 0x2000) && setting != 1) {
+                        func_801D0040(1);
+                        setting = value + 1;
+                        Savemap.config =
+                            (Savemap.config & 0xFFF3) | ((value + 1) << 2);
+                    }
+                    if ((D_80062D7E & 0x8000) && setting != 0) {
+                        func_801D0040(1);
+                        Savemap.config =
+                            (Savemap.config & 0xFFF3) | ((setting - 1) << 2);
+                    }
+                }
+                break;
+
+            case 3: // cursor
+                value = (Savemap.config >> 4) & 3;
+                setting = value;
+                if ((D_80062D7E & 0x2000) && setting != 1) {
+                    func_801D0040(1);
+                    setting = value + 1;
+                    Savemap.config =
+                        (Savemap.config & 0xFFCF) | ((value + 1) << 4);
+                }
+                if ((D_80062D7E & 0x8000) && setting != 0) {
+                    func_801D0040(1);
+                    Savemap.config =
+                        (Savemap.config & 0xFFCF) | ((setting - 1) << 4);
+                }
+                break;
+
+            case 4: // ATB
+                value = (Savemap.config >> 6) & 3;
+                setting = value;
+                if ((D_80062D7E & 0x2000) && setting != 2) {
+                    value = value + 1;
+                    func_801D0040(1);
+                    setting = value;
+                    value = value << 6;
+                    Savemap.config = (Savemap.config & 0xFF3F) | value;
+                }
+                if ((D_80062D7E & 0x8000) && setting != 0) {
+                    func_801D0040(1);
+                    Savemap.config =
+                        (Savemap.config & 0xFF3F) | ((setting - 1) << 6);
+                }
+                break;
+
+            case 5: // battle speed
+                if ((D_80062D78 & 0x2000) && Savemap.battle_speed != 0xFF) {
+                    if (arg0 & 4) {
+                        func_801D0040(1);
+                    }
+                    Savemap.battle_speed++;
+                }
+                if (D_80062D78 & 0x8000) {
+                    if (Savemap.battle_speed != 0) {
+                        if (arg0 & 4) {
+                            func_801D0040(1);
+                        }
+                        Savemap.battle_speed--;
+                    }
+                }
+                break;
+
+            case 6: // battle message speed
+                if ((D_80062D78 & 0x2000) && Savemap.battle_msg_speed != 0xFF) {
+                    if (arg0 & 4) {
+                        func_801D0040(1);
+                    }
+                    Savemap.battle_msg_speed++;
+                }
+                if (D_80062D78 & 0x8000) {
+                    if (Savemap.battle_msg_speed != 0) {
+                        if (arg0 & 4) {
+                            func_801D0040(1);
+                        }
+                        Savemap.battle_msg_speed--;
+                    }
+                }
+                break;
+
+            case 7: // field message speed
+                if ((D_80062D78 & 0x2000) && Savemap.field_msg_speed != 0xFF) {
+                    if (arg0 & 4) {
+                        func_801D0040(1);
+                    }
+                    Savemap.field_msg_speed++;
+                }
+                if (D_80062D78 & 0x8000) {
+                    if (Savemap.field_msg_speed != 0) {
+                        if (arg0 & 4) {
+                            func_801D0040(1);
+                        }
+                        Savemap.field_msg_speed--;
+                    }
+                }
+                break;
+
+            case 8: // camera angle
+                value = (Savemap.config >> 8) & 3;
+                setting = value;
+                if ((D_80062D7E & 0x2000) && setting != 1) {
+                    func_801D0040(1);
+                    setting = value + 1;
+                    Savemap.config =
+                        (Savemap.config & 0xFCFF) | ((value + 1) << 8);
+                }
+                if ((D_80062D7E & 0x8000) && setting != 0) {
+                    func_801D0040(1);
+                    Savemap.config =
+                        (Savemap.config & 0xFCFF) | ((setting - 1) << 8);
+                }
+                break;
+
+            case 9: // magic order
+                value = (Savemap.config >> 10) & 7;
+                setting = value;
+                if ((D_80062D7E & 0x2000) && setting != 5) {
+                    func_801D0040(1);
+                    setting = value + 1;
+                    Savemap.config =
+                        (Savemap.config & 0xE3FF) | ((value + 1) << 10);
+                }
+                if ((D_80062D7E & 0x8000) && setting != 0) {
+                    func_801D0040(1);
+                    i = Savemap.config;
+                    Savemap.config = (i & 0xE3FF) | ((setting - 1) << 10);
+                }
+                break;
+            }
+            break;
+
+        case 1:
+            if (D_80062D7C & 0x40) {
+                for (i = 0; i < LEN(D_80049208); i++) {
+                    D_80049208[i] = D_801D252C[i];
+                }
+                func_801D0040(4);
+                D_801D1AA8 = 0;
+            } else if (D_80062D7C & 0x20) {
+                D_801D1AA8 = 2;
+                func_801D0040(1);
+            }
+            break;
+
+        case 2:
+            corner = D_801D24CC[1].unkA * 3 + D_801D24CC[1].unkB * 6 +
+                     D_801D24CC[2].unkB;
+            if (D_80062D7C & 0x40) {
+                func_801D0040(4);
+                D_801D1AA8 = 1;
+            } else if (D_80062D78 & 0x2000) {
+                if (D_801D252C[corner] != 0xFF) {
+                    if (arg0 & 4) {
+                        func_801D0040(1);
+                    }
+                    D_801D252C[corner] = D_801D252C[corner] + 1;
+                }
+            } else if (D_80062D78 & 0x8000) {
+                if (D_801D252C[corner] != 0) {
+                    if (arg0 & 4) {
+                        func_801D0040(1);
+                    }
+                    D_801D252C[corner] = D_801D252C[corner] - 1;
+                }
+            }
+            break;
+
+        case 3:
+            if (D_801D24BC & 0x40) {
+                if (D_801D2528 == 0) {
+                    func_801D0040(4);
+                    D_801D1AA8 = 0;
+                    break;
+                }
+            } else if (D_801D2528 == 0) {
+                if (D_801D24BC & 0x800) {
+                    D_801D2528 = 1;
+                }
+                break;
+            }
+            if (D_801D24BC == 0) {
+                break;
+            }
+            if (func_801D0118(D_801D24BC) != 0xFF) {
+                Savemap.button_config[(&D_801D1ADB)[D_801D2528]] =
+                    func_801D0118(D_801D24BC);
+            } else if ((D_80062D7E & 0x1000) && D_801D2528 != 1) {
+                func_801D0040(1);
+                D_801D2528--;
+            } else if ((D_80062D7E & 0x4000) && D_801D2528 != 10) {
+                func_801D0040(1);
+                D_801D2528++;
+            } else if (D_80062D7E & 0xA000) {
+                // Left1, Right1 and Menu must each still be bound to some
+                // button before the layout can be accepted.
+                s32 mapped = 0;
+                u16 j;
+                for (j = 0; j < 3; j++) {
+                    for (i = 0; i < 16; i++) {
+                        value = D_801D24C0[j];
+                        if (value == Savemap.button_config[i]) {
+                            mapped |= 1 << j;
+                        }
+                    }
+                }
+                if (mapped == 7) {
+                    func_801D0040(1);
+                    D_801D2528 = 0;
+                    D_801D1AA8 = 0;
+                } else {
+                    func_801D0040(3);
+                }
+            }
+            break;
+
+        case 4:
+            break;
+        }
+    }
+    D_801D24B8.prev = D_801D24B8.press;
+}
+#endif
 
 static void func_801D1AA0(void) {}

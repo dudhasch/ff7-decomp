@@ -69,6 +69,39 @@ automatic:
 The aligned `base.c` uses address names, so when a candidate wins, translate the
 names back on the way into `src/` — `base.c.prealign` is the key.
 
+### Two kinds `align` does not reach
+
+A file whose data is `static` has a fourth kind, and some functions have a
+fifth that cannot be fixed at all. Both were found on `func_801D080C`
+(`src/menu/cnfgmenu.c`); `tools/permuter_externise.py` handles the first.
+
+* **file-scope statics** — they are *defined* in the candidate object, so the
+  assembler relocates against the section (`.data+0xa10`), while target.s,
+  which holds only the function, relocates against the name
+  (`D_801D24B8+0x4`). Dropping the definitions to `extern` makes them undefined
+  in the candidate too. The scratch is never linked, so losing the data costs
+  nothing, and it is codegen-neutral: it only changes how asm-differ
+  *classifies* rows, turning an insert+delete pair into a reordering.
+
+* **interiors of a named struct** — splat calls the field at 0x8009D7BE
+  `D_8009D7BE`; the C calls it `Savemap.config`, relocating as
+  `Savemap+0x10da`. **Do not rewrite these.** A standalone `extern u16` stops
+  gcc CSE-ing the struct's base address into a register, so one `lui/addiu`
+  plus `lhu 0(reg)` per access becomes a `lui`+`lo` pair: 805 → 9620 on that
+  function. The same trap catches any attempt to merge two adjacent scalars
+  into one aggregate so an offset rides in the relocation's addend.
+
+Compiler-generated jump tables have no name to align to either. So a function
+can have a **nonzero noise floor** — 280 for `func_801D080C` — and then
+`--stop-on-zero` never fires however close you get. Read the floor off the
+`--debug` two-column diff (rows differing only in symbol text) and watch for
+that number instead of zero.
+
+Worth knowing alongside this: the aligned score is a *finer* instrument than
+`tools/checkfn.py`, whose alias discounting is address-based. On that function
+it hid an 85-point regression entirely. Use checkfn as the gate and the aligned
+score to compare variants.
+
 ## The loop
 
 ```bash
@@ -77,6 +110,7 @@ names back on the way into `src/` — `base.c.prealign` is the key.
     asm/us/field/nonmatchings/field/FieldButtonsUpdate.s
 .venv/bin/python3 tools/permuter_strip_asm.py nonmatchings/FieldButtonsUpdate
 .venv/bin/python3 tools/permuter_macros.py align nonmatchings/FieldButtonsUpdate --strings
+.venv/bin/python3 tools/permuter_externise.py nonmatchings/FieldButtonsUpdate/base.c  # if the file's data is static
 .venv/bin/python3 tools/permuter_macros.py lint nonmatchings/FieldButtonsUpdate
 
 # 2. see what is actually wrong, in the scorer's own terms -- keep the output
