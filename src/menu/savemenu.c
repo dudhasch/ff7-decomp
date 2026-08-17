@@ -592,7 +592,48 @@ const char D_801D0194[] = "bu00:%s";
 
 SaveHeader* func_801D1D1C(s32 arg0) { return &D_801E3864[arg0]; }
 
-INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1D40);
+// Load one save slot's header off the memory card. read() is retried up to 30
+// times, each attempt asking only for the bytes the previous one did not
+// deliver. 1 = could not open, 2 = gave up reading, 0 = header copied in.
+s32 func_801D1D40(s32 arg0) {
+    // Never touched, but the original reserved 0x28 bytes below `path`: the
+    // target's sprintf buffer is at sp+0x38 in a 0x70 frame, and without this
+    // the frame is 0x48 with the buffer at sp+0x10. A DIRENTRY is exactly the
+    // 0x28 the gap wants, and this file uses one in func_801D1C2C.
+    struct DIRENTRY dir;
+    char path[0x20];
+    s32 fd;
+    s32 retries;
+    s32 n;
+
+    D_801E8F40 = 0x280;
+    if (arg0 & 0x10) {
+        sprintf(path, D_801D018C, D_801E2C78[arg0 & 0xF]);
+    } else {
+        sprintf(path, D_801D0194, D_801E2C78[arg0 & 0xF]);
+    }
+    fd = open(path, 1);
+    if (fd == -1) {
+        return 1;
+    }
+    retries = 30;
+    do {
+        n = read(fd, D_801E6F38, D_801E8F40);
+        if (n == D_801E8F40) {
+            goto ok;
+        }
+        retries--;
+        if (n != -1) {
+            D_801E8F40 -= n;
+        }
+    } while (retries != 0);
+    close(fd);
+    return 2;
+ok:
+    close(fd);
+    memcpy(&D_801E3864[arg0 & 0xF], D_801E7138, sizeof(SaveHeader));
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1F40);
 

@@ -83,6 +83,11 @@ extern unsigned char D_801E2CFC[][0x24];
 extern unsigned char D_801E3260[][0x30];
 extern unsigned char D_801E33B0[][0x30];
 
+// Memory-card read buffer, and the save header sitting 0x200 bytes into it.
+extern u8 D_801E6F38[];
+extern u8 D_801E7138[];
+extern s32 D_801E8F40; // bytes still to read
+
 // The live party's HP/MP, one record per member, stride 0x440 bytes.
 extern u16 D_8009D85C[];
 extern u16 D_8009D85E[];
