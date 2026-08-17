@@ -221,7 +221,7 @@ typedef struct {
 } FieldGateway; // size:0x18
 
 void AddBackgroundToRender(struct FieldRenderData* buf);
-s32 FieldEntitySqrDistToLine(FieldLine*, u_long*, u_long*);
+s32 FieldEntitySqrDistToLine(FieldLine*, s32*, s32*);
 void FieldEntityLineInteract(FieldEntity* arg0, FieldLine* arg1);
 void HandleKawaiDataInModel(struct FieldRenderData* buf);
 void FieldEventOpcodeCycle(void);
@@ -828,11 +828,112 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
 }
 #endif
 
+/* Squared distance from `point` to the segment `line`, with the foot of the
+ * perpendicular written to `nearest`. Returns -1 when that foot lands outside
+ * the segment on either the x or the y axis, which is how callers tell "past
+ * the end of the line" apart from "near it". The line parameter runs in 8-bit
+ * fixed point, so the projection stays in integer arithmetic throughout.
+ *
+ * Not matching: register assignment only. Every instruction and its order are
+ * right; the original accumulates the dot product in v1 and holds y1 in a0,
+ * where gcc picks the two the other way round and the swap propagates. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntitySqrDistToLine);
+#else
+s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
+    s32 t;
+
+    t = -(((line->pos.x1 - point[0]) * (line->pos.x2 - line->pos.x1) +
+           (line->pos.y1 - point[1]) * (line->pos.y2 - line->pos.y1) +
+           (line->pos.z1 - point[2]) * (line->pos.z2 - line->pos.z1))
+          << 8) /
+        ((line->pos.x2 - line->pos.x1) * (line->pos.x2 - line->pos.x1) +
+         (line->pos.y2 - line->pos.y1) * (line->pos.y2 - line->pos.y1) +
+         (line->pos.z2 - line->pos.z1) * (line->pos.z2 - line->pos.z1));
+    nearest[0] = ((t * (line->pos.x2 - line->pos.x1)) >> 8) + line->pos.x1;
+    nearest[1] = ((t * (line->pos.y2 - line->pos.y1)) >> 8) + line->pos.y1;
+    nearest[2] = ((t * (line->pos.z2 - line->pos.z1)) >> 8) + line->pos.z1;
+    if ((line->pos.x1 - nearest[0] >= 0 && line->pos.x2 - nearest[0] <= 0) ||
+        (line->pos.x1 - nearest[0] <= 0 && line->pos.x2 - nearest[0] >= 0)) {
+        if ((line->pos.y1 - nearest[1] >= 0 &&
+             line->pos.y2 - nearest[1] <= 0) ||
+            (line->pos.y1 - nearest[1] <= 0 &&
+             line->pos.y2 - nearest[1] >= 0)) {
+            return (nearest[0] - point[0]) * (nearest[0] - point[0]) +
+                   (nearest[1] - point[1]) * (nearest[1] - point[1]) +
+                   (nearest[2] - point[2]) * (nearest[2] - point[2]);
+        }
+    }
+    return -1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
 
+/* Walk the map's 32 trigger lines against one entity and raise the script
+ * requests each one is due. Entering a line's radius arms its touch-on script
+ * and leaving it arms touch-off, with `touch` holding the edge state between
+ * frames. The talk request additionally needs the entity facing within +/-32
+ * of the line's proximity angle and the OK button newly pressed this frame --
+ * pad2 current has the bit and pad2 previous does not. An entity under script
+ * control (scriptedMoveMode) triggers nothing.
+ *
+ * Not matching: register assignment only. The original keeps the walking line
+ * pointer in s2 and the constant 1 in s3; gcc allocates them the other way
+ * round. Neither declaration order, statement order, nor indexing with
+ * `line[i]` instead of a walking pointer shifts the tie. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineInteract);
+#else
+void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
+    s32* from;
+    s32* nearest;
+    s32 i;
+    s32 sqrDist;
+    u32* pad2;
+
+    from = (s32*)0x1F800000;
+    nearest = (s32*)0x1F800010;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    pad2 = &D_8009AC6C;
+    for (i = 0; i < 32; i++, line++) {
+        if (line->isActive != 1) {
+            continue;
+        }
+        if (entity->scriptedMoveMode != 0) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            if (line->touch == 0) {
+                line->requestTouchOnScript = 1;
+            }
+            line->touch = 1;
+        } else {
+            if (line->touch == 1) {
+                line->requestTouchOffScript = 1;
+            }
+            line->touch = 0;
+        }
+        if (line->isOnLine != 1) {
+            continue;
+        }
+        if ((u8)(line->proximityAngle - entity->MoveDir + 0x20) >= 0x40) {
+            continue;
+        }
+        if (!(pad2[0] & 0x20)) {
+            continue;
+        }
+        if (pad2[1] & 0x20) {
+            continue;
+        }
+        line->requestTalkScript = 1;
+    }
+}
+#endif
 
 static void FieldEntityLineClear(FieldLine* lines) {
     s32 i;
@@ -876,8 +977,7 @@ void FieldEntityGatewayCheck(
         if (gateway->destFieldId == 0x7FFF) {
             continue;
         }
-        sqrDist = FieldEntitySqrDistToLine(
-            (FieldLine*)gateway, (u_long*)from, (u_long*)nearest);
+        sqrDist = FieldEntitySqrDistToLine((FieldLine*)gateway, from, nearest);
         if (sqrDist == -1) {
             continue;
         }
