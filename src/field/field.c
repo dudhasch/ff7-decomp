@@ -734,7 +734,39 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsAndScale);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsForPart);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadBsxTexToVram);
+/* One texture page inside a BSX model file: where it lives in VRAM and where
+ * its pixels sit relative to the start of the file. */
+typedef struct {
+    /* 0x0 */ u16 w;
+    /* 0x2 */ u16 h;
+    /* 0x4 */ u16 x;
+    /* 0x6 */ u16 y;
+    /* 0x8 */ u32 dataOffset;
+} BsxTexEntry; // size:0xC
+
+typedef struct {
+    /* 0x0 */ u32 unk0;
+    /* 0x4 */ u8 texCount;
+    /* 0x5 */ u8 pad[3];
+    /* 0x8 */ BsxTexEntry entries[1];
+} BsxTexHeader;
+
+void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
+    RECT rect;
+    u32 i;
+    u32 count;
+    BsxTexEntry* entries;
+
+    count = bsx->texCount;
+    entries = bsx->entries;
+    for (i = 0; i < count; i++) {
+        rect.x = entries[i].x;
+        rect.y = entries[i].y;
+        rect.w = entries[i].w;
+        rect.h = entries[i].h;
+        LoadImage(&rect, (u_long*)((u8*)bsx + entries[i].dataOffset));
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
 
