@@ -165,6 +165,7 @@ extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
 extern u8 D_8009AC26;
+extern u8 D_8009AC27;
 extern u8 D_80081DC4;
 extern s16 D_80114464;
 extern s16 D_80114468;
@@ -214,13 +215,13 @@ typedef struct {
     /* 0x0C */ s16 destPosX;
     /* 0x0E */ s16 destPosY;
     /* 0x10 */ u16 destWalkMeshId;
-    /* 0x12 */ s16 destFieldId;
+    /* 0x12 */ u16 destFieldId; // 0x7FFF marks an unused gateway slot
     /* 0x14 */ u8 destDirection;
     /* 0x15 */ u8 pad[3];
 } FieldGateway; // size:0x18
 
 void AddBackgroundToRender(struct FieldRenderData* buf);
-s32 FieldEntitySqrDistToLine(FieldLine*, u_long*, u_long*);
+s32 FieldEntitySqrDistToLine(FieldLine*, s32*, s32*);
 void FieldEntityLineInteract(FieldEntity* arg0, FieldLine* arg1);
 void HandleKawaiDataInModel(struct FieldRenderData* buf);
 void FieldEventOpcodeCycle(void);
@@ -509,7 +510,80 @@ static s32 FieldCalcWorldToScreenPos(SVECTOR* worldPos, long* screenPos) {
     return ret;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGShakeUpdate);
+/* Advance one axis of the SHAKE camera effect. The shake runs as a chain of
+ * segments: each one eases the background offset from where the previous
+ * segment left off to a fresh random target, negated relative to the last so
+ * the image swings either side of centre. Clearing `enabled` does not stop it
+ * dead -- it eases one final segment back to zero first.
+ *
+ * Every instruction matches except the four that increment currentStep: gcc
+ * coalesces `step + 1` into a3 (the argument register) where the original
+ * keeps it in v0, which lets the original schedule the store into the call's
+ * delay slot. */
+void FieldBGShakeUpdate(FieldShakeData* shake) {
+    s16 step;
+    s16 target;
+
+    if (shake->enabled == 1) {
+        if (shake->segmentActive == 0) {
+            shake->currentStep = 0;
+            shake->start = 0;
+            shake->target =
+                (s16)(g_RandomTable[shake->rngId] * shake->amplitude) / 256;
+            shake->segmentActive = 1;
+            shake->rngId++;
+            return;
+        }
+        step = shake->currentStep;
+        if (shake->numStepsPerSegment < step) {
+            target = shake->target;
+            shake->currentStep = 0;
+            shake->start = target;
+            if (target < 0) {
+                shake->target =
+                    (s16)(g_RandomTable[shake->rngId] * shake->amplitude) / 256;
+            } else {
+                shake->target =
+                    -(s16)(g_RandomTable[shake->rngId] * shake->amplitude) /
+                    256;
+            }
+            shake->rngId++;
+            return;
+        }
+    } else if (shake->segmentActive == 1) {
+        step = shake->currentStep;
+        if (shake->numStepsPerSegment < step) {
+            shake->currentStep = 0;
+            shake->start = shake->target;
+            shake->target = 0;
+            shake->segmentActive = 0;
+            shake->rngId++;
+            return;
+        }
+    } else {
+        step = shake->currentStep;
+        if (shake->numStepsPerSegment == step) {
+            shake->currentOffset = 0;
+            return;
+        }
+    }
+    /* The two arms are deliberately identical. gcc cross-jumps them back into
+     * one block, but only after it has allocated `step + 1` to its own
+     * register instead of coalescing it into a3 -- which is what lets the
+     * store of currentStep be scheduled into the call's delay slot, as the
+     * original does. Written once, the tail is four instructions off. */
+    if (step != 0) {
+        step = step + 1;
+        shake->currentStep = step;
+        shake->currentOffset = FieldCalcEaseInOut(
+            shake->start, shake->target, shake->numStepsPerSegment, step);
+    } else {
+        step = step + 1;
+        shake->currentStep = step;
+        shake->currentOffset = FieldCalcEaseInOut(
+            shake->start, shake->target, shake->numStepsPerSegment, step);
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
 
@@ -579,7 +653,47 @@ void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
     }
 }
 
+/* Advance one entity's animation clock. animCurrentFrame counts in 1/16ths of
+ * a frame, so the comparisons scale animLastFrame by 16. The player's own
+ * model loops back to the start; every other entity holds on its last frame.
+ * D_8009AC27 freezes all field animation at once.
+ *
+ * Not matching: the original reserves an unused 8-byte frame, and its clamp
+ * arm keeps animLastFrame live across the branch to recompute `* 16` in the
+ * delay slot where gcc reuses the already-shifted value. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAnimationUpdate);
+#else
+void FieldEntityAnimationUpdate(s32 entityId) {
+    FieldModelEntry* model;
+    u8* anims;
+    u8 entryIndex;
+
+    entryIndex = g_FieldModelLoaderData[entityId].modelEntryIndex;
+    if (entryIndex == 0xFF) {
+        return;
+    }
+    model = &g_FieldModelData->modelEntries[entryIndex];
+    anims = model->modelData + model->animationOffset;
+    if (D_8009AC27 != 0) {
+        return;
+    }
+    g_FieldEntity[entityId].animCurrentFrame +=
+        g_FieldEntity[entityId].animSpeed;
+    if (entityId == g_PlayerModelId && D_8009AC26 == 0) {
+        g_FieldEntity[entityId].animLastFrame =
+            *(u16*)&anims[g_FieldEntity[entityId].activeAnimId * 16] - 1;
+        if (g_FieldEntity[entityId].animLastFrame * 16 <
+            g_FieldEntity[entityId].animCurrentFrame) {
+            g_FieldEntity[entityId].animCurrentFrame = 0;
+        }
+    } else if (g_FieldEntity[entityId].animLastFrame * 16 <
+               g_FieldEntity[entityId].animCurrentFrame) {
+        g_FieldEntity[entityId].animCurrentFrame =
+            g_FieldEntity[entityId].animLastFrame * 16;
+    }
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMovementUpdate);
 
@@ -661,13 +775,165 @@ s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCollisionCheck);
+extern s16 D_8009AC1C;
 
+/* Would `pos` put entity `entityId` inside another solid entity? Two entities
+ * collide when their horizontal distance falls under the mean of their two
+ * solid radii and they are within ~127 units of each other vertically, so
+ * characters on a different floor of the same map never block one another.
+ * Only the player's own collisions arm the other entity's push script.
+ *
+ * Not matching: register assignment only. Every instruction is in the right
+ * place, but the original holds &D_8009AC1C in a1 and copies it into t4 for the
+ * loop, where gcc keeps one register for both and renames the rest downstream.
+ */
+#ifndef NON_MATCHINGS
+INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCollisionCheck);
+#else
+s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
+    s16 i;
+    s32 hit;
+    s32 range;
+    s16* entityCount;
+    s32 dz;
+    s32 radius;
+    s32 dx;
+    s32 dy;
+
+    hit = 0;
+    range = g_FieldEntity[entityId].SolidRange;
+    entityCount = &D_8009AC1C;
+    for (i = 0; i < *entityCount; i++) {
+        if (i == entityId) {
+            continue;
+        }
+        if (g_FieldEntity[i].SolidOff != 0) {
+            continue;
+        }
+        dz = (g_FieldEntity[i].PosZ >> 12) - pos->vz;
+        if (dz < -126 || dz > 127) {
+            continue;
+        }
+        radius = (range + g_FieldEntity[i].SolidRange) >> 1;
+        dx = (g_FieldEntity[i].PosX - pos->vx) >> 12;
+        dy = (g_FieldEntity[i].PosY - pos->vy) >> 12;
+        if (radius * radius > dx * dx + dy * dy) {
+            hit = 1;
+            if (entityId == g_PlayerModelId) {
+                g_FieldEntity[i].requestPushScript = 1;
+            }
+        }
+    }
+    return hit;
+}
+#endif
+
+/* Squared distance from `point` to the segment `line`, with the foot of the
+ * perpendicular written to `nearest`. Returns -1 when that foot lands outside
+ * the segment on either the x or the y axis, which is how callers tell "past
+ * the end of the line" apart from "near it". The line parameter runs in 8-bit
+ * fixed point, so the projection stays in integer arithmetic throughout.
+ *
+ * Not matching: register assignment only. Every instruction and its order are
+ * right; the original accumulates the dot product in v1 and holds y1 in a0,
+ * where gcc picks the two the other way round and the swap propagates. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntitySqrDistToLine);
+#else
+s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
+    s32 t;
+
+    t = -(((line->pos.x1 - point[0]) * (line->pos.x2 - line->pos.x1) +
+           (line->pos.y1 - point[1]) * (line->pos.y2 - line->pos.y1) +
+           (line->pos.z1 - point[2]) * (line->pos.z2 - line->pos.z1))
+          << 8) /
+        ((line->pos.x2 - line->pos.x1) * (line->pos.x2 - line->pos.x1) +
+         (line->pos.y2 - line->pos.y1) * (line->pos.y2 - line->pos.y1) +
+         (line->pos.z2 - line->pos.z1) * (line->pos.z2 - line->pos.z1));
+    nearest[0] = ((t * (line->pos.x2 - line->pos.x1)) >> 8) + line->pos.x1;
+    nearest[1] = ((t * (line->pos.y2 - line->pos.y1)) >> 8) + line->pos.y1;
+    nearest[2] = ((t * (line->pos.z2 - line->pos.z1)) >> 8) + line->pos.z1;
+    if ((line->pos.x1 - nearest[0] >= 0 && line->pos.x2 - nearest[0] <= 0) ||
+        (line->pos.x1 - nearest[0] <= 0 && line->pos.x2 - nearest[0] >= 0)) {
+        if ((line->pos.y1 - nearest[1] >= 0 &&
+             line->pos.y2 - nearest[1] <= 0) ||
+            (line->pos.y1 - nearest[1] <= 0 &&
+             line->pos.y2 - nearest[1] >= 0)) {
+            return (nearest[0] - point[0]) * (nearest[0] - point[0]) +
+                   (nearest[1] - point[1]) * (nearest[1] - point[1]) +
+                   (nearest[2] - point[2]) * (nearest[2] - point[2]);
+        }
+    }
+    return -1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
 
+/* Walk the map's 32 trigger lines against one entity and raise the script
+ * requests each one is due. Entering a line's radius arms its touch-on script
+ * and leaving it arms touch-off, with `touch` holding the edge state between
+ * frames. The talk request additionally needs the entity facing within +/-32
+ * of the line's proximity angle and the OK button newly pressed this frame --
+ * pad2 current has the bit and pad2 previous does not. An entity under script
+ * control (scriptedMoveMode) triggers nothing.
+ *
+ * Not matching: register assignment only. The original keeps the walking line
+ * pointer in s2 and the constant 1 in s3; gcc allocates them the other way
+ * round. Neither declaration order, statement order, nor indexing with
+ * `line[i]` instead of a walking pointer shifts the tie. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineInteract);
+#else
+void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
+    s32* from;
+    s32* nearest;
+    s32 i;
+    s32 sqrDist;
+    u32* pad2;
+
+    from = (s32*)0x1F800000;
+    nearest = (s32*)0x1F800010;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    pad2 = &D_8009AC6C;
+    for (i = 0; i < 32; i++, line++) {
+        if (line->isActive != 1) {
+            continue;
+        }
+        if (entity->scriptedMoveMode != 0) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            if (line->touch == 0) {
+                line->requestTouchOnScript = 1;
+            }
+            line->touch = 1;
+        } else {
+            if (line->touch == 1) {
+                line->requestTouchOffScript = 1;
+            }
+            line->touch = 0;
+        }
+        if (line->isOnLine != 1) {
+            continue;
+        }
+        if ((u8)(line->proximityAngle - entity->MoveDir + 0x20) >= 0x40) {
+            continue;
+        }
+        if (!(pad2[0] & 0x20)) {
+            continue;
+        }
+        if (pad2[1] & 0x20) {
+            continue;
+        }
+        line->requestTalkScript = 1;
+    }
+}
+#endif
 
 static void FieldEntityLineClear(FieldLine* lines) {
     s32 i;
@@ -678,7 +944,60 @@ static void FieldEntityLineClear(FieldLine* lines) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityGatewayCheck);
+/* Did this step take the entity across one of the map's twelve gateway lines?
+ * The move is staged in the PS1 scratchpad as two points -- where the entity is
+ * now and where it wants to go -- and each gateway near enough to matter gets a
+ * pair of 2D cross products, one per point. Opposite signs mean the segment
+ * crossed the line, which loads the destination map. A gateway whose
+ * destFieldId is 0x7FFF is an unused slot. */
+void FieldEntityGatewayCheck(
+    FieldEntity* entity, FieldGateway* gateway, VECTOR* dest) {
+    s32* from;
+    s32* to;
+    s32* nearest;
+    s32 i;
+    s32 sqrDist;
+    s16 x1;
+    s16 y1;
+    s32 dx;
+    s32 dy;
+    s32 crossFrom;
+    s32 crossTo;
+
+    from = (s32*)0x1F800000;
+    to = (s32*)0x1F800010;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    to[0] = dest->vx >> 12;
+    to[1] = dest->vy >> 12;
+    to[2] = entity->PosZ >> 12;
+    for (i = 0; i < 12; i++, gateway++) {
+        if (gateway->destFieldId == 0x7FFF) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine((FieldLine*)gateway, from, nearest);
+        if (sqrDist == -1) {
+            continue;
+        }
+        if (sqrDist >= entity->SolidRange * entity->SolidRange) {
+            continue;
+        }
+        x1 = gateway->pos.x1;
+        y1 = gateway->pos.y1;
+        dx = gateway->pos.x2 - x1;
+        dy = gateway->pos.y2 - y1;
+        crossFrom = dx * (from[1] - y1) - (from[0] - x1) * dy;
+        crossTo = dx * (to[1] - y1) - (to[0] - x1) * dy;
+        if ((crossFrom >= 0 && crossTo < 0) ||
+            (crossTo >= 0 && crossFrom < 0) ||
+            (crossFrom > 0 && crossTo <= 0) ||
+            (crossTo > 0 && crossFrom <= 0)) {
+            FieldEntityGatewayMapLoad(gateway);
+        }
+    }
+}
 
 /* One entry of the map's background-trigger block. Even `type`s arm the
  * trigger, odd ones disarm it. */
