@@ -17,7 +17,36 @@ asm_prelude_file = "config/permuter_prelude.inc"
 # the N64 default of mips:4300.
 objdump_command = "mipsel-linux-gnu-objdump -drz -m mips:3000"
 
+# Macros import.py leaves unexpanded in base.c, declaring each as an opaque
+# function of the type given here so pycparser can still type-check the file.
+# The real #define is restored in a late-define block before every candidate is
+# compiled, so preserving one never changes codegen -- it only keeps the
+# permuter from mutating the macro's guts, and keeps a winning candidate
+# copy-pasteable straight back into src/.
+#
+# These types must be built-in: the generated declarations are emitted above
+# the typedefs, so `u8` and friends are not in scope yet.
+#
+# Preserve only macros whose internal shape is never the matching lever. If a
+# diff turns out to be *inside* one of these, re-import that function with
+# `import.py --preserve-macros ''` to expand everything.
+#
+# (The previous entries here -- gSP*, gDma*, _SHIFTL -- were N64 GBI macros
+# carried over from decomp-permuter's example settings. No FF7 source file
+# mentions any of them.)
 [preserve_macros]
-"g[DS]P.*" = "void"
-"gDma.*" = "void"
-"_SHIFTL" = "unsigned int"
+# src/field/field.c: the field script VM. 190 PC_INC and 201 GET_PARAM_U8 sites.
+"PC_INC|PC_DEC" = "void"
+"GET_PARAM_U8" = "unsigned char"
+"GET_PRIORITY|GET_SCRIPTID" = "int"
+"ADD_PARTY_MEMBER" = "void"
+# src/battle/battle2.c fixed-point multiply, src/world/world.h, include/common.h.
+"MUL" = "int"
+"ABS" = "int"
+"LEN" = "int"
+# Deliberately *not* preserved: GET_PARAM_S16, READ_S8 and READ_S16 all write
+# through an argument. Hidden behind an opaque `void f()` the randomizer stops
+# seeing those writes and starts producing candidates that drop the variable.
+#
+# _S() cannot be listed at all: under -DFF7_STR it is not a macro, it is
+# rewritten textually by bin/str after cpp (see include/game.h).
