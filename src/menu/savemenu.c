@@ -635,7 +635,64 @@ ok:
     return 0;
 }
 
+// Load a whole save file over the live Savemap, then push its menu colours
+// back into the global palette. Same open/read/retry shape as func_801D1D40,
+// but 0x2000 bytes and the destination is the save work area itself.
+//
+// 5 rows short, all of them register naming: the target puts the trailing
+// colour loop's counter in v1 and this puts it in s0. The two are coupled --
+// `i = fd` is what gets the descriptor into s0 to begin with (declaration
+// order alone does not), and reusing `i` for the loop is what keeps it there,
+// so giving the loop its own counter, or reusing `n`, both regress to 8 rows.
+// decomp-permuter went 300 -> 60 finding the `i = fd` alias and then 25 more
+// minutes of randomisation found nothing further.
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1F40);
+#else
+s32 func_801D1F40(s32 arg0) {
+    struct DIRENTRY dir; // see func_801D1D40: reserved, never read
+    char path[0x20];
+    s32 retries;
+    s32 fd;
+    s32 n;
+    s32 i;
+
+    n = arg0;
+    D_801E8F40 = 0x2000;
+    if (arg0 & 0x10) {
+        sprintf(path, D_801D018C, D_801E2C78[n & 0xF]);
+    } else {
+        sprintf(path, D_801D0194, D_801E2C78[arg0 & 0xF]);
+    }
+    fd = open(path, 1);
+    i = fd;
+    if (i == -1) {
+        return 1;
+    }
+    retries = 30;
+    do {
+        n = read(i, D_801E6F38, D_801E8F40);
+        if (n == D_801E8F40) {
+            goto ok;
+        }
+        // BUG: counts up, not down -- func_801D1D40's twin does `retries--`.
+        // The loop only ever leaves through the read succeeding.
+        retries++;
+        if (n != -1) {
+            D_801E8F40 -= n;
+        }
+    } while (retries != 0);
+    close(i);
+    return 2;
+ok:
+    close(i);
+    memcpy(&Savemap, D_801E7138, sizeof(SaveWork));
+    for (i = 0; i < 12; i++) {
+        D_80049208[i] = ((u8*)Savemap.header.menu_color)[i];
+    }
+    return 0;
+}
+#endif
 
 static s32 func_801D2150(s8 arg0) {
     if (arg0 > -0x68 && arg0 < -0x60 || arg0 > -32 && arg0 < -3) {
