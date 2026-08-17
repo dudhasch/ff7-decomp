@@ -8583,7 +8583,31 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderString);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
 
+/* Append a coloured line to a debug page, wrapping back to the top row once the
+ * page's pixel height can no longer hold another 10-pixel row.
+ *
+ * Semantically right, not yet matching. One root cause behind the register
+ * renames: the original keeps only `page * 378` in a callee-saved register and
+ * lets the assembler rebuild `&D_800E0754 + that` through $at on each of the
+ * five accesses, where gcc CSEs the whole address into a second callee-saved
+ * register. Dropping the `colors` local removed three spurious instructions and
+ * fixed the frame size; the address CSE is what is left. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddColorStrNextDebugRow);
+#else
+s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
+    char* rows = D_800E0758 + page * 378;
+
+    FieldDebugStringCopy(&rows[D_800E0754[page * 189] * 14], str);
+    D_800E08A8[page * 378 + D_800E0754[page * 189]] = color;
+    D_800E0754[page * 189]++;
+    if ((D_800E074E[page * 189] - 8) / 10 < D_800E0754[page * 189]) {
+        D_800E0754[page * 189] = 0;
+    }
+    D_8009D824 = 1;
+    return 1;
+}
+#endif
 
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
     char* rows = D_800E0758 + page * 378;
