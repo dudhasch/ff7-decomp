@@ -124,7 +124,31 @@ a near-miss, in rough order of frequency:
   destination as members of the real struct object fixes it — this is what
   `FieldEntityGatewayMapLoad` needs to write through `FieldState` at
   `0x8009ABF4` rather than through six separate `D_` symbols.
+* **One extra `move` into a callee-saved register, at the top of a loop** —
+  the target computes a base address into a caller-saved temp and then copies
+  it (`addu t3,t3,a3` / `move s0,t3`), where a hand-written walking pointer
+  computes straight into the callee-saved register and is one instruction
+  short. That copy is gcc *strength-reducing an indexed access*: the base is
+  dead after loop setup, so it stays in a temp, and the induction variable is
+  initialised from it. Write the access as `&parts[i * 32]` and let gcc create
+  the walking pointer, rather than writing `parts += 0x20` yourself. This is
+  what `FieldModelCreatePktsAndScale` and `KawaiSetColorToModelPkts` need.
+  When the value *stored* is itself the loop counter, the reduction goes the
+  other way — gcc walks a pointer for the address and you have to write that
+  pointer by hand (`OpcodeFuncMhmmx`'s first store loop).
+* **`x % n` on an `s16` sign-extends the result** — gcc 2.6.3 does the modulo
+  in `HImode` and adds a `sll`/`sra` pair to widen it back. Write it as
+  `value - quotient * n` with an `s32` quotient. Hoist both the quotient and
+  the remainder into locals ahead of an `if`/`else` that uses them, or gcc
+  duplicates the division into both arms (`OpcodeFuncIdlck`).
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
+
+Two near-misses that currently have no known fix, both variants of gcc
+hoisting a global array's address out of a loop where the original
+re-materialises it through the assembler's `$at` macro each time. The C is
+otherwise byte-for-byte correct, so they stay `INCLUDE_ASM`:
+`FieldDebugPagesResetPosSize` (2 extra instructions) and
+`AddStrNextDebugRow`.
 
 #### Three ways a clean-looking diff lies
 
