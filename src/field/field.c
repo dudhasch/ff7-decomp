@@ -414,10 +414,8 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
 
 /* Latch both pads: keep the raw state, the previous state, and the edges
  * (newly pressed / newly released) derived from the two. */
-/* Two instructions out: gcc schedules the second pad's `nor`/`and` before the
- * D_8009AC74 store, where the original stores first and reuses $a0. */
-/* Two instructions out: gcc schedules the second pad's `nor`/`and` before the
- * D_8009AC74 store, where the original stores first and reuses $a0. */
+/* Two instructions out, both register choices; see the comment on the second
+ * pad's release computation below. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldButtonsUpdate);
 #else
@@ -441,7 +439,14 @@ void FieldButtonsUpdate(void) {
     D_8009AC6C = pad2;
     D_8009AC70 = old2;
     D_8009AC74 = (pad2 ^ old2) & pad2;
-    D_8009AC78 = (pad2 ^ old2) & ~pad2;
+    /* The do/while is not cosmetic: without the statement boundary gcc hoists
+     * this whole expression above the D_8009AC74 store. It is most likely a
+     * macro in the original. What is left is one register choice -- the
+     * original puts the `nor` in $a0, freed by the store just above, where gcc
+     * reuses $v0. */
+    do {
+        D_8009AC78 = (pad2 ^ old2) & ~pad2;
+    } while (0);
 }
 #endif
 
