@@ -7633,4 +7633,32 @@ static void FieldDebugStringU32hex(s32 val, char* msg_out) {
     msg_out[3] = g_FieldDebugDigits[val & 0xF];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugIntToString);
+/* Writes value as decimal into out, suppressing leading zeros. Five digits
+ * plus the units place, so the range is 0..99999. */
+void FieldDebugIntToString(s32 value, char* out) {
+    char* end;
+    s32 started;
+    s32 divisor;
+    s32 count;
+    s32 digit;
+    u8 lastDigit;
+
+    started = 0;
+    divisor = 10000;
+    count = 0;
+    do {
+        digit = value / divisor;
+        if (started || digit != 0) {
+            started = 1;
+            out[count] = g_FieldDebugDigits[digit];
+            count++;
+        }
+        value -= digit * divisor;
+        divisor /= 10;
+    } while (divisor >= 2);
+    end = out + count;
+    digit = g_FieldDebugDigits[value];
+    lastDigit = digit;
+    end[1] = '\0';
+    end[0] = lastDigit;
+}
