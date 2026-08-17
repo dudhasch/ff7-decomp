@@ -81,6 +81,17 @@ def object_for(source):
     return os.path.join(REPO, "build", "us", rel + ".o")
 
 
+# "src/field/field.c:452: `D_8009AC26' undeclared (first use this function)".
+# gcc 2.6.3 says this and *carries on*, folding the unknown value to 0. The
+# compile line ends in the assembler, so the pipeline still exits 0 and ninja
+# reports success: the object silently contains code you did not write.
+DIAG_RE = re.compile(r"^\S.*:\d+: (?!warning:)")
+
+
+def diagnostics(output):
+    return [line for line in output.splitlines() if DIAG_RE.match(line)]
+
+
 def rebuild(source):
     """Bring the object up to date, refusing to proceed on a stale one."""
     obj = object_for(source)
@@ -93,12 +104,29 @@ def rebuild(source):
             "report/build/, and\n"
             "         plain ninja then silently does nothing. Run `make build` "
             "to restore it." % rel)
-    subprocess.run(["ninja", rel], cwd=REPO, check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.run(["ninja", rel], cwd=REPO, check=False,
+                          capture_output=True, text=True)
     if not os.path.exists(obj):
         die("%s was not built" % rel)
     if os.path.getmtime(obj) < os.path.getmtime(source):
         die("%s is older than %s -- the object is stale" % (rel, source))
+
+    # ninja only prints the compile output when it actually compiles, so keep
+    # the verdict beside the object: a second run that says "no work to do"
+    # must not look clean just because the errors have scrolled away.
+    stamp = obj + ".checkfn-diag"
+    if "no work to do" in proc.stdout:
+        bad = open(stamp).read().splitlines() if os.path.exists(stamp) else []
+    else:
+        bad = diagnostics(proc.stdout + proc.stderr)
+        with open(stamp, "w") as fh:
+            fh.write("\n".join(bad))
+    if bad:
+        die("%s compiled with errors -- the object does not match the source.\n"
+            "         gcc reports these and keeps going, and the assembler at "
+            "the end of the\n"
+            "         pipe still exits 0, so ninja calls it a success.\n\n%s"
+            % (source, "\n".join("         " + line for line in bad)))
     return obj
 
 

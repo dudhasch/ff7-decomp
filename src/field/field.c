@@ -135,6 +135,7 @@ extern u8 D_8009AD2C;
 extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
+extern u8 D_8009AC26;
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;
 extern s16 D_8009A162;
@@ -157,6 +158,8 @@ s32 func_8002542C(u32 materia);
 u8 func_80025650(u32 materia, u8 slot);
 void SystemMenuAddHpByPartyId(s32 partyId, s32 amount);
 void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
+void func_80025800(s32 partyId, s32 amount);
+void func_80025988(s32 partyId, s32 amount);
 void FieldEventSetDirByActorId(u8 actorId);
 void FieldMoveToEntityUpdate(u8 actorId);
 void FieldEntityTurnToEntity(u8 actorId);
@@ -446,7 +449,17 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityInitPos);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAddRotate);
+void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
+    if (D_8009AC26 == 0) {
+        if (D_8009ABF4.activeKeys2 & PADR1) {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0xE0;
+        } else if (D_8009ABF4.activeKeys2 & PADL1) {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0x20;
+        } else {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAnimationUpdate);
 
@@ -795,7 +808,24 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetSplashToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiInitSplashPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetPartAttribute);
+s32 KawaiSetPartAttribute(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    s32 count;
+    s32 i;
+    s32 partIdx;
+
+    count = data[0];
+    if (count > 0) {
+        parts = model->modelData + model->partsOffset;
+        for (i = 0; i < count; i++) {
+            partIdx = data[i * 2 + 1];
+            if (partIdx < model->partCount) {
+                parts[partIdx * 32] = data[i * 2 + 2];
+            }
+        }
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiApplyBoneTransform);
 
@@ -3452,9 +3482,43 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAnimw);
+s32 OpcodeFuncAnimw(void) {
+    u8 modelIdx;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAnimb);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("animw", 0);
+    }
+    modelIdx = g_EntityToModel[g_CurrentEntity];
+    if (modelIdx == 0xFF) {
+        PC_INC(1);
+        return 0;
+    }
+    switch (D_800756E8[modelIdx]) {
+    case 2:
+    case 5:
+    case 6:
+        return 1;
+    case 4:
+        D_800756E8[modelIdx] = 0;
+        break;
+    }
+    PC_INC(1);
+    return 0;
+}
+
+s32 OpcodeFuncAnimb(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("animb", 0);
+    }
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame >>
+            4;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 3;
+    }
+    PC_INC(1);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_model_move.c
@@ -3466,7 +3530,17 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFcfix);
+s32 OpcodeFuncFcfix(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fcfix", 1);
+    }
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock =
+            GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
 
@@ -3573,7 +3647,22 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkr2);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMsped);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsped);
+s32 OpcodeFuncAsped(void) {
+    u8 modelIdx;
+    s16 speed;
+
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("asped", 3);
+        }
+        speed = FieldEventReadMemoryS16(2, 2);
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        g_FieldModels[modelIdx].animSpeed = speed;
+        D_8009D828[modelIdx] = speed;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGtdir);
 
@@ -5748,13 +5837,89 @@ s32 OpcodeFuncHmpmx(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpPlus);
+s32 OpcodeFuncMpPlus(void) {
+    s32 partyId;
+    s32 i;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpMinus);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mp+", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                SystemMenuAddMpByPartyId(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncHpPlus);
+s32 OpcodeFuncMpMinus(void) {
+    s32 partyId;
+    s32 i;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncHpMinus);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mp-", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                func_80025988(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
+
+s32 OpcodeFuncHpPlus(void) {
+    s32 partyId;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("hp+", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                SystemMenuAddHpByPartyId(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
+
+s32 OpcodeFuncHpMinus(void) {
+    s32 partyId;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("hp-", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                func_80025800(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
 
 /**
  * @brief Opcode 0x39 - **GOLDU** - Gold Up

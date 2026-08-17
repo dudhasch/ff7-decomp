@@ -126,7 +126,7 @@ a near-miss, in rough order of frequency:
   `0x8009ABF4` rather than through six separate `D_` symbols.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
-#### Two ways a clean-looking diff lies
+#### Three ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -141,6 +141,26 @@ object ends up older than the source.
 past the end of the function, so rows belonging to the *next* function appear
 under the name you asked for. Scope by the target `.s`'s instruction count, as
 `checkfn.py` does, before concluding anything.
+
+**A compile error that ninja calls a success.** The compile line is a pipeline
+ending in `mipsel-linux-gnu-as`, so the shell's exit status is the
+*assembler's*. gcc 2.6.3 reports an error such as
+
+```
+src/field/field.c:452: `D_8009AC26' undeclared (first use this function)
+```
+
+on stderr, substitutes 0 for the unknown value, and keeps generating code. The
+assembler is perfectly happy with that code, ninja prints no failure, and you
+are diffing a function with a whole `if` constant-folded out of it. Nothing in
+the build shouts. `checkfn.py` now scans the compile output for non-warning
+diagnostics and refuses to give a verdict, caching them beside the object so a
+later `no work to do` run cannot look clean.
+
+The usual way to trip this is a symbol declared only inside a
+`#else /* NON_MATCHINGS */` block — `PreloadNextFieldMap`'s externs near the top
+of `src/field/field.c` are not compiled in the matching build. Declare the
+symbol in the real extern block instead.
 
 ### 3b. Check .rodata ownership before writing the C
 
