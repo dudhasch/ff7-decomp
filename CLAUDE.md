@@ -85,7 +85,20 @@ starting point, not an answer — it will usually compile but rarely match.
 
 ### 3. Iterate against the assembly
 
-Build **one object** and diff it:
+Rebuild the one object and get a verdict:
+
+```shell
+.venv/bin/python3 tools/checkfn.py src/battle/battle.c func_800A85FC
+# MATCH    func_800A85FC  (6 symbol aliases)
+```
+
+`checkfn.py` rebuilds the object, then compares only the instructions the target
+`.s` actually declares, discounting differences that are purely a symbol *name*
+(the `.s` says `D_800722C4`, your C says `g_CurrentEntity`; same address, same
+bytes). It exits non-zero unless every function named matched. Prefer it to
+reading `diff.py` by eye — see *Two ways a clean-looking diff lies* below.
+
+To look at the actual instructions once it reports a mismatch:
 
 ```shell
 ninja build/us/src/battle/battle.c.o
@@ -96,7 +109,7 @@ Use `--format=json` when you need to parse the result programmatically; it gives
 per-row diff classes (register mismatches, insertions, reorderings) rather than
 text you have to scrape.
 
-Repeat edit → `ninja` → `diff` until there are zero diff rows. Typical causes of
+Repeat edit → `checkfn` until it reports MATCH. Typical causes of
 a near-miss, in rough order of frequency:
 
 * **Register allocation differs** — usually means a temporary should (or should
@@ -104,7 +117,87 @@ a near-miss, in rough order of frequency:
 * **Instruction order differs** — restructure the C (hoist/sink an assignment,
   change `if`/`else` polarity) rather than fighting the compiler.
 * **Stack layout differs** — a local's type or declaration order is wrong.
+* **Load/store order differs** — gcc 2.6.3 only keeps a load and a store in
+  source order when *both* sides are struct references. Reading through a
+  parameter pointer and writing to standalone `extern` scalars lets it batch the
+  loads ahead of the stores, which changes the instruction count. Writing the
+  destination as members of the real struct object fixes it — this is what
+  `FieldEntityGatewayMapLoad` needs to write through `FieldState` at
+  `0x8009ABF4` rather than through six separate `D_` symbols.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
+
+#### Three ways a clean-looking diff lies
+
+**A stale object.** `make report` rewrites `build.ninja` to build into
+`report/build/`. After it has run, `ninja build/us/...` finds no such target,
+prints `no work to do`, and leaves the *previous* object in place — so
+`diff.py` compares code you did not write and reports a match. An
+`INCLUDE_ASM` function trivially matches itself this way. Run `make build` to
+restore the normal configuration after `make report`; `checkfn.py` refuses to
+run when `build.ninja` is in the report configuration, and also fails if the
+object ends up older than the source.
+
+**Neighbouring functions.** `diff.py -o <fn>` renders a window that continues
+past the end of the function, so rows belonging to the *next* function appear
+under the name you asked for. Scope by the target `.s`'s instruction count, as
+`checkfn.py` does, before concluding anything.
+
+**A compile error that ninja calls a success.** The compile line is a pipeline
+ending in `mipsel-linux-gnu-as`, so the shell's exit status is the
+*assembler's*. gcc 2.6.3 reports an error such as
+
+```
+src/field/field.c:452: `D_8009AC26' undeclared (first use this function)
+```
+
+on stderr, substitutes 0 for the unknown value, and keeps generating code. The
+assembler is perfectly happy with that code, ninja prints no failure, and you
+are diffing a function with a whole `if` constant-folded out of it. Nothing in
+the build shouts. `checkfn.py` now scans the compile output for non-warning
+diagnostics and refuses to give a verdict, caching them beside the object so a
+later `no work to do` run cannot look clean.
+
+The usual way to trip this is a symbol declared only inside a
+`#else /* NON_MATCHINGS */` block — `PreloadNextFieldMap`'s externs near the top
+of `src/field/field.c` are not compiled in the matching build. Declare the
+symbol in the real extern block instead.
+
+### 3b. Check .rodata ownership before writing the C
+
+Some functions cannot be decompiled alone, and the failure shows up as a red
+`make build` while every function still diffs perfectly. Check first:
+
+```shell
+.venv/bin/python3 tools/rodata_owner.py src/field/field.c OpcodeFuncMenu2
+# BORROWS  OpcodeFuncMenu2 -> D_800A0F38, owned by OpcodeFuncMenu (still INCLUDE_ASM)
+```
+
+* **BORROWS** — the function prints a string that another `.s` owns. Writing the
+  literal makes gcc emit a *second* copy, shifting every later `.rodata` offset
+  and breaking the overlay. Decompile the owner in the same change, or skip.
+* **LENDS** — the function owns a label other `.s` files still reference.
+  Decompiling it alone deletes the definition and the link fails with an
+  undefined reference. `IfCheck` owns the `"ope err="` that both `If2Check*` use,
+  so those three are one unit.
+* **SHARES** — the owner is already C, so the two identical literals fold into
+  one. Fine, as long as you pass exactly the same string.
+
+Pass `--all` to triage a whole file at once.
+
+#### Known blocker: a string immediately followed by a jump table
+
+gcc emits `.rdata` / `.align 3` before every jump table, so GNU `as` puts the
+table on the next 8-byte boundary. Where the original has a string constant
+immediately before the table it instead sits 4 bytes further on, with 4 zero
+bytes in between (`spimdisasm` renders them as a stray `.asciz ""`). An
+8-byte alignment cannot produce that offset, so the original toolchain must
+have used 4-byte alignment plus a real 4-byte item, and maspsx has no knob for
+it. Until that is resolved these stay `INCLUDE_ASM` however good the C is —
+in `src/field/field.c` that is `IfCheck`, `If2CheckSigned`, `If2CheckUnsigned`,
+`OpcodeFuncSetx`, `OpcodeFuncGetx`, `OpcodeFuncSrchx`, `OpcodeFuncFade`,
+`OpcodeFuncFadew`, `OpcodeFuncSpcal`, `FieldEventWriteMemoryU8` and
+`FieldEventRequestRun`. Functions whose jump table does *not* follow a string
+are unaffected and match normally.
 
 ### 4. Last-mile: decomp-permuter
 
@@ -129,9 +222,39 @@ ninja build/us/src/battle/battle.c.o
 export PATH="$PWD/tools/permuter-bin:$PATH"   # see "Toolchain overrides" below
 .venv/bin/python3 ../decomp-permuter/import.py src/battle/battle.c \
     asm/us/battle/nonmatchings/battle/func_800A85FC.s
+.venv/bin/python3 tools/permuter_strip_asm.py nonmatchings/func_800A85FC
 .venv/bin/python3 ../decomp-permuter/permuter.py nonmatchings/func_800A85FC \
     -j"$(($(nproc) - 2))"
 ```
+
+**The `permuter_strip_asm.py` step is not optional**, and skipping it is not
+obvious from the output — the search just never converges. `import.py`
+preprocesses the `.c`, so every `INCLUDE_ASM` has already expanded into a
+`__maspsx_include_asm_hack_*` function holding `.include "<fn>.s"`, and those
+land in `base.c` as `#pragma _permuter b64literal` blobs. The permuter decodes
+them into every candidate, so each candidate object carries the whole overlay's
+assembly — ~44,000 instructions for `src/field/field.c` — while `target.o` holds
+only the function being permuted. The score is then almost entirely code the
+permuter cannot affect.
+
+The signature is a base score in the millions, and — the giveaway — base scores
+that agree to within a percent across completely unrelated functions:
+
+```
+[FieldDebugPageAddPos]   base score = 4446740
+[OpcodeFuncMpPlus]       base score = 4422490
+[UpdateFieldExitArrows]  base score = 4361645   <- 45 after stripping
+```
+
+**Sanity-check the base score before trusting a run.** A correctly imported
+scratch scores in the tens or low hundreds; `asm-differ` and `checkfn.py` tell
+you roughly how far off the function is, and the base score should agree. If it
+is in the millions, stop and strip.
+
+Adding `-DSKIP_ASM=1` to the scratch's `compile.sh` does **not** fix this — cpp
+consumed the macro at import time. It only ever appeared to help by accident,
+when an import ran while `make report` had left `build.ninja` in its SKIP_ASM
+configuration.
 
 `import.py` takes `<c_file> <asm_file|func_name>` — there is no `-o` flag. The
 `func_name` form only works if the function still has a `GLOBAL_ASM` stub, which
@@ -244,7 +367,7 @@ Before committing, all four must hold:
 
 | Check | Command | Required result |
 | --- | --- | --- |
-| Function matches | `diff.py -o <fn>` | zero diff rows |
+| Function matches | `tools/checkfn.py <src> <fn>` | `MATCH` |
 | Nothing regressed | `make build` | 13× `OK` |
 | Formatted | `make format` | empty `git diff` |
 | Export committed | `git diff --exit-code -- config/sym_ovl_export.us.txt` | clean |
@@ -307,6 +430,8 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `config/symbols.*.txt` | Hand-maintained symbol names — edit via `mako.sh symbols` |
 | `config/permuter_settings.toml` | Auto-discovered by decomp-permuter (see step 4) |
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
+| `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
+| `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
 

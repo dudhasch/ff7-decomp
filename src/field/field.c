@@ -122,6 +122,12 @@ extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
+extern u8 D_800716CC;
+extern s32 D_8009A010;
+extern s32 D_8009A014;
+extern s16 D_801144D4;
+extern u8 D_80095DE0[];
+extern s32 g_BattleCharIdToCharId[11];
 extern u8 D_8009AD30[];
 extern FieldState D_8009ABF4;
 extern u8 D_8009C540;
@@ -129,6 +135,7 @@ extern u8 D_8009AD2C;
 extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
+extern u8 D_8009AC26;
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;
 extern s16 D_8009A162;
@@ -140,6 +147,7 @@ void FieldDialogSetWindowStyleCbc(s16 window, u8 style, s16 preventClose);
 void FieldDialogSetWindowHeight(s16 window, s16 height);
 void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h);
 void FieldDebugPageResetStrings(s16 page);
+void FieldDialogMove(s16 window, s16 dx, s16 dy);
 u16 func_80025310(u16 itemId);
 s32 OpcodeFuncWsize(void);
 s32 FieldWindowSetStateToClose(s16 window);
@@ -150,6 +158,8 @@ s32 func_8002542C(u32 materia);
 u8 func_80025650(u32 materia, u8 slot);
 void SystemMenuAddHpByPartyId(s32 partyId, s32 amount);
 void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
+void func_80025800(s32 partyId, s32 amount);
+void func_80025988(s32 partyId, s32 amount);
 void FieldEventSetDirByActorId(u8 actorId);
 void FieldMoveToEntityUpdate(u8 actorId);
 void FieldEntityTurnToEntity(u8 actorId);
@@ -395,7 +405,15 @@ s32 FieldCalcLinearStep(s32 start, s32 target, s32 duration, s32 step) {
     return start;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcEaseInOut);
+s32 FieldCalcEaseInOut(s32 from, s32 to, s32 total, s32 step) {
+    s32 angle;
+    s32 diff;
+
+    angle = ((step << 12) / total) / 32 - 0x80;
+    diff = to - from;
+    return from +
+           ((FieldEntityGetDirVectorY(angle & 0xFF) + 0x1000) * diff) / 0x2000;
+}
 
 static s32 FieldCalcWorldToScreenPos(SVECTOR* worldPos, long* screenPos) {
     long flag;
@@ -417,7 +435,34 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGClampPos);
+/* Scroll limits at the head of the field's trigger block. g_FieldTriggers is
+ * typed s32 because it is assigned as a raw word on load. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ s16 minX;
+    /* 0x0E */ s16 minY;
+    /* 0x10 */ s16 maxX;
+    /* 0x12 */ s16 maxY;
+} FieldScrollLimits;
+
+#define FIELD_SCROLL_LIMITS ((FieldScrollLimits*)g_FieldTriggers)
+
+/* Keeps a background scroll position half a screen (0xA0 x 0x78) inside the
+ * map's scroll limits. */
+void FieldBGClampPos(s16* pos) {
+    if (FIELD_SCROLL_LIMITS->maxX - 0xA0 < pos[0]) {
+        pos[0] = FIELD_SCROLL_LIMITS->maxX - 0xA0;
+    }
+    if (pos[0] < FIELD_SCROLL_LIMITS->minX + 0xA0) {
+        pos[0] = FIELD_SCROLL_LIMITS->minX + 0xA0;
+    }
+    if (FIELD_SCROLL_LIMITS->maxY - 0x78 < pos[1]) {
+        pos[1] = FIELD_SCROLL_LIMITS->maxY - 0x78;
+    }
+    if (pos[1] < FIELD_SCROLL_LIMITS->minY + 0x78) {
+        pos[1] = FIELD_SCROLL_LIMITS->minY + 0x78;
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGGetEntityScreenPos);
 
@@ -431,7 +476,17 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityInitPos);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAddRotate);
+void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
+    if (D_8009AC26 == 0) {
+        if (D_8009ABF4.activeKeys2 & PADR1) {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0xE0;
+        } else if (D_8009ABF4.activeKeys2 & PADL1) {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0x20;
+        } else {
+            g_FieldEntity[entityIdx].MoveDirAdd = 0;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAnimationUpdate);
 
@@ -706,7 +761,39 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsAndScale);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsForPart);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadBsxTexToVram);
+/* One texture page inside a BSX model file: where it lives in VRAM and where
+ * its pixels sit relative to the start of the file. */
+typedef struct {
+    /* 0x0 */ u16 w;
+    /* 0x2 */ u16 h;
+    /* 0x4 */ u16 x;
+    /* 0x6 */ u16 y;
+    /* 0x8 */ u32 dataOffset;
+} BsxTexEntry; // size:0xC
+
+typedef struct {
+    /* 0x0 */ u32 unk0;
+    /* 0x4 */ u8 texCount;
+    /* 0x5 */ u8 pad[3];
+    /* 0x8 */ BsxTexEntry entries[1];
+} BsxTexHeader;
+
+void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
+    RECT rect;
+    u32 i;
+    u32 count;
+    BsxTexEntry* entries;
+
+    count = bsx->texCount;
+    entries = bsx->entries;
+    for (i = 0; i < count; i++) {
+        rect.x = entries[i].x;
+        rect.y = entries[i].y;
+        rect.w = entries[i].w;
+        rect.h = entries[i].h;
+        LoadImage(&rect, (u_long*)((u8*)bsx + entries[i].dataOffset));
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
 
@@ -780,7 +867,24 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetSplashToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiInitSplashPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetPartAttribute);
+s32 KawaiSetPartAttribute(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    s32 count;
+    s32 i;
+    s32 partIdx;
+
+    count = data[0];
+    if (count > 0) {
+        parts = model->modelData + model->partsOffset;
+        for (i = 0; i < count; i++) {
+            partIdx = data[i * 2 + 1];
+            if (partIdx < model->partCount) {
+                parts[partIdx * 32] = data[i * 2 + 2];
+            }
+        }
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiApplyBoneTransform);
 
@@ -2140,9 +2244,6 @@ u32 IfCheck(void) {
  *
  * Compares two s16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIf2);
-#else
 s32 OpcodeFuncIf2(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("if2", 7);
@@ -2160,16 +2261,12 @@ s32 OpcodeFuncIf2(void) {
     }
     return 0;
 }
-#endif
 
 /*
  * Field-script opcode LIF2: Long if, 2 bytes, signed
  *
  * Compares two s16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLif2);
-#else
 s32 OpcodeFuncLif2(void) {
     s16 param;
 
@@ -2190,7 +2287,6 @@ s32 OpcodeFuncLif2(void) {
     }
     return 0;
 }
-#endif
 
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", If2CheckSigned);
@@ -2252,36 +2348,29 @@ u32 If2CheckSigned(void) {
  *
  * Compares two u16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIf2u);
-#else
 s32 OpcodeFuncIf2u(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("if2", 7);
     }
-    if (If2CheckUnsigned()) {
+    if (If2CheckUnsigned() != 0) {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("if2=false", 0, 0);
+            FieldDebugAddParseValueToPage2("if2=true", 0, 0);
         }
         PC_INC(8);
     } else {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("if2=true", 0, 0);
+            FieldDebugAddParseValueToPage2("if2=false", 0, 0);
         }
         PC_INC(GET_PARAM_U8(7) + 7);
     }
     return 0;
 }
-#endif
 
 /*
  * Field-script opcode LIF2U: Long if, 2 bytes, unsigned
  *
  * Compares two u16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLif2u);
-#else
 s32 OpcodeFuncLif2u(void) {
     s16 param;
 
@@ -2290,19 +2379,18 @@ s32 OpcodeFuncLif2u(void) {
     }
     if (If2CheckUnsigned() != 0) {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("lif2=false", 0, 0);
+            FieldDebugAddParseValueToPage2("lif2=true", 0, 0);
         }
         PC_INC(9);
     } else {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("lif2=true", 0, 0);
+            FieldDebugAddParseValueToPage2("lif2=false", 0, 0);
         }
         GET_PARAM_S16(param, 7);
         PC_INC(param + 7);
     }
     return 0;
 }
-#endif
 
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", If2CheckUnsigned);
@@ -2907,7 +2995,29 @@ s32 OpcodeFuncPmjmp2(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMgame);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBatle);
+s32 OpcodeFuncBatle(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("batle", 3);
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_NONE:
+        FieldWindowResetTextAll();
+        g_FieldState->eventCmd = EVTCMD_ENTERING_BATTLE;
+        g_FieldState->eventCmdParam = FieldEventReadMemoryS16(2, 2);
+        D_8007EBE0 = 1;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        return 1;
+    case EVTCMD_ENTERING_BATTLE:
+        if (g_FieldState->movieCommandState == MOVCMD_DONE) {
+            PC_INC(4);
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            return 0;
+        }
+        break;
+    }
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_akao_sound.c
@@ -2924,9 +3034,37 @@ void FieldEventClearAkaoStruct(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAkao);
+s32 OpcodeFuncAkao(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("akao", 3);
+    }
+    FieldEventClearAkaoStruct();
+    *D_8009A000 = GET_PARAM_U8(4);
+    *D_8009A004 = FieldEventReadMemoryU8(1, 5);
+    *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 6);
+    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 8);
+    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 10);
+    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 12);
+    SystemAkaoExecute();
+    PC_INC(14);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAkao2);
+s32 OpcodeFuncAkao2(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("akao2", 3);
+    }
+    FieldEventClearAkaoStruct();
+    *D_8009A000 = GET_PARAM_U8(4);
+    *D_8009A004 = (s16)FieldEventReadMemoryS16(1, 5);
+    *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 7);
+    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 9);
+    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 11);
+    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 13);
+    SystemAkaoExecute();
+    PC_INC(15);
+    return 0;
+}
 
 s32 OpcodeFuncSe(void) {
     if (g_DebugLevel & 3) {
@@ -3387,9 +3525,43 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAnimw);
+s32 OpcodeFuncAnimw(void) {
+    u8 modelIdx;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAnimb);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("animw", 0);
+    }
+    modelIdx = g_EntityToModel[g_CurrentEntity];
+    if (modelIdx == 0xFF) {
+        PC_INC(1);
+        return 0;
+    }
+    switch (D_800756E8[modelIdx]) {
+    case 2:
+    case 5:
+    case 6:
+        return 1;
+    case 4:
+        D_800756E8[modelIdx] = 0;
+        break;
+    }
+    PC_INC(1);
+    return 0;
+}
+
+s32 OpcodeFuncAnimb(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("animb", 0);
+    }
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame >>
+            4;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 3;
+    }
+    PC_INC(1);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_model_move.c
@@ -3401,7 +3573,17 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFcfix);
+s32 OpcodeFuncFcfix(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fcfix", 1);
+    }
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock =
+            GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
 
@@ -3508,7 +3690,22 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkr2);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMsped);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsped);
+s32 OpcodeFuncAsped(void) {
+    u8 modelIdx;
+    s16 speed;
+
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("asped", 3);
+        }
+        speed = FieldEventReadMemoryS16(2, 2);
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        g_FieldModels[modelIdx].animSpeed = speed;
+        D_8009D828[modelIdx] = speed;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGtdir);
 
@@ -3522,9 +3719,33 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAxyzi);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPxyzi);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncVisi);
+s32 OpcodeFuncVisi(void) {
+    u8 model;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkon);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("visi", 1);
+    }
+    model = g_EntityToModel[g_CurrentEntity];
+    if (model != 0xFF) {
+        g_FieldModels[model].visible = GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
+
+s32 OpcodeFuncTlkon(void) {
+    u8 model;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("tlkon", 1);
+    }
+    model = g_EntityToModel[g_CurrentEntity];
+    if (model != 0xFF) {
+        g_FieldModels[model].TalkOff = GET_PARAM_U8(1);
+    }
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyzi);
 
@@ -3536,7 +3757,16 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyi);
 // Start of field_opcode_message.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMes);
+s32 OpcodeFuncMes(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mes", 2);
+    }
+    if (FieldDialogMessageUpdateStates(GET_PARAM_U8(1), GET_PARAM_U8(2)) != 0) {
+        PC_INC(3);
+        return 0;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncMpnam(void) {
     if (g_DebugLevel & 3) {
@@ -3597,7 +3827,19 @@ s32 OpcodeFuncWrow(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWmove);
+s32 OpcodeFuncWmove(void) {
+    s16 dx;
+    s16 dy;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wmove", 8);
+    }
+    GET_PARAM_S16(dx, 2);
+    GET_PARAM_S16(dy, 4);
+    FieldDialogMove(GET_PARAM_U8(1), dx, dy);
+    PC_INC(6);
+    return 0;
+}
 
 s32 OpcodeFuncWrest(void) {
     if (g_DebugLevel & 3) {
@@ -3608,7 +3850,16 @@ s32 OpcodeFuncWrest(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWclse);
+s32 OpcodeFuncWclse(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wclse", 1);
+    }
+    if (FieldWindowSetStateToClose(GET_PARAM_U8(1)) != 0) {
+        PC_INC(2);
+        return 0;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncWmode(void) {
     if (g_DebugLevel & 3) {
@@ -4594,9 +4845,30 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmvie);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMovie);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMvief);
+s32 OpcodeFuncMvief(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mvief", 2);
+    }
+    if (D_800716CC != 0) {
+        FieldEventWriteMemoryS16(2, 2, D_801144D4);
+        D_801144D4++;
+        PC_INC(3);
+        return 0;
+    } else {
+        FieldEventWriteMemoryS16(2, 2, g_FieldState->currentMovieFrame);
+        PC_INC(3);
+        return 0;
+    }
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpjpo);
+s32 OpcodeFuncMpjpo(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpjpo", 0);
+    }
+    g_FieldState->mapJumpDisabled = GET_PARAM_U8(1);
+    PC_INC(2);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_scroll.c
@@ -4614,13 +4886,32 @@ s32 OpcodeFuncScr2d(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlc);
+s32 OpcodeFuncScrlc(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrlc", 0);
+    }
+    g_FieldState->cameraScrollMode = GET_PARAM_U8(4);
+    g_FieldState->cameraScrollTargetId = g_FieldState->pcModelId;
+    g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(2, 2);
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrla);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrcc);
+s32 OpcodeFuncScrcc(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrcc", 0);
+    }
+    g_FieldState->cameraScrollMode = SCRL_OFF;
+    g_FieldState->cameraScrollTargetId = g_FieldState->pcModelId;
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(1);
+    return 0;
+}
 
 s32 OpcodeFuncScr2dc(void) {
     if (g_DebugLevel & 3) {
@@ -4648,17 +4939,67 @@ s32 OpcodeFuncScr2dl(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlw);
+s32 OpcodeFuncScrlw(void) {
+    s32 mode;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrlw", 0);
+    }
+    if (g_FieldState->cameraScrollState == SCRLST_DONE) {
+        mode = g_FieldState->cameraScrollMode;
+        if (mode != SCRL_OFF) {
+            if (mode < SCRL_TO_COORDS_INSTANT) {
+                g_FieldState->cameraScrollMode = SCRL_TO_ENTITY_INSTANT;
+            } else if (mode < 7) {
+                if (mode >= SCRL_TO_COORDS_LINEAR) {
+                    g_FieldState->cameraScrollMode = SCRL_TO_COORDS_INSTANT;
+                }
+            }
+        }
+        g_FieldState->cameraScrollState = SCRLST_INIT;
+        PC_INC(1);
+        return 0;
+    }
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_palette.c
 ////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStpal);
+s32 OpcodeFuncStpal(void) {
+    RECT rect;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("stpal", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = FieldEventReadMemoryU8(1, 2) + 0x1E0;
+    rect.x = 0;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    StoreImage(&rect, (u_long*)&D_80095DE0[FieldEventReadMemoryU8(2, 3) * 32]);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStpls);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLdpal);
+s32 OpcodeFuncLdpal(void) {
+    RECT rect;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ldpal", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = FieldEventReadMemoryU8(2, 3) + 0x1E0;
+    rect.x = 0;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    LoadImage(&rect, (u_long*)&D_80095DE0[FieldEventReadMemoryU8(1, 2) * 32]);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLdpls);
 
@@ -5122,9 +5463,37 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIdlck);
 // Begin of field_opcode_window_color.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGwcol);
+s32 OpcodeFuncGwcol(void) {
+    s16 pane;
+    s32 corner;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSwcol);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("gwcol", 6);
+    }
+    pane = FieldEventReadMemoryU8(1, 3);
+    corner = pane * 3;
+    FieldEventWriteMemoryU8(2, 4, D_80049208[corner]);
+    FieldEventWriteMemoryU8(3, 5, D_80049208[corner + 1]);
+    FieldEventWriteMemoryU8(4, 6, D_80049208[corner + 2]);
+    PC_INC(7);
+    return 0;
+}
+
+s32 OpcodeFuncSwcol(void) {
+    s16 pane;
+    s32 corner;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("swcol", 6);
+    }
+    pane = FieldEventReadMemoryU8(1, 3);
+    corner = pane * 3;
+    D_80049208[corner] = FieldEventReadMemoryU8(2, 4);
+    D_80049208[corner + 1] = FieldEventReadMemoryU8(3, 5);
+    D_80049208[corner + 2] = FieldEventReadMemoryU8(4, 6);
+    PC_INC(7);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_field_effect.c
@@ -5209,9 +5578,39 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSpcal);
 // Begin of field_opcode_layer.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgscr);
+s32 OpcodeFuncBgscr(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgscr", 8);
+    }
+    switch (GET_PARAM_U8(2)) {
+    case 2:
+        g_FieldState->layer2_bgScrollXSpeed = FieldEventReadMemoryS16(1, 3);
+        g_FieldState->layer2_bgScrollYSpeed = FieldEventReadMemoryS16(2, 5);
+        break;
+    case 3:
+        g_FieldState->layer3_bgScrollXSpeed = FieldEventReadMemoryS16(1, 3);
+        g_FieldState->layer3_bgScrollYSpeed = FieldEventReadMemoryS16(2, 5);
+        break;
+    }
+    PC_INC(7);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgdph);
+s32 OpcodeFuncBgdph(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgdph", 8);
+    }
+    switch (GET_PARAM_U8(2)) {
+    case 2:
+        g_FieldState->layer2_depth = FieldEventReadMemoryS16(1, 3);
+        break;
+    case 3:
+        g_FieldState->layer3_depth = FieldEventReadMemoryS16(1, 3);
+        break;
+    }
+    PC_INC(5);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_materia.c
@@ -5327,7 +5726,19 @@ s32 OpcodeFuncMenu2(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetpc);
+s32 OpcodeFuncGetpc(void) {
+    s32 slot;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("getpc", 3);
+    }
+    slot = GET_PARAM_U8(2);
+    if (slot < 3) {
+        FieldEventWriteMemoryU8(2, 3, D_8009CBDC[slot]);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpara);
 
@@ -5435,7 +5846,22 @@ void SystemRefreshParty(void) {
     func_80017678();
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", SystemResoreParty);
+void SystemResoreParty(void) {
+    s32 i;
+    s32 charId;
+
+    SystemRefreshParty();
+    for (i = 0; i < 3; i++) {
+        SystemMenuAddHpByPartyId(i, 10000);
+        SystemMenuAddMpByPartyId(i, 10000);
+        if (D_8009CBDC[i] != 0xFF) {
+            charId = g_BattleCharIdToCharId[D_8009CBDC[i]];
+            if (charId < 9) {
+                Savemap.party[charId].status_flags = 0;
+            }
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMhmmx);
 
@@ -5454,13 +5880,89 @@ s32 OpcodeFuncHmpmx(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpPlus);
+s32 OpcodeFuncMpPlus(void) {
+    s32 partyId;
+    s32 i;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpMinus);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mp+", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                SystemMenuAddMpByPartyId(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncHpPlus);
+s32 OpcodeFuncMpMinus(void) {
+    s32 partyId;
+    s32 i;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncHpMinus);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mp-", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                func_80025988(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
+
+s32 OpcodeFuncHpPlus(void) {
+    s32 partyId;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("hp+", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                SystemMenuAddHpByPartyId(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
+
+s32 OpcodeFuncHpMinus(void) {
+    s32 partyId;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("hp-", 4);
+    }
+    SystemRefreshParty();
+    partyId = GET_PARAM_U8(2);
+    if (D_8009D391[partyId] != 0xFF) {
+        partyId = D_8009D391[partyId];
+        for (i = 0; i < 3; i++) {
+            if (D_8009CBDC[i] == partyId) {
+                func_80025800(i, FieldEventReadMemoryS16(2, 3));
+            }
+        }
+    }
+    PC_INC(5);
+    return 0;
+}
 
 /**
  * @brief Opcode 0x39 - **GOLDU** - Gold Up
@@ -7131,4 +7633,32 @@ static void FieldDebugStringU32hex(s32 val, char* msg_out) {
     msg_out[3] = g_FieldDebugDigits[val & 0xF];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugIntToString);
+/* Writes value as decimal into out, suppressing leading zeros. Five digits
+ * plus the units place, so the range is 0..99999. */
+void FieldDebugIntToString(s32 value, char* out) {
+    char* end;
+    s32 started;
+    s32 divisor;
+    s32 count;
+    s32 digit;
+    u8 lastDigit;
+
+    started = 0;
+    divisor = 10000;
+    count = 0;
+    do {
+        digit = value / divisor;
+        if (started || digit != 0) {
+            started = 1;
+            out[count] = g_FieldDebugDigits[digit];
+            count++;
+        }
+        value -= digit * divisor;
+        divisor /= 10;
+    } while (divisor >= 2);
+    end = out + count;
+    digit = g_FieldDebugDigits[value];
+    lastDigit = digit;
+    end[1] = '\0';
+    end[0] = lastDigit;
+}
