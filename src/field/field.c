@@ -3815,19 +3815,80 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDir);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSlidr);
+/* SLIDR: set this entity's collision radius. The script value is in map units,
+ * so it is scaled by the field's own scale and divided back down by 512. */
+s32 OpcodeFuncSlidr(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("slidR", 2);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].SolidRange =
+            (FieldEventReadMemoryU8(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(3);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSldr2);
+/* SLDR2: SLIDR with a 16-bit radius. */
+s32 OpcodeFuncSldr2(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("sldR2", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].SolidRange =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTalkr);
+/* TALKR: set this entity's talk radius, scaled the same way as SLIDR. */
+s32 OpcodeFuncTalkr(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("talkR", 2);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TalkRange =
+            (FieldEventReadMemoryU8(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(3);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkr2);
+/* TLKR2: TALKR with a 16-bit radius. */
+s32 OpcodeFuncTlkr2(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("tlkR2", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TalkRange =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_model_state.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMsped);
+/* MSPED: set this entity's movement speed, scaled like the radius opcodes. */
+s32 OpcodeFuncMsped(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("msped", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveSpeed =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 s32 OpcodeFuncAsped(void) {
     u8 modelIdx;
@@ -3846,11 +3907,40 @@ s32 OpcodeFuncAsped(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGtdir);
+/* GTDIR: write another entity's facing direction back into a memory bank. */
+s32 OpcodeFuncGtdir(void) {
+    u8 entityId;
+
+    entityId = GET_PARAM_U8(2);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("gtdir", 3);
+        }
+        FieldEventWriteMemoryU8(
+            2, 3, g_FieldModels[g_EntityToModel[entityId]].Dir);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPgtdr);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetai);
+/* GETAI: write another entity's walkmesh triangle id back into a memory bank.
+ */
+s32 OpcodeFuncGetai(void) {
+    u8 entityId;
+
+    entityId = GET_PARAM_U8(2);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("getai", 3);
+        }
+        FieldEventWriteMemoryS16(
+            2, 3, g_FieldModels[g_EntityToModel[entityId]].PosI);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetaxy);
 
@@ -7746,7 +7836,29 @@ static void InitFieldDebugPages(void) {
     FieldDebugPageSetHeadRow(5, 4);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPagesResetPosSize);
+/* Move the first hidden debug page to (x, y, w, h) and clear its text, falling
+ * back to page 0 when every page is currently being rendered.
+ *
+ * The element address has to go through `page` rather than being indexed
+ * inline: as a bare `D_800E08C0[i * 378]` gcc hoists the symbol's %hi/%lo out
+ * of the loop, where the original rematerialises it each iteration. */
+s16 FieldDebugPagesResetPosSize(s16 x, s16 y, s16 w, s16 h) {
+    s16 i;
+
+    for (i = 0; i < 6; i++) {
+        u8* page;
+
+        page = &D_800E08C0[i * 378];
+        if (*page) {
+            FieldDebugPageSetPosSize(i, x, y, w, h);
+            FieldDebugPageResetStrings(i);
+            return i;
+        }
+    }
+    FieldDebugPageSetPosSize(0, x, y, w, h);
+    FieldDebugPageResetStrings(0);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageInit);
 
