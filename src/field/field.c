@@ -75,6 +75,13 @@ extern char D_800A0270[4];
 extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
 extern s8 D_800E0630;
+extern s16 D_800E0748[];
+extern s16 D_800E074A[];
+extern s16 D_800E074C[];
+extern s16 D_800E074E[];
+extern u8 D_800E0750[];
+extern u8 D_800E0751[];
+extern u8 D_800E0752[];
 extern s16 D_800E0756[];
 extern char D_800E0758[];
 extern u8 D_800E08A8[];
@@ -127,6 +134,8 @@ extern s16 D_8009A162;
 extern u8 D_8009A15C;
 
 void SystemRefreshParty(void);
+void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h);
+void FieldDebugPageResetStrings(s16 page);
 u16 func_80025310(u16 itemId);
 s32 OpcodeFuncWsize(void);
 s32 FieldWindowSetStateToClose(s16 window);
@@ -3483,7 +3492,14 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyi);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMes);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpnam);
+s32 OpcodeFuncMpnam(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpnam", 1);
+    }
+    CopyDialogToMapName(GET_PARAM_U8(1));
+    PC_INC(2);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsk);
 
@@ -6881,7 +6897,13 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPagesResetPosSize);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageInit);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageSetPosSize);
+void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
+    D_800E0748[page * 189] = x;
+    D_800E074A[page * 189] = y;
+    D_800E074C[page * 189] = w;
+    D_800E074E[page * 189] = h;
+    D_8009D824 = 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
 
@@ -6931,7 +6953,14 @@ void FieldDebugPageSetHeadRow(s16 page, s16 row) {
     D_8009D824 = 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageSetColor);
+void FieldDebugPageSetColor(s16 page, u8 r, u8 g, u8 b) {
+    if (D_800E08C0[page * 378] == 0) {
+        D_800E0750[page * 378] = r;
+        D_800E0751[page * 378] = g;
+        D_800E0752[page * 378] = b;
+        D_8009D824 = 1;
+    }
+}
 
 void FieldDebugPageNotInit(s16 page) {
     D_800E08C0[page * 378] = 1;
