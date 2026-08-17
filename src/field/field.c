@@ -5771,9 +5771,81 @@ static void FieldEventRectClear(s16* arg0) {
     arg0[3] = 0;
 }
 
+/* Copy the first `count` entries of one 16-colour palette over another. The
+ * palette store is a flat byte array of 32-byte pages, so both ends have to be
+ * re-cast to u16 to walk entries rather than bytes. Declaring the two pointers
+ * inside the loop is what makes gcc hoist each as one invariant; written above
+ * the loop they land ahead of the zero-trip guard, and written inline gcc
+ * reassociates the base out and the body needs a third `addu`.
+ *
+ * One instruction from matching: the original materialises &D_80095DE0 between
+ * the `andi` that widens the palette id and the `sll` that scales it, gcc after
+ * both. The two are a .rodata unit -- OpcodeFuncCppal owns the "cppal" string
+ * that OpcodeFuncCppal2 prints -- so neither can land without the other. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCppal);
+#else
+s32 OpcodeFuncCppal(void) {
+    s16 count;
+    u8 src;
+    u8 dst;
+    s16 i;
 
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cppal", 4);
+    }
+    count = GET_PARAM_U8(4) + 1;
+    src = FieldEventReadMemoryU8(1, 2);
+    dst = FieldEventReadMemoryU8(2, 3);
+    for (i = 0; i < count; i++) {
+        u16* dstPal = (u16*)(D_80095DE0 + dst * 32);
+        u16* srcPal = (u16*)(D_80095DE0 + src * 32);
+
+        dstPal[i] = srcPal[i];
+    }
+    PC_INC(5);
+    return 0;
+}
+#endif
+
+/* As CPPAL, but source and destination each get their own start entry, so the
+ * copy can shift a run of colours within or between palettes.
+ *
+ * Instruction-for-instruction identical; the preheader swaps $v0 and $v1
+ * between the scaled index and the base address. Reversing the operand order in
+ * the C does not move it. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCppal2);
+#else
+s32 OpcodeFuncCppal2(void) {
+    s16 count;
+    s16 srcPal;
+    s16 dstPal;
+    s16 src;
+    s16 dst;
+    s16 end;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cppal", 7);
+    }
+    count = FieldEventReadMemoryU8(4, 7) + 1;
+    srcPal = GET_PARAM_U8(3);
+    dstPal = GET_PARAM_U8(4);
+    src = FieldEventReadMemoryU8(1, 5);
+    dst = FieldEventReadMemoryU8(2, 6);
+    end = src + count;
+    while (src < end) {
+        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+
+        to[dst] = from[src];
+        src++;
+        dst++;
+    }
+    PC_INC(8);
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncRtpal);
 
