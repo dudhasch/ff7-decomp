@@ -140,8 +140,9 @@ extern volatile u16 D_80114488;
 extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
-extern u8 D_80071C1C;  // set while a movie opcode is driving playback
-extern u32 D_80075E10; // top of the buffer the movie stream decodes into
+extern u8 D_80071C1C;    // set while a movie opcode is driving playback
+extern u32 D_80075E10;   // top of the buffer the movie stream decodes into
+extern u16 D_800E42A8[]; // per-model default walk speed, indexed by model id
 extern s16 D_801142C8;
 void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
 void func_800354CC(void);                    // STR playback start
@@ -6300,11 +6301,44 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitSet);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetMove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinEndMove);
+/* Poll one party member's walk during a SPLIT or JOIN. ActionState 2 means the
+ * move just finished, so release the scripted-move lock and restore the
+ * model's default speed. */
+s32 FieldEventSplitJoinEndMove(s16 entityId) {
+    if (g_FieldModels[g_EntityToModel[entityId]].ActionState != 2) {
+        return 0;
+    }
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("end move", 0, 0);
+    }
+    g_FieldModels[g_EntityToModel[entityId]].scriptedMoveMode = 0;
+    g_FieldModels[g_EntityToModel[entityId]].ActionState = 0;
+    D_800756E8[g_EntityToModel[entityId]] = 0;
+    g_FieldModels[g_EntityToModel[entityId]].MoveSpeed =
+        D_800E42A8[g_EntityToModel[entityId]];
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetTurn);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinEndTurn);
+/* Poll one party member's turn during a SPLIT or JOIN. Returns 1 once the
+ * entity has finished turning -- or has no model to turn -- and 0 while it is
+ * still in progress. */
+s32 FieldEventSplitJoinEndTurn(s16 entityId) {
+    if (g_EntityToModel[entityId] == 0xFF) {
+        return 1;
+    }
+    if (g_FieldModels[g_EntityToModel[entityId]].TurnType != 3) {
+        return 0;
+    }
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("end turn", 0, 0);
+    }
+    g_FieldModels[g_EntityToModel[entityId]].TurnType = 0;
+    g_FieldModels[g_EntityToModel[entityId]].TurnStep = 0;
+    g_FieldModels[g_EntityToModel[entityId]].TurnSteps = 0;
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_fade.c
@@ -6687,7 +6721,23 @@ s32 OpcodeFuncMpara(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpra2);
+/* MPRA2: as MPARA, but the bound address is 16-bit. Writing it through
+ * GET_PARAM_S16 stores the low byte and then the combined halfword, which is
+ * why the same slot is written twice. */
+s32 OpcodeFuncMpra2(void) {
+    s32 window;
+    s32 param;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpra2", 5);
+    }
+    window = GET_PARAM_U8(2);
+    param = FieldEventReadMemoryU8(1, 3);
+    g_WindowReplaceBank[window][param] = GET_PARAM_U8(1) & 0xF;
+    GET_PARAM_S16(g_WindowReplaceBankAddr[window][param], 4);
+    PC_INC(6);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_angle.c
@@ -8583,7 +8633,31 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderString);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
 
+/* Append a coloured line to a debug page, wrapping back to the top row once the
+ * page's pixel height can no longer hold another 10-pixel row.
+ *
+ * Semantically right, not yet matching. One root cause behind the register
+ * renames: the original keeps only `page * 378` in a callee-saved register and
+ * lets the assembler rebuild `&D_800E0754 + that` through $at on each of the
+ * five accesses, where gcc CSEs the whole address into a second callee-saved
+ * register. Dropping the `colors` local removed three spurious instructions and
+ * fixed the frame size; the address CSE is what is left. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddColorStrNextDebugRow);
+#else
+s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
+    char* rows = D_800E0758 + page * 378;
+
+    FieldDebugStringCopy(&rows[D_800E0754[page * 189] * 14], str);
+    D_800E08A8[page * 378 + D_800E0754[page * 189]] = color;
+    D_800E0754[page * 189]++;
+    if ((D_800E074E[page * 189] - 8) / 10 < D_800E0754[page * 189]) {
+        D_800E0754[page * 189] = 0;
+    }
+    D_8009D824 = 1;
+    return 1;
+}
+#endif
 
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
     char* rows = D_800E0758 + page * 378;
