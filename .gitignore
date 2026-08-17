@@ -18,3 +18,4 @@ undefined_syms_auto.*.txt
 build.ninja
 objdiff.json
 /permute*
+tools/docker-build.ps1

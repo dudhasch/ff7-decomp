@@ -30,6 +30,36 @@ See [docs/STEAMOS.md](docs/STEAMOS.md).
 `gh`-based commands (`make board`) run on the **host**, never in the container —
 it has no credentials.
 
+### Where `build/` and `.venv/` live in a container build
+
+`tools/docker-build.sh` (and its untracked Windows twin `tools/docker-build.ps1`)
+mount the repository at `/ff7` but keep two paths in **Docker named volumes**
+rather than on the host bind mount:
+
+| Path in container | Volume | Why |
+| --- | --- | --- |
+| `/ff7/.venv` | `ff7_venv` | The venv is baked into the image; the bind mount would otherwise hide it. |
+| `/ff7/build` | `ff7_build` | Thousands of small object files, far too slow over a macOS/Windows bind mount. |
+| `/gocache` | `go_cache` | Go module and build cache, shared across runs. |
+
+The consequence: **`build/` does not exist on the host filesystem.** Anything
+that reads it — `asm-differ`, `ninja`, `make report`'s `build/report.json` — must
+run inside the container. `asm/`, `expected/`, `config/` and `src/` are on the
+bind mount and are visible from both sides.
+
+`tools/podman-build.sh` mounts only `/gocache`, so on that path `.venv` and
+`build/` are ordinary host directories and `make requirements` must be run once.
+
+To inspect or copy something out of a volume:
+
+```shell
+docker run --rm -v ff7_build:/build ff7-build:latest -lc 'ls /build/us'
+```
+
+Rebuild the image from a minimal context (just `Dockerfile` + `requirements.txt`
+in a temp directory) — a build from the repository root uploads the ~750 MB disc
+image in `disks/` as build context for no reason.
+
 ## The decompilation loop
 
 ### 1. Pick a function
