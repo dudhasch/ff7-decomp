@@ -122,6 +122,8 @@ extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
+extern u8 D_80095DE0[];
+extern s32 g_BattleCharIdToCharId[11];
 extern u8 D_8009AD30[];
 extern FieldState D_8009ABF4;
 extern u8 D_8009C540;
@@ -395,7 +397,15 @@ s32 FieldCalcLinearStep(s32 start, s32 target, s32 duration, s32 step) {
     return start;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcEaseInOut);
+s32 FieldCalcEaseInOut(s32 from, s32 to, s32 total, s32 step) {
+    s32 angle;
+    s32 diff;
+
+    angle = ((step << 12) / total) / 32 - 0x80;
+    diff = to - from;
+    return from +
+           ((FieldEntityGetDirVectorY(angle & 0xFF) + 0x1000) * diff) / 0x2000;
+}
 
 static s32 FieldCalcWorldToScreenPos(SVECTOR* worldPos, long* screenPos) {
     long flag;
@@ -3536,7 +3546,16 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyi);
 // Start of field_opcode_message.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMes);
+s32 OpcodeFuncMes(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mes", 2);
+    }
+    if (FieldDialogMessageUpdateStates(GET_PARAM_U8(1), GET_PARAM_U8(2)) != 0) {
+        PC_INC(3);
+        return 0;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncMpnam(void) {
     if (g_DebugLevel & 3) {
@@ -3608,7 +3627,16 @@ s32 OpcodeFuncWrest(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWclse);
+s32 OpcodeFuncWclse(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wclse", 1);
+    }
+    if (FieldWindowSetStateToClose(GET_PARAM_U8(1)) != 0) {
+        PC_INC(2);
+        return 0;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncWmode(void) {
     if (g_DebugLevel & 3) {
@@ -4620,7 +4648,16 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrla);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrcc);
+s32 OpcodeFuncScrcc(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrcc", 0);
+    }
+    g_FieldState->cameraScrollMode = SCRL_OFF;
+    g_FieldState->cameraScrollTargetId = g_FieldState->pcModelId;
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(1);
+    return 0;
+}
 
 s32 OpcodeFuncScr2dc(void) {
     if (g_DebugLevel & 3) {
@@ -4654,11 +4691,39 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlw);
 // Begin of field_opcode_palette.c
 ////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStpal);
+s32 OpcodeFuncStpal(void) {
+    RECT rect;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("stpal", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = FieldEventReadMemoryU8(1, 2) + 0x1E0;
+    rect.x = 0;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    StoreImage(&rect, (u_long*)&D_80095DE0[FieldEventReadMemoryU8(2, 3) * 32]);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStpls);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLdpal);
+s32 OpcodeFuncLdpal(void) {
+    RECT rect;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ldpal", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = FieldEventReadMemoryU8(2, 3) + 0x1E0;
+    rect.x = 0;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    LoadImage(&rect, (u_long*)&D_80095DE0[FieldEventReadMemoryU8(1, 2) * 32]);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLdpls);
 
@@ -5211,7 +5276,21 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSpcal);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgscr);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgdph);
+s32 OpcodeFuncBgdph(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgdph", 8);
+    }
+    switch (GET_PARAM_U8(2)) {
+    case 2:
+        g_FieldState->layer2_depth = FieldEventReadMemoryS16(1, 3);
+        break;
+    case 3:
+        g_FieldState->layer3_depth = FieldEventReadMemoryS16(1, 3);
+        break;
+    }
+    PC_INC(5);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_materia.c
@@ -5435,7 +5514,22 @@ void SystemRefreshParty(void) {
     func_80017678();
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", SystemResoreParty);
+void SystemResoreParty(void) {
+    s32 i;
+    s32 charId;
+
+    SystemRefreshParty();
+    for (i = 0; i < 3; i++) {
+        SystemMenuAddHpByPartyId(i, 10000);
+        SystemMenuAddMpByPartyId(i, 10000);
+        if (D_8009CBDC[i] != 0xFF) {
+            charId = g_BattleCharIdToCharId[D_8009CBDC[i]];
+            if (charId < 9) {
+                Savemap.party[charId].status_flags = 0;
+            }
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMhmmx);
 
