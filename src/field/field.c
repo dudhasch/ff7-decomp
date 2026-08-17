@@ -793,6 +793,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCollisionCheck);
 s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
     s16 i;
     s32 hit;
+    s32 sqrRadius;
     s32 range;
     s16* entityCount;
     s32 dz;
@@ -814,10 +815,12 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
         if (dz < -126 || dz > 127) {
             continue;
         }
-        radius = (range + g_FieldEntity[i].SolidRange) >> 1;
+        sqrRadius = (range + g_FieldEntity[i].SolidRange) >> 1;
+        radius = sqrRadius;
         dx = (g_FieldEntity[i].PosX - pos->vx) >> 12;
         dy = (g_FieldEntity[i].PosY - pos->vy) >> 12;
-        if (radius * radius > dx * dx + dy * dy) {
+        sqrRadius = radius * radius;
+        if (sqrRadius > dx * dx + dy * dy) {
             hit = 1;
             if (entityId == g_PlayerModelId) {
                 g_FieldEntity[i].requestPushScript = 1;
@@ -859,9 +862,10 @@ s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
              line->pos.y2 - nearest[1] <= 0) ||
             (line->pos.y1 - nearest[1] <= 0 &&
              line->pos.y2 - nearest[1] >= 0)) {
-            return (nearest[0] - point[0]) * (nearest[0] - point[0]) +
-                   (nearest[1] - point[1]) * (nearest[1] - point[1]) +
-                   (nearest[2] - point[2]) * (nearest[2] - point[2]);
+            t = (nearest[0] - point[0]) * (nearest[0] - point[0]) +
+                (nearest[1] - point[1]) * (nearest[1] - point[1]) +
+                (nearest[2] - point[2]) * (nearest[2] - point[2]);
+            return t;
         }
     }
     return -1;
