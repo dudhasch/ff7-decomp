@@ -136,6 +136,15 @@ extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
 extern u8 D_8009AC26;
+extern u8 D_80081DC4;
+extern s16 D_80114464;
+extern s16 D_80114468;
+extern u8 D_80114490;
+// Two POLY_FT4 at 0x800E48F4, filling the gap between g_EntityForSplitJoin
+// (0x800E48F0) and g_WindowString (0x800E4944) exactly. Confirmed by the
+// 0x28 stride, len 9 / code 0x2C at +3 / +7, clut at +0x0E and tpage at +0x16.
+extern POLY_FT4 D_800E48F4[2];
+s32 GetGraphType(void);
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;
 extern s16 D_8009A162;
@@ -188,6 +197,8 @@ void DebugUpdateActor(s32 arg0, u8 actorId);
 void DebugPrintOpcode(char* arg0, s32 arg1);
 u8 FieldEventReadMemoryU8(s16 arg0, s16 arg1);
 void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value);
+s32 FieldDialogAskUpdateStates(
+    u8 windowId, u8 firstRow, u8 lastRow, u8 cancelRow, s16* answer);
 s16 FieldEventReadMemoryS16(s16 arg0, s16 arg1);
 void FieldEventWriteMemoryS16(s16 arg0, s16 arg1, s16 value);
 u32 IfCheck(void);
@@ -1188,7 +1199,34 @@ u8 FieldEventRequestRun(s16 entityId, s16 priority, s16 scriptId) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", ResetFieldRenderState);
+void ResetFieldRenderState(void) {
+    s16 tpage;
+
+    D_80114490 = 0;
+    D_80114464 = 0x7FFF;
+    D_80114468 = 0x7FFF;
+    setPolyFT4(&D_800E48F4[0]);
+    setPolyFT4(&D_800E48F4[1]);
+    setSemiTrans(&D_800E48F4[0], 0);
+    setSemiTrans(&D_800E48F4[1], 0);
+    setShadeTex(&D_800E48F4[0], 1);
+    setShadeTex(&D_800E48F4[1], 1);
+    if (GetGraphType() == 1 || GetGraphType() == 2) {
+        tpage = 0x2F;
+    } else {
+        tpage = 0x1F;
+    }
+    D_800E48F4[1].tpage = tpage;
+    D_800E48F4[0].tpage = tpage;
+    D_800E48F4[1].clut = 0x7850;
+    D_800E48F4[0].clut = 0x7850;
+    D_800E48F4[0].r0 = 0;
+    D_800E48F4[1].r0 = 0;
+    D_800E48F4[0].g0 = 0;
+    D_800E48F4[1].g0 = 0;
+    D_800E48F4[0].b0 = 0;
+    D_800E48F4[1].b0 = 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", UpdateFieldExitArrows);
 
@@ -3777,7 +3815,33 @@ s32 OpcodeFuncMpnam(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsk);
+/*
+ * Field-script opcode ASK: run a menu prompt and store the chosen row.
+ *
+ * Blocks (returning 1 and holding the player) until FieldDialogAskUpdateStates
+ * reports the prompt is finished; the answer is written back to the script
+ * memory bank either way.
+ */
+s32 OpcodeFuncAsk(void) {
+    s16 answer;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ask", 6);
+    }
+    answer = FieldEventReadMemoryU8(2, 6);
+    if (FieldDialogAskUpdateStates(
+            GET_PARAM_U8(2), GET_PARAM_U8(3), GET_PARAM_U8(4), GET_PARAM_U8(5),
+            &answer) != 0) {
+        FieldEventWriteMemoryU8(2, 6, answer);
+        g_FieldState->characterLock = D_80081DC4;
+        PC_INC(7);
+        return 0;
+    } else {
+        FieldEventWriteMemoryU8(2, 6, answer);
+        g_FieldState->characterLock = 1;
+        return 1;
+    }
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_window.c
