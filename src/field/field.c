@@ -122,6 +122,8 @@ extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
+extern u8 D_800716CC;
+extern s16 D_801144D4;
 extern u8 D_80095DE0[];
 extern s32 g_BattleCharIdToCharId[11];
 extern u8 D_8009AD30[];
@@ -2917,7 +2919,29 @@ s32 OpcodeFuncPmjmp2(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMgame);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBatle);
+s32 OpcodeFuncBatle(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("batle", 3);
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_NONE:
+        FieldWindowResetTextAll();
+        g_FieldState->eventCmd = EVTCMD_ENTERING_BATTLE;
+        g_FieldState->eventCmdParam = FieldEventReadMemoryS16(2, 2);
+        D_8007EBE0 = 1;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        return 1;
+    case EVTCMD_ENTERING_BATTLE:
+        if (g_FieldState->movieCommandState == MOVCMD_DONE) {
+            PC_INC(4);
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            return 0;
+        }
+        break;
+    }
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_akao_sound.c
@@ -4622,9 +4646,30 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmvie);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMovie);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMvief);
+s32 OpcodeFuncMvief(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mvief", 2);
+    }
+    if (D_800716CC != 0) {
+        FieldEventWriteMemoryS16(2, 2, D_801144D4);
+        D_801144D4++;
+        PC_INC(3);
+        return 0;
+    } else {
+        FieldEventWriteMemoryS16(2, 2, g_FieldState->currentMovieFrame);
+        PC_INC(3);
+        return 0;
+    }
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpjpo);
+s32 OpcodeFuncMpjpo(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpjpo", 0);
+    }
+    g_FieldState->mapJumpDisabled = GET_PARAM_U8(1);
+    PC_INC(2);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_scroll.c
@@ -4685,7 +4730,29 @@ s32 OpcodeFuncScr2dl(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlw);
+s32 OpcodeFuncScrlw(void) {
+    s32 mode;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrlw", 0);
+    }
+    if (g_FieldState->cameraScrollState == SCRLST_DONE) {
+        mode = g_FieldState->cameraScrollMode;
+        if (mode != SCRL_OFF) {
+            if (mode < SCRL_TO_COORDS_INSTANT) {
+                g_FieldState->cameraScrollMode = SCRL_TO_ENTITY_INSTANT;
+            } else if (mode < 7) {
+                if (mode >= SCRL_TO_COORDS_LINEAR) {
+                    g_FieldState->cameraScrollMode = SCRL_TO_COORDS_INSTANT;
+                }
+            }
+        }
+        g_FieldState->cameraScrollState = SCRLST_INIT;
+        PC_INC(1);
+        return 0;
+    }
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_palette.c
@@ -5274,7 +5341,23 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSpcal);
 // Begin of field_opcode_layer.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgscr);
+s32 OpcodeFuncBgscr(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgscr", 8);
+    }
+    switch (GET_PARAM_U8(2)) {
+    case 2:
+        g_FieldState->layer2_bgScrollXSpeed = FieldEventReadMemoryS16(1, 3);
+        g_FieldState->layer2_bgScrollYSpeed = FieldEventReadMemoryS16(2, 5);
+        break;
+    case 3:
+        g_FieldState->layer3_bgScrollXSpeed = FieldEventReadMemoryS16(1, 3);
+        g_FieldState->layer3_bgScrollYSpeed = FieldEventReadMemoryS16(2, 5);
+        break;
+    }
+    PC_INC(7);
+    return 0;
+}
 
 s32 OpcodeFuncBgdph(void) {
     if (g_DebugLevel & 3) {
@@ -5406,7 +5489,19 @@ s32 OpcodeFuncMenu2(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetpc);
+s32 OpcodeFuncGetpc(void) {
+    s32 slot;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("getpc", 3);
+    }
+    slot = GET_PARAM_U8(2);
+    if (slot < 3) {
+        FieldEventWriteMemoryU8(2, 3, D_8009CBDC[slot]);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpara);
 
