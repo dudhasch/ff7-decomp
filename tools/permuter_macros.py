@@ -314,6 +314,70 @@ that a later expression reads.
 """,
     ),
     Recipe(
+        "delay-slot-swap",
+        "two independent instructions are swapped between a branch's delay slot "
+        "and the following call's, and no statement reordering moves them",
+        "sites x perms x 2, then unbounded",
+        """
+/* The store that must land either in the loop tail or in the block: PERM_ONCE
+ * places it at exactly one site, so every alternative stays correct C. */
+    func_80027B84(pr);
+    PERM_ONCE(rectx, rect.x = 0;)
+}
+PERM_ONCE(rectx, rect.x = 0;)
+PERM_LINESWAP(
+rect.y = 0;
+rect.w = 0x100;
+rect.h = 0x100;
+)
+func_80026A34(0, 1, 0x1F, PERM_GENERAL(pr, &rect));
+
+/* Only once that finite space is exhausted, and scoped to the arm that
+ * actually diverges -- never the whole function. */
+PERM_RANDOMIZE(
+if ((D_80062D7E & 0x2000) && setting != 2) {
+    value = value + 1;
+    func_801D0040(1);
+    setting = value;
+    value = value << 6;
+    Savemap.config = (Savemap.config & 0xFF3F) | value;
+}
+)
+""",
+        """
+Written for func_801D080C in src/menu/cnfgmenu.c, whose last four rows are two
+of these swaps, but the shape is general -- delay-slot residues outlive every
+other kind on this target.
+
+The mechanism first, because it says what NOT to search. reorg fills a call's
+delay slot from whatever the scheduler left adjacent to the `jal`, and a call's
+argument setup is emitted at the call, so an argument load is always adjacent
+and always wins the slot. The branch before it then takes whatever is left.
+That is why permuting the statements around the call does nothing: it cannot
+change which insn is emitted last. Three rounds of directed search on this
+function -- about 1700 variants -- moved neither pair, and seven spellings of a
+loop increment all scored the same. Do not spend a run re-enumerating statement
+order.
+
+What can still move it is anything that changes RTL emission order at that
+point *without* changing the instruction count, which is what the randomizer's
+temp-introduction and expression-splitting passes do and what hand-written
+alternatives generally do not. Hence the shape above: a small finite space for
+the structural choices, then PERM_RANDOMIZE scoped to the one arm.
+
+Two cautions specific to a function this close to matching. Scope the
+randomization: with 1201 of 1205 instructions already byte-identical, an
+unscoped run spends essentially all of its candidates rewriting code that
+already matches, and can also destroy load-bearing constructs elsewhere in the
+function (in this one, `value` doubling as a byte pointer, the `s8*`/`short*`
+loop invariants, and the named 0x100). And re-measure the floor before trusting
+`--stop-on-zero`: this function has unalignable Savemap interiors and two
+compiler-generated jump tables, so its aligned score never reaches 0. Take the
+floor from the `--debug` two-column diff and watch for that number, not for
+zero.
+""",
+    ),
+    Recipe(
         "region-random",
         "the finite space is exhausted and the residue is a couple of rows you "
         "have no hypothesis for",

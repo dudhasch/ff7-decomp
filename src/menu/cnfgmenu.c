@@ -271,14 +271,40 @@ void func_801D069C(void) {
 
 // exported, see 8004941C
 //
-// SCRATCH SETUP (docs/PERMUTER_MACROS.md, plus tools/permuter_externise.py):
+// PERMUTER PLAN. Recipe `delay-slot-swap` in tools/permuter_macros.py was
+// written for this function; print it with
+//   .venv/bin/python3 tools/permuter_macros.py recipe delay-slot-swap
+//
+// Scratch setup (docs/PERMUTER_MACROS.md, plus tools/permuter_externise.py):
 //   import.py -> permuter_strip_asm.py -> permuter_macros.py align --strings
 //   -> permuter_externise.py <scratch>/base.c
-// Aligned that way the base scores 805 against a noise floor of 280 -- 48 rows
-// of Savemap interiors and compiler-generated jump tables that have no name to
-// align to, plus 8 for D_801D24BC. So --stop-on-zero cannot fire here; watch
-// for 280 instead. Folding D_801D24BC into an aggregate with D_801D24B8 would
-// clear its 8 rows but is not codegen-neutral -- see permuter_externise.py.
+//
+// Two things about running it here, both of which differ from a normal run:
+//
+//   * Re-measure the floor first. An older revision of this comment quoted a
+//     base of 805 against a floor of 280, but that was measured when the
+//     function was hundreds of rows out; at four rows the base sits just above
+//     the floor. The floor itself is nonzero and permanent -- Savemap struct
+//     interiors and two compiler-generated jump tables have no name for `align`
+//     to match -- so --stop-on-zero can never fire. Take the floor from the
+//     `--debug` two-column diff and watch for that number.
+//
+//   * Scope the randomization to the two arms that diverge, never the whole
+//     function. 1201 of 1205 instructions already match, so an unscoped run
+//     spends its candidates rewriting correct code, and can quietly destroy the
+//     load-bearing constructs listed below -- `value` doubling as a byte
+//     pointer, the s8*/short* loop invariants, the named 0x100. Exhaust the
+//     finite space first: PERM_ONCE over the two legal sites for `rect.x = 0`,
+//     PERM_LINESWAP over the remaining three stores and PERM_GENERAL over the
+//     call's rect argument is 24 candidates, seconds of work.
+//
+// What not to search: statement order around either call. reorg fills a call's
+// delay slot from whatever the scheduler left adjacent to the jal, and the
+// argument setup is emitted at the call, so an argument load is always adjacent
+// and always wins. About 1700 directed variants across three rounds moved
+// neither pair. Only something that changes RTL emission order without changing
+// the instruction count can help, which is what the randomizer's
+// temp-introduction passes do and hand-written alternatives do not.
 //
 // 4 rows of 1205 instructions still differ, and the floor is 0 -- a match is
 // reachable. 1201 instructions are byte-identical, as are .data/.rodata/.bss
