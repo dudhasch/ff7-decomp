@@ -82,6 +82,7 @@ extern s16 D_800E074E[];
 extern u8 D_800E0750[];
 extern u8 D_800E0751[];
 extern u8 D_800E0752[];
+extern s16 D_800E0754[];
 extern s16 D_800E0756[];
 extern char D_800E0758[];
 extern u8 D_800E08A8[];
@@ -121,6 +122,7 @@ extern u8 g_WindowBuffer[4][16];
 extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
+extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
 extern s32 D_8009A010;
@@ -136,6 +138,15 @@ extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
 extern u8 D_8009AC26;
+extern u8 D_80081DC4;
+extern s16 D_80114464;
+extern s16 D_80114468;
+extern u8 D_80114490;
+// Two POLY_FT4 at 0x800E48F4, filling the gap between g_EntityForSplitJoin
+// (0x800E48F0) and g_WindowString (0x800E4944) exactly. Confirmed by the
+// 0x28 stride, len 9 / code 0x2C at +3 / +7, clut at +0x0E and tpage at +0x16.
+extern POLY_FT4 D_800E48F4[2];
+s32 GetGraphType(void);
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;
 extern s16 D_8009A162;
@@ -188,6 +199,8 @@ void DebugUpdateActor(s32 arg0, u8 actorId);
 void DebugPrintOpcode(char* arg0, s32 arg1);
 u8 FieldEventReadMemoryU8(s16 arg0, s16 arg1);
 void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value);
+s32 FieldDialogAskUpdateStates(
+    u8 windowId, u8 firstRow, u8 lastRow, u8 cancelRow, s16* answer);
 s16 FieldEventReadMemoryS16(s16 arg0, s16 arg1);
 void FieldEventWriteMemoryS16(s16 arg0, s16 arg1, s16 value);
 u32 IfCheck(void);
@@ -204,7 +217,7 @@ static void DebugPrintToFieldWindow(const char* str);
 static void FieldEventDebugError(const char* errmsg);
 void FieldWindowReset(s16 window);
 void FieldWindowResetTextAll(void);
-void AddStrNextDebugRow(s32 val, const char* msg_out);
+s32 AddStrNextDebugRow(s16 page, const char* str);
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str);
 static void FieldDebugStringCopy(char* dst, const char* src);
 static void FieldDebugStringConcat(char* arg0, char* arg1);
@@ -757,7 +770,24 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", LoadLocalFieldModelAndInitAll);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsAndScale);
+extern u8* FieldModelCreatePktsForPart(u8* part, u8* pkts, s32 arg2, s32 arg3);
+extern void FieldModelScaleModel(FieldModelEntry* model, s16 scale, s32 arg2);
+
+/* Reserves one 32-byte matrix slot per bone at the head of the packet buffer,
+ * then emits the drawing packets for every part behind them. */
+u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
+    u8* parts;
+    u32 i;
+
+    model->partMatrices = pkts;
+    pkts += model->boneCount * 32;
+    parts = model->modelData + model->partsOffset;
+    for (i = 0; i < model->partCount; i++) {
+        pkts = FieldModelCreatePktsForPart(&parts[i * 32], pkts, 0, arg2);
+    }
+    FieldModelScaleModel(model, model->scale, 0);
+    return pkts;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsForPart);
 
@@ -799,7 +829,31 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelStructInit);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadGlobalModels);
+extern u_long* D_800DFCA0;
+u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);
+
+/* Loads every global (BCX) model in the header, then optionally kicks off the
+ * next streamed read. Scratchpad word 0 is clobbered by each load and restored
+ * before the next one; word 1 holds the sector/size pair for that read. */
+u8* FieldModelLoadGlobalModels(
+    FieldModelData* data, s32 arg1, u8* pkts, s32 readFile) {
+    u32* fileInfo;
+    s32 saved;
+    u32 i;
+
+    saved = ((s32*)0x1F800000)[0];
+    fileInfo = (u32*)((s32*)0x1F800000)[1];
+    for (i = 0; i < data->unk2; i++) {
+        ((s32*)0x1F800000)[0] = saved;
+        pkts = FieldModelLoadBcx(data, arg1, pkts, i);
+    }
+    if (readFile) {
+        DS_read(fileInfo[0], fileInfo[1], D_800DFCA0, NULL);
+        while (SystemCdromReadChain() != 0) {
+        }
+    }
+    return pkts;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadBcx);
 
@@ -900,7 +954,51 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiAnimatedPointLight);
 // Begin of field_event.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventInit);
+extern u8 D_800716D4;
+void FieldWindowResetAll(void);
+void FieldInitDefaultValues(void);
+void FieldEventRunInit(void);
+
+/* Installs the field's state, model and script pointers, checks the script
+ * header's version bytes, then brings the event system up. */
+void FieldEventInit(
+    FieldState* state, FieldEntity* models, FieldScriptHeader* scripts) {
+    s32 flags;
+
+    /* The high half of FieldState's 0x68 word. The low half is the
+     * controller-1 key bits (see OpcodeFuncKeyEx, which matches against
+     * activeKeys as a u32), so this cannot be a named field without splitting
+     * that member. Widening to s32 is what makes the load lh rather than lhu:
+     * held in an s16 the value is only ever masked, and gcc narrows it. */
+    flags = *(s16*)((u8*)state + 0x6A);
+    g_FieldState = state;
+    g_FieldModels = models;
+    g_FieldScripts = scripts;
+    D_80095DCC = 0;
+    D_8007EBE0 = 1;
+    D_8009FE8C = 0;
+    if (flags & 0x100) {
+        D_80095DCC = 1;
+        D_80099FFC = 4;
+    }
+    if (scripts->eventDataVersion < 2) {
+        SystemError('K', 10);
+    }
+    if (scripts->eventDataVersion > 2 || scripts->eventVersion > 5) {
+        SystemError('K', 12);
+    }
+    if (scripts->eventVersion < 5) {
+        SystemError('K', 11);
+    }
+    FieldWindowResetAll();
+    FieldInitDefaultValues();
+    FieldEventRunInit();
+    if (D_800716D4 == 0) {
+        FieldEventClearAkaoStruct();
+        *D_8009A000 = 0xF2;
+        SystemAkaoExecute();
+    }
+}
 
 static void InitFieldDebugPages(void);
 void FieldEventUpdate(s32 arg0) {
@@ -1188,9 +1286,50 @@ u8 FieldEventRequestRun(s16 entityId, s16 priority, s16 scriptId) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", ResetFieldRenderState);
+void ResetFieldRenderState(void) {
+    s16 tpage;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", UpdateFieldExitArrows);
+    D_80114490 = 0;
+    D_80114464 = 0x7FFF;
+    D_80114468 = 0x7FFF;
+    setPolyFT4(&D_800E48F4[0]);
+    setPolyFT4(&D_800E48F4[1]);
+    setSemiTrans(&D_800E48F4[0], 0);
+    setSemiTrans(&D_800E48F4[1], 0);
+    setShadeTex(&D_800E48F4[0], 1);
+    setShadeTex(&D_800E48F4[1], 1);
+    if (GetGraphType() == 1 || GetGraphType() == 2) {
+        tpage = 0x2F;
+    } else {
+        tpage = 0x1F;
+    }
+    D_800E48F4[1].tpage = tpage;
+    D_800E48F4[0].tpage = tpage;
+    D_800E48F4[1].clut = 0x7850;
+    D_800E48F4[0].clut = 0x7850;
+    D_800E48F4[0].r0 = 0;
+    D_800E48F4[1].r0 = 0;
+    D_800E48F4[0].g0 = 0;
+    D_800E48F4[1].g0 = 0;
+    D_800E48F4[0].b0 = 0;
+    D_800E48F4[1].b0 = 0;
+}
+
+/* Unprototyped on purpose: the original passes nothing, but arg0 has to stay
+ * live across the call for the cached &D_8009D5A6 to land in $a1. */
+void DrawFieldExitArrow();
+
+/* Select toggles the exit arrows on and off (bit 0); bit 1 is a debug override
+ * that shows them regardless of the toggle and of the movement lock. */
+void UpdateFieldExitArrows(s32 arg0) {
+    if (g_FieldState->newActiveKeys2 & (1 << 8)) {
+        D_8009D5A6[0] ^= 1;
+    }
+    if (((D_8009D5A6[0] == 1) && (g_FieldState->characterLock == 0)) ||
+        (D_8009D5A6[0] & 2)) {
+        DrawFieldExitArrow(arg0);
+    }
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
 
@@ -3676,19 +3815,80 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDir);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSlidr);
+/* SLIDR: set this entity's collision radius. The script value is in map units,
+ * so it is scaled by the field's own scale and divided back down by 512. */
+s32 OpcodeFuncSlidr(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("slidR", 2);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].SolidRange =
+            (FieldEventReadMemoryU8(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(3);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSldr2);
+/* SLDR2: SLIDR with a 16-bit radius. */
+s32 OpcodeFuncSldr2(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("sldR2", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].SolidRange =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTalkr);
+/* TALKR: set this entity's talk radius, scaled the same way as SLIDR. */
+s32 OpcodeFuncTalkr(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("talkR", 2);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TalkRange =
+            (FieldEventReadMemoryU8(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(3);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTlkr2);
+/* TLKR2: TALKR with a 16-bit radius. */
+s32 OpcodeFuncTlkr2(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("tlkR2", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TalkRange =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_model_state.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMsped);
+/* MSPED: set this entity's movement speed, scaled like the radius opcodes. */
+s32 OpcodeFuncMsped(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("msped", 3);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveSpeed =
+            (FieldEventReadMemoryS16(2, 2) * g_FieldState->currentFieldScale) /
+            512;
+    }
+    PC_INC(4);
+    return 0;
+}
 
 s32 OpcodeFuncAsped(void) {
     u8 modelIdx;
@@ -3707,11 +3907,40 @@ s32 OpcodeFuncAsped(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGtdir);
+/* GTDIR: write another entity's facing direction back into a memory bank. */
+s32 OpcodeFuncGtdir(void) {
+    u8 entityId;
+
+    entityId = GET_PARAM_U8(2);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("gtdir", 3);
+        }
+        FieldEventWriteMemoryU8(
+            2, 3, g_FieldModels[g_EntityToModel[entityId]].Dir);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPgtdr);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetai);
+/* GETAI: write another entity's walkmesh triangle id back into a memory bank.
+ */
+s32 OpcodeFuncGetai(void) {
+    u8 entityId;
+
+    entityId = GET_PARAM_U8(2);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("getai", 3);
+        }
+        FieldEventWriteMemoryS16(
+            2, 3, g_FieldModels[g_EntityToModel[entityId]].PosI);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetaxy);
 
@@ -3777,7 +4006,33 @@ s32 OpcodeFuncMpnam(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsk);
+/*
+ * Field-script opcode ASK: run a menu prompt and store the chosen row.
+ *
+ * Blocks (returning 1 and holding the player) until FieldDialogAskUpdateStates
+ * reports the prompt is finished; the answer is written back to the script
+ * memory bank either way.
+ */
+s32 OpcodeFuncAsk(void) {
+    s16 answer;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ask", 6);
+    }
+    answer = FieldEventReadMemoryU8(2, 6);
+    if (FieldDialogAskUpdateStates(
+            GET_PARAM_U8(2), GET_PARAM_U8(3), GET_PARAM_U8(4), GET_PARAM_U8(5),
+            &answer) != 0) {
+        FieldEventWriteMemoryU8(2, 6, answer);
+        g_FieldState->characterLock = D_80081DC4;
+        PC_INC(7);
+        return 0;
+    } else {
+        FieldEventWriteMemoryU8(2, 6, answer);
+        g_FieldState->characterLock = 1;
+        return 1;
+    }
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_window.c
@@ -5457,7 +5712,27 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
 // Begin of field_opcode_intersect.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIdlck);
+/* IDLCK: set or clear the "player may not cross this walkmesh edge" bit for
+ * one triangle. blockedAccesses is a bitfield, eight triangles per byte. */
+s32 OpcodeFuncIdlck(void) {
+    s16 triId;
+    s32 byteIdx;
+    s32 bitIdx;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("idlck", 3);
+    }
+    GET_PARAM_S16(triId, 1);
+    byteIdx = triId / 8;
+    bitIdx = triId - byteIdx * 8;
+    if (GET_PARAM_U8(3)) {
+        g_FieldState->blockedAccesses[byteIdx] |= 1 << bitIdx;
+    } else {
+        g_FieldState->blockedAccesses[byteIdx] &= ~(1 << bitIdx);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_window_color.c
@@ -5508,7 +5783,32 @@ s32 OpcodeFuncLstmp(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncShake);
+/* SHAKE: arm the randomized camera shake on either axis. Bit 0 of parameter 3
+ * enables the X shake, bit 1 the Y shake; a clear bit disables that axis. */
+s32 OpcodeFuncShake(void) {
+    s32 axes;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("shake", 7);
+    }
+    axes = GET_PARAM_U8(3);
+    if (axes & 1) {
+        g_FieldState->shakeX.enabled = 1;
+        g_FieldState->shakeX.amplitude = FieldEventReadMemoryU8(1, 4);
+        g_FieldState->shakeX.numStepsPerSegment = FieldEventReadMemoryU8(2, 5);
+    } else {
+        g_FieldState->shakeX.enabled = 0;
+    }
+    if (axes & 2) {
+        g_FieldState->shakeY.enabled = 1;
+        g_FieldState->shakeY.amplitude = FieldEventReadMemoryU8(3, 6);
+        g_FieldState->shakeY.numStepsPerSegment = FieldEventReadMemoryU8(4, 7);
+    } else {
+        g_FieldState->shakeY.enabled = 0;
+    }
+    PC_INC(8);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_items.c
@@ -5740,7 +6040,22 @@ s32 OpcodeFuncGetpc(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpara);
+/* MPARA: bind one of a window's replaceable text parameters to a memory bank
+ * slot, so the window redraws with the current value of that variable. */
+s32 OpcodeFuncMpara(void) {
+    s32 window;
+    s32 param;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpara", 4);
+    }
+    window = GET_PARAM_U8(2);
+    param = FieldEventReadMemoryU8(1, 3);
+    g_WindowReplaceBank[window][param] = GET_PARAM_U8(1) & 0xF;
+    g_WindowReplaceBankAddr[window][param] = GET_PARAM_U8(4);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpra2);
 
@@ -5863,7 +6178,38 @@ void SystemResoreParty(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMhmmx);
+/* MHMMX: debug helper that walks the three fixed party line-ups (characters
+ * 0-2, 3-5, 6-8) through SystemResoreParty, then puts the real party back. */
+s32 OpcodeFuncMhmmx(void) {
+    u8 saved[3];
+    u8* slot;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mhmmx", 0);
+    }
+    for (i = 0; i < 3; i++) {
+        saved[i] = D_8009CBDC[i];
+    }
+    for (i = 2, slot = &D_8009CBDC[2]; i >= 0; i--) {
+        *slot-- = i;
+    }
+    SystemResoreParty();
+    for (i = 2; i >= 0; i--) {
+        D_8009CBDC[i] = i + 3;
+    }
+    SystemResoreParty();
+    for (i = 2; i >= 0; i--) {
+        D_8009CBDC[i] = i + 6;
+    }
+    SystemResoreParty();
+    for (i = 0; i < 3; i++) {
+        D_8009CBDC[i] = saved[i];
+    }
+    SystemResoreParty();
+    PC_INC(1);
+    return 0;
+}
 
 s32 OpcodeFuncHmpmx(void) {
     s32 i;
@@ -7490,7 +7836,29 @@ static void InitFieldDebugPages(void) {
     FieldDebugPageSetHeadRow(5, 4);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPagesResetPosSize);
+/* Move the first hidden debug page to (x, y, w, h) and clear its text, falling
+ * back to page 0 when every page is currently being rendered.
+ *
+ * The element address has to go through `page` rather than being indexed
+ * inline: as a bare `D_800E08C0[i * 378]` gcc hoists the symbol's %hi/%lo out
+ * of the loop, where the original rematerialises it each iteration. */
+s16 FieldDebugPagesResetPosSize(s16 x, s16 y, s16 w, s16 h) {
+    s16 i;
+
+    for (i = 0; i < 6; i++) {
+        u8* page;
+
+        page = &D_800E08C0[i * 378];
+        if (*page) {
+            FieldDebugPageSetPosSize(i, x, y, w, h);
+            FieldDebugPageResetStrings(i);
+            return i;
+        }
+    }
+    FieldDebugPageSetPosSize(0, x, y, w, h);
+    FieldDebugPageResetStrings(0);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageInit);
 
