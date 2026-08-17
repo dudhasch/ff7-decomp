@@ -113,6 +113,9 @@ extern u8 g_WindowBuffer[4][16];
 extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
+extern u8 D_8009D5A7;
+extern s32 D_8009A108;
+extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;
@@ -120,6 +123,14 @@ extern s16 D_8009A162;
 extern u8 D_8009A15C;
 
 void SystemRefreshParty(void);
+u16 func_80025310(u16 itemId);
+s32 OpcodeFuncWsize(void);
+s32 FieldWindowSetStateToClose(s16 window);
+s32 FieldDialogMessageUpdateStates(u8 window, u8 message);
+void func_80025288(u16 itemId);
+void func_80025380(u16 itemId);
+s32 func_8002542C(u32 materia);
+u8 func_80025650(u32 materia, u8 slot);
 void SystemMenuAddHpByPartyId(s32 partyId, s32 amount);
 void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
 void FieldEventSetDirByActorId(u8 actorId);
@@ -2821,9 +2832,25 @@ s32 OpcodeFuncMjump(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmjmp);
+s32 OpcodeFuncPmjmp(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pmjmp", 8);
+    }
+    GET_PARAM_S16(g_FieldPreloadMapId, 1);
+    PC_INC(3);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmjmp2);
+s32 OpcodeFuncPmjmp2(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pmjmp", 8);
+    }
+    if (g_isFieldLoading != 2) {
+        return 1;
+    }
+    PC_INC(1);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMgame);
 
@@ -3426,7 +3453,22 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAsk);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWclsEx);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsizw);
+s32 OpcodeFuncWsizw(void) {
+    s16 window;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wsizw", 8);
+    }
+    window = GET_PARAM_U8(1);
+    if (D_8008326C[window] == 0xFF) {
+        return OpcodeFuncWsize();
+    }
+    if (D_8008326C[window] == g_CurrentEntity) {
+        FieldWindowSetStateToClose(window);
+        FieldDialogMessageUpdateStates(window, 0);
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsize);
 
@@ -4353,15 +4395,58 @@ s32 OpcodeFuncRdmsd(void) {
 // Begin of field_opcode_background.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgon);
+s32 OpcodeFuncBgon(void) {
+    u8 layer;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgoff);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgon", 3);
+    }
+    layer = FieldEventReadMemoryU8(1, 2);
+    g_FieldState->backgroundLayerVisibility[layer] |=
+        1 << FieldEventReadMemoryU8(2, 3);
+    PC_INC(4);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgclr);
+s32 OpcodeFuncBgoff(void) {
+    u8 layer;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgrol);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgoff", 3);
+    }
+    layer = FieldEventReadMemoryU8(1, 2);
+    g_FieldState->backgroundLayerVisibility[layer] &=
+        ~(1 << FieldEventReadMemoryU8(2, 3));
+    PC_INC(4);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgrol2);
+s32 OpcodeFuncBgclr(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgclr", 3);
+    }
+    g_FieldState->backgroundLayerVisibility[FieldEventReadMemoryU8(2, 2)] = 0;
+    PC_INC(3);
+    return 0;
+}
+
+s32 OpcodeFuncBgrol(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgrol", 3);
+    }
+    g_FieldState->backgroundLayerVisibility[FieldEventReadMemoryU8(2, 2)] <<= 1;
+    PC_INC(3);
+    return 0;
+}
+
+s32 OpcodeFuncBgrol2(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("bgrol", 3);
+    }
+    g_FieldState->backgroundLayerVisibility[FieldEventReadMemoryU8(2, 2)] >>= 1;
+    PC_INC(3);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_movie.c
@@ -4379,7 +4464,17 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpjpo);
 // Begin of field_opcode_scroll.c
 ////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScr2d);
+s32 OpcodeFuncScr2d(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scr2d", 5);
+    }
+    g_FieldState->cameraScrollMode = SCRL_TO_COORDS_INSTANT;
+    g_FieldState->cameraScrollTargetX = FieldEventReadMemoryS16(1, 2);
+    g_FieldState->cameraScrollTargetY = FieldEventReadMemoryS16(2, 4);
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(6);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlc);
 
@@ -4389,9 +4484,31 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrcc);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScr2dc);
+s32 OpcodeFuncScr2dc(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scr2dc", 8);
+    }
+    g_FieldState->cameraScrollMode = SCRL_TO_COORDS_SMOOTH;
+    g_FieldState->cameraScrollTargetX = FieldEventReadMemoryS16(1, 3);
+    g_FieldState->cameraScrollTargetY = FieldEventReadMemoryS16(2, 5);
+    g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(4, 7);
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(9);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScr2dl);
+s32 OpcodeFuncScr2dl(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scr2dl", 8);
+    }
+    g_FieldState->cameraScrollMode = SCRL_TO_COORDS_LINEAR;
+    g_FieldState->cameraScrollTargetX = FieldEventReadMemoryS16(1, 3);
+    g_FieldState->cameraScrollTargetY = FieldEventReadMemoryS16(2, 5);
+    g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(4, 7);
+    g_FieldState->cameraScrollState = SCRLST_INIT;
+    PC_INC(9);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlw);
 
@@ -4890,11 +5007,59 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncShake);
 // Begin of field_opcode_items.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStitm);
+s32 OpcodeFuncStitm(void) {
+    s32 itemHi;
+    u16 itemId;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDlitm);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("stitm", 4);
+    }
+    itemHi = FieldEventReadMemoryU8(2, 4);
+    itemId = (itemHi & 0xFF) << 9;
+    itemId |= FieldEventReadMemoryS16(1, 2);
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("S item=", itemId, 4);
+    }
+    func_80025380(itemId);
+    PC_INC(5);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCkitm);
+s32 OpcodeFuncDlitm(void) {
+    s32 itemHi;
+    u16 itemId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("dlitm", 4);
+    }
+    itemHi = FieldEventReadMemoryU8(2, 4);
+    itemId = (itemHi & 0xFF) << 9;
+    itemId |= FieldEventReadMemoryS16(1, 2);
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("G item=", itemId, 4);
+    }
+    func_80025288(itemId);
+    PC_INC(5);
+    return 0;
+}
+
+s32 OpcodeFuncCkitm(void) {
+    u16 itemId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ckitm", 4);
+    }
+    itemId = func_80025310(FieldEventReadMemoryS16(1, 2));
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("C item=", itemId, 4);
+    }
+    if (itemId == 0xFFFF) {
+        itemId = 0;
+    }
+    FieldEventWriteMemoryU8(2, 4, itemId >> 9);
+    PC_INC(5);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_special.c
@@ -4914,11 +5079,41 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncBgdph);
 // Begin of field_opcode_materia.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSmtra);
+s32 OpcodeFuncSmtra(void) {
+    u32 materia;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("smtra", 6);
+    }
+    materia = FieldEventReadMemoryU8(1, 3);
+    materia |= FieldEventReadMemoryU8(2, 4) << 8;
+    materia |= FieldEventReadMemoryU8(3, 5) << 16;
+    materia |= FieldEventReadMemoryU8(4, 6) << 24;
+    if (func_8002542C(materia) == -1) {
+        D_8009D5A7 = 0;
+    } else {
+        D_8009D5A7 = 1;
+    }
+    PC_INC(7);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDmtra);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmtra);
+s32 OpcodeFuncCmtra(void) {
+    u32 materia;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cmtra", 8);
+    }
+    materia = FieldEventReadMemoryU8(1, 4);
+    materia |= FieldEventReadMemoryU8(2, 5) << 8;
+    materia |= FieldEventReadMemoryU8(3, 6) << 16;
+    materia |= FieldEventReadMemoryU8(4, 7) << 24;
+    FieldEventWriteMemoryU8(6, 9, func_80025650(materia, GET_PARAM_U8(8)));
+    PC_INC(10);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_menu.c
@@ -5222,7 +5417,20 @@ s32 OpcodeFuncChmph(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncChmst);
+s32 OpcodeFuncChmst(void) {
+    u8 state;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("chmst", 2);
+    }
+    state = D_8009A108 != 0;
+    if (D_80099FCC[0] != 0) {
+        state |= 2;
+    }
+    FieldEventWriteMemoryU8(2, 2, state);
+    PC_INC(3);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_window_timer.c
