@@ -83,6 +83,13 @@ extern unsigned char D_801E2CFC[][0x24];
 extern unsigned char D_801E3260[][0x30];
 extern unsigned char D_801E33B0[][0x30];
 
+// The live party's HP/MP, one record per member, stride 0x440 bytes.
+extern u16 D_8009D85C[];
+extern u16 D_8009D85E[];
+extern u16 D_8009D860[];
+extern u16 D_8009D862[];
+extern u32 D_8009D264;
+
 void func_801D19C4(void);
 void func_801D1BA4(void);
 SaveHeader* func_801D1D1C(s32 arg0);

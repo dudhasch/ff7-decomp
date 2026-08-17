@@ -630,7 +630,46 @@ void func_801D21F0(u8* arg0, u8* arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D224C);
+// Snapshot the live party into the save header, so the file-select screen can
+// show it without loading the file. The leader is the first of the three party
+// slots that is filled; its HP/MP come from the live battle records, which are
+// four parallel arrays with a 0x440-byte stride.
+void func_801D224C(void) {
+    s16 charId;
+    s32 i;
+    s32 statsOfs;
+
+    for (i = 0; i < 3; i++) {
+        (&Savemap.header.leader_portrait)[i] = D_8009CBDC[i];
+    }
+    func_801D21E0(0x10);
+    i = 0;
+    do {
+        charId = D_8009CBDC[i];
+        if (charId != 0xFF) {
+            // One offset shared by all four reads: computing it per access
+            // gives gcc four induction variables and it caches the four base
+            // addresses in registers instead of re-materialising them.
+            statsOfs = i * 0x440;
+            func_801D21F0(
+                Savemap.header.leader_name, Savemap.party[charId].name);
+            Savemap.header.leader_level = Savemap.party[charId].level;
+            Savemap.header.leader_hp = *(u16*)((u8*)D_8009D85C + statsOfs);
+            Savemap.header.leader_hp_max = *(u16*)((u8*)D_8009D85E + statsOfs);
+            Savemap.header.leader_mp = *(u16*)((u8*)D_8009D860 + statsOfs);
+            Savemap.header.leader_mp_max = *(u16*)((u8*)D_8009D862 + statsOfs);
+            break;
+        }
+        i++;
+    } while (i < 3);
+    for (i = 0; i < 12; i++) {
+        ((u8*)Savemap.header.menu_color)[i] = D_80049208[i];
+    }
+    Savemap.header.gil = D_8009D260;
+    Savemap.header.time = D_8009D264;
+    func_801D21E0(0x18);
+    func_801D21F0(Savemap.header.place_name, &Savemap.memory_bank_4[0x68]);
+}
 
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D2408);
 
