@@ -1,6 +1,22 @@
 build_system = "ninja"
 compiler_type = "gcc"
 
+# decomp-permuter's bundled prelude is N64-flavoured and opens with `.set gp=64`,
+# which mipsel-linux-gnu-as rejects on this project's 32-bit R3000A target.
+# The assembler itself cannot be corrected here -- import.py forbids combining
+# `assembler_command` with `build_system` -- so it is overridden by putting
+# tools/permuter-bin on PATH instead. See CLAUDE.md step 4.
+asm_prelude_file = "config/permuter_prelude.inc"
+
+# Likewise, the scorer's objdump defaults to a big-endian MIPS/N64 search list
+# (mips-linux-gnu-objdump, mips64-linux-gnu-objdump, mips64-elf-objdump), none
+# of which exist here. Unlike the assembler, this one has a supported override
+# that import.py copies into the generated scratch settings.toml.
+# Supplying this replaces the default argument list outright, so the scorer's
+# own flags have to be repeated: -drz, and -m with the R3000A arch in place of
+# the N64 default of mips:4300.
+objdump_command = "mipsel-linux-gnu-objdump -drz -m mips:3000"
+
 [preserve_macros]
 "g[DS]P.*" = "void"
 "gDma.*" = "void"

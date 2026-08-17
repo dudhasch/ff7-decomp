@@ -124,17 +124,81 @@ usage:
 
 ```shell
 git clone https://github.com/simonlindholm/decomp-permuter ../decomp-permuter
+.venv/bin/pip3 install pynacl toml            # its deps, on top of requirements.txt
 ninja build/us/src/battle/battle.c.o
-../decomp-permuter/import.py -o build/us/src/battle/battle.c.o func_800A85FC
-../decomp-permuter/permuter.py func_800A85FC -j"$(nproc)"
+export PATH="$PWD/tools/permuter-bin:$PATH"   # see "Toolchain overrides" below
+.venv/bin/python3 ../decomp-permuter/import.py src/battle/battle.c \
+    asm/us/battle/nonmatchings/battle/func_800A85FC.s
+.venv/bin/python3 ../decomp-permuter/permuter.py nonmatchings/func_800A85FC \
+    -j"$(($(nproc) - 2))"
 ```
 
-`import.py` creates a self-contained scratch under `permuter/func_800A85FC/`
-(target `.s`, current `.c`, and compile command); `permuter.py` then searches
-until it prints a `(0)` base-score / perfect match or you stop it. Copy the
-winning permutation back into the real `.c` file by hand — never commit
-anything from the `permuter/` scratch directory — then re-run step 3 to
-confirm `asm-differ` shows zero diff rows before moving to step 5.
+`import.py` takes `<c_file> <asm_file|func_name>` — there is no `-o` flag. The
+`func_name` form only works if the function still has a `GLOBAL_ASM` stub, which
+this repo does not use (it uses `INCLUDE_ASM`), so pass the target `.s` path
+explicitly. `permuter.py` takes the scratch **directory**, not a bare function
+name.
+
+Run both through `.venv/bin/python3`, as with `diff.py` in step 3. The
+permuter's own dependencies (`toml`, `pynacl`, `Levenshtein`) are installed into
+this project's venv, so letting the scripts' `#!/usr/bin/env python3` shebang
+pick the system interpreter fails with `ModuleNotFoundError: No module named
+'toml'`.
+
+**Always pass `-j`.** It is the only CPU knob the permuter has —
+`config/permuter_settings.toml` does not carry one — and it **defaults to 1**,
+so an untuned run searches on a single core and looks like the permuter is
+simply bad at finding a match. Reserving two cores (`nproc - 2`) keeps the
+machine usable during a search that can run for hours; use the full `nproc` on
+a dedicated box.
+
+Each worker is an independent compile-and-score loop, so heterogeneous cores
+are fine — on a hybrid CPU the E-core workers just contribute fewer candidates
+per minute than the P-core ones. Scale by core count, not by thread count: with
+SMT enabled, two workers sharing a physical core each run near half speed.
+Memory is not the limit (workers are well under 1 GB each), so the only reason
+to go below `nproc - 2` is wanting the machine responsive for other work.
+
+#### Toolchain overrides
+
+decomp-permuter defaults to an N64 toolchain in three places, none of which
+exist for this little-endian R3000A target. Two are fixed by settings, one is
+not:
+
+| Default | Override |
+| --- | --- |
+| `mips-linux-gnu-as -march=vr4300 -mabi=32` | `tools/permuter-bin/` on `PATH` |
+| prelude opening `.set gp=64` | `asm_prelude_file` in `permuter_settings.toml` |
+| `mips-linux-gnu-objdump -drz -m mips:4300` | `objdump_command` in the same file |
+
+The assembler is the awkward one. `import.py` only overrides `DEFAULT_AS_CMDLINE`
+by scraping an `asm-processor --assembler` flag out of the discovered build
+command, and this project drives the assembler through maspsx, so nothing is
+scraped. The `assembler_command` setting is not a way out either: `import.py`
+asserts it is never combined with `build_system`, and dropping
+`build_system = "ninja"` would force hand-writing `compiler_command` too —
+discarding the ninja-derived compile line that is the whole reason the permuter
+compiles exactly the way the real build does. So the assembler is overridden by
+`PATH` instead, via a `mips-linux-gnu-as` shim that strips the N64 flags and
+forwards to `mipsel-linux-gnu-as` with the `psx-as` flags from `build.ninja`.
+Forget the `export PATH` line and `import.py` dies with
+`FileNotFoundError: 'mips-linux-gnu-as'`.
+
+`import.py` creates a self-contained scratch holding `base.c`, `target.s`,
+`target.o`, `compile.sh` and a generated `settings.toml`. It is named after the
+target `.s`'s parent directory, so for this project's
+`asm/us/<ovl>/nonmatchings/...` layout it lands in **`nonmatchings/<func>/`** at
+the repo root, not `permuter/` — both are gitignored. `permuter.py` then
+searches until it prints a `(0)` base-score / perfect match or you stop it,
+writing each improvement to an `output-<score>-<n>/` beside the scratch. Copy the
+winning permutation back into the real `.c` file by hand — never commit anything
+from the scratch directory — then re-run step 3 to confirm `asm-differ` shows
+zero diff rows before moving to step 5.
+
+The function must already have a C body in the `.c` for this to be useful: the
+permuter mutates `base.c`, so if the function is still an `INCLUDE_ASM` stub
+`import.py` warns `Function <name> not found in base.c` and there is nothing to
+permute.
 
 ### 5. Verify for real
 

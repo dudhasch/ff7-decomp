@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Assembler shim for decomp-permuter.
+#
+# decomp-permuter hardcodes
+#     DEFAULT_AS_CMDLINE = mips-linux-gnu-as -march=vr4300 -mabi=32
+# (import.py) and only overrides it by scraping an `asm-processor --assembler`
+# flag out of the discovered build command. This project drives the assembler
+# through maspsx instead, so nothing is scraped and the N64 default survives --
+# import.py then dies with `FileNotFoundError: 'mips-linux-gnu-as'`, since FF7
+# is little-endian R3000A and only mipsel-linux-gnu-as is installed.
+#
+# The settings-file route (`assembler_command` in permuter_settings.toml) is not
+# usable here: import.py asserts that key is never combined with `build_system`,
+# and dropping `build_system = "ninja"` would mean hand-writing `compiler_command`
+# too -- throwing away the ninja-derived compile line that guarantees the
+# permuter compiles exactly the way the real build does. Overriding only the
+# assembler via PATH keeps that guarantee intact.
+#
+# Used by prepending this directory to PATH, see CLAUDE.md step 4:
+#     PATH="$PWD/tools/permuter-bin:$PATH" .venv/bin/python3 \
+#         ../decomp-permuter/import.py <c_file> <asm_file>
+#
+# This assembles only the *target* .s into the reference .o that the permuter
+# scores candidates against; it is not part of the matching build itself.
+
+set -euo pipefail
+
+# Drop the N64 flags decomp-permuter injects; keep everything else (the input
+# path and the `-o <output>` pair it appends).
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        -march=* | -mabi=*) continue ;;
+    esac
+    args+=("$arg")
+done
+
+# Mirrors the `psx-as` rule in build.ninja.
+exec mipsel-linux-gnu-as \
+    -Iinclude -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 \
+    "${args[@]}"
