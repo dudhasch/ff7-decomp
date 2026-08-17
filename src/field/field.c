@@ -3903,7 +3903,34 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstw);
 
+/* Block until this entity's turn finishes. Returning 1 without advancing the
+ * PC re-runs the opcode next frame; TurnType 3 means the turn just completed,
+ * so clear it and fall through.
+ *
+ * Instruction-for-instruction identical, but the original keeps the entity id
+ * loaded at the top of the function live in $a0 and lets the model == 0xFF path
+ * fall into the PC_INC tail without reloading it; gcc reloads on both paths. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnw);
+#else
+s32 OpcodeFuncTurnw(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("turnw", 0);
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 0) {
+            if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 3) {
+                return 1;
+            }
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        }
+    }
+    PC_INC(1);
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
 
@@ -4094,9 +4121,55 @@ s32 OpcodeFuncGetaxy(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAxyzi);
+s32 OpcodeFuncAxyzi(void) {
+    u8 entityId;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPxyzi);
+    entityId = GET_PARAM_U8(3);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("axyzi", 7);
+    }
+    if (g_EntityToModel[entityId] != 0xFF) {
+        FieldEventWriteMemoryS16(
+            1, 4, g_FieldModels[g_EntityToModel[entityId]].PosX >> 12);
+        FieldEventWriteMemoryS16(
+            2, 5, g_FieldModels[g_EntityToModel[entityId]].PosY >> 12);
+        FieldEventWriteMemoryS16(
+            3, 6, g_FieldModels[g_EntityToModel[entityId]].PosZ >> 12);
+        FieldEventWriteMemoryS16(
+            4, 7, g_FieldModels[g_EntityToModel[entityId]].PosI);
+    }
+    PC_INC(8);
+    return 0;
+}
+
+s32 OpcodeFuncPxyzi(void) {
+    u8 slot;
+    u8 partyId;
+    u8 actorId;
+
+    slot = GET_PARAM_U8(3);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pxyzi", 7);
+    }
+    if (slot < 3) {
+        partyId = D_8009D391[slot];
+        if (partyId < 9) {
+            actorId = D_8009AD30[partyId];
+            if (g_EntityToModel[actorId] != 0xFF) {
+                FieldEventWriteMemoryS16(
+                    1, 4, g_FieldModels[g_EntityToModel[actorId]].PosX >> 12);
+                FieldEventWriteMemoryS16(
+                    2, 5, g_FieldModels[g_EntityToModel[actorId]].PosY >> 12);
+                FieldEventWriteMemoryS16(
+                    3, 6, g_FieldModels[g_EntityToModel[actorId]].PosZ >> 12);
+                FieldEventWriteMemoryS16(
+                    4, 7, g_FieldModels[g_EntityToModel[actorId]].PosI);
+            }
+        }
+    }
+    PC_INC(8);
+    return 0;
+}
 
 s32 OpcodeFuncVisi(void) {
     u8 model;
@@ -4126,11 +4199,55 @@ s32 OpcodeFuncTlkon(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyzi);
+s32 OpcodeFuncXyzi(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("xyzi", 8);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosX =
+            FieldEventReadMemoryS16(1, 3) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosY =
+            FieldEventReadMemoryS16(2, 5) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosZ =
+            FieldEventReadMemoryS16(3, 7) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosI =
+            FieldEventReadMemoryS16(4, 9);
+    }
+    PC_INC(11);
+    return 1;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyz);
+s32 OpcodeFuncXyz(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("xyz", 8);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosX =
+            FieldEventReadMemoryS16(1, 3) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosY =
+            FieldEventReadMemoryS16(2, 5) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosZ =
+            FieldEventReadMemoryS16(3, 7) << 12;
+    }
+    PC_INC(9);
+    return 1;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncXyi);
+s32 OpcodeFuncXyi(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("xyi", 8);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosX =
+            FieldEventReadMemoryS16(1, 3) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosY =
+            FieldEventReadMemoryS16(2, 5) << 12;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosI =
+            FieldEventReadMemoryS16(3, 7);
+    }
+    PC_INC(9);
+    return 1;
+}
 
 /////////////////////////////////////////////////
 // Start of field_opcode_message.c
