@@ -247,9 +247,20 @@ export PATH="$PWD/tools/permuter-bin:$PATH"   # see "Toolchain overrides" below
 .venv/bin/python3 ../decomp-permuter/import.py src/battle/battle.c \
     asm/us/battle/nonmatchings/battle/func_800A85FC.s
 .venv/bin/python3 tools/permuter_strip_asm.py nonmatchings/func_800A85FC
+.venv/bin/python3 tools/permuter_macros.py align nonmatchings/func_800A85FC --strings
 .venv/bin/python3 ../decomp-permuter/permuter.py nonmatchings/func_800A85FC \
     -j"$(($(nproc) - 2))"
 ```
+
+`permuter_macros.py align` is the second correction the scratch needs, for the
+same reason as the first: the score has to describe the code. The scorer diffs
+`objdump` text, so a relocation shows up as the symbol's *name* — and the
+generated `asm/` names globals after their address (`D_8009D820`) while the C
+uses the project name (`g_DebugLevel`). Every such reference is a permanent
+5-point penalty, so a byte-identical function can score 50 and `--stop-on-zero`
+never fires. The same tool holds this project's `PERM_*` macro catalogue, which
+turns the search from an unbounded random walk into a finite, exhaustive one;
+see [docs/PERMUTER_MACROS.md](docs/PERMUTER_MACROS.md).
 
 **The `permuter_strip_asm.py` step is not optional**, and skipping it is not
 obvious from the output — the search just never converges. `import.py`
@@ -456,6 +467,7 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
+| `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
 
