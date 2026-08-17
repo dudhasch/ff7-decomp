@@ -76,6 +76,7 @@ extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
 extern s8 D_800E0630;
 extern s16 D_800E0756[];
+extern char D_800E0758[];
 extern u8 D_800E08A8[];
 extern u8 D_800E08C0[];
 extern u8 D_800DFDFC[];
@@ -114,6 +115,9 @@ extern s16 g_WindowTotalRowsHeight[4];
 
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
+extern FieldState D_8009ABF4;
+extern u8 D_8009C540;
+extern u8 D_8009AD2C;
 extern s32 D_8009A108;
 extern s32 D_80099FCC[];
 extern u8 D_8009AC2D;
@@ -139,6 +143,16 @@ void FieldEntityTurnToEntity(u8 actorId);
 void func_80020058(s16 partyId);
 void func_8001786C(s16 partyId);
 void func_80017678(void);
+
+typedef struct {
+    /* 0x00 */ LinePos pos;
+    /* 0x0C */ s16 destPosX;
+    /* 0x0E */ s16 destPosY;
+    /* 0x10 */ u16 destWalkMeshId;
+    /* 0x12 */ s16 destFieldId;
+    /* 0x14 */ u8 destDirection;
+    /* 0x15 */ u8 pad[3];
+} FieldGateway; // size:0x18
 
 void AddBackgroundToRender(struct FieldRenderData* buf);
 s32 FieldEntitySqrDistToLine(FieldLine*, u_long*, u_long*);
@@ -168,7 +182,7 @@ static void FieldEventDebugError(const char* errmsg);
 void FieldWindowReset(s16 window);
 void FieldWindowResetTextAll(void);
 void AddStrNextDebugRow(s32 val, const char* msg_out);
-void SetStrToDebugRow(s32 page, s16 row, const char* str);
+s32 SetStrToDebugRow(s16 page, s16 row, const char* str);
 static void FieldDebugStringCopy(char* dst, const char* src);
 static void FieldDebugStringConcat(char* arg0, char* arg1);
 static void FieldDebugStringU8hex(s32 val, char* msg_out);
@@ -410,7 +424,14 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityAnimationUpdate);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMovementUpdate);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityGatewayMapLoad);
+void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
+    D_8009ABF4.eventCmd = EVTCMD_FIELD_MAP_CHANGE;
+    D_8009ABF4.eventCmdParam = gateway->destFieldId;
+    D_8009ABF4.pcPosX = gateway->destPosX;
+    D_8009ABF4.pcPosY = gateway->destPosY;
+    D_8009ABF4.pcWalkMeshId = gateway->destWalkMeshId;
+    *(u16*)&D_8009ABF4.pcDirection = gateway->destDirection;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
 
@@ -626,7 +647,13 @@ void FieldRainUpdate(void) {
 // Begin of field_battle.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldGetRandomU8FromList);
+u8 FieldGetRandomU8FromList(void) {
+    D_8009C540++;
+    if (D_8009C540 == 0) {
+        D_8009AD2C += 13;
+    }
+    return g_RandomTable[D_8009C540] - D_8009AD2C;
+}
 
 u8 FieldGetNextRandomU8(void) {
     D_80071C20++;
@@ -639,7 +666,20 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBattleCheck);
 // Begin of field_arrow.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsInit);
+void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
+    s16 i;
+
+    for (i = 0; i < 24; i++, sprt++) {
+        SetSprt16(sprt);
+        SetShadeTex(sprt, 1);
+        SetSemiTrans(sprt, 0);
+        sprt->r0 = 0x80;
+        sprt->g0 = 0x80;
+        sprt->b0 = 0x80;
+        sprt->clut = GetClut(0x100, 0x1E9);
+    }
+    SetDrawMode(dm, 0, 1, GetTPage(0, 0, 0x3C0, 0x100), NULL);
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
 
@@ -6869,7 +6909,13 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddColorStrNextDebugRow);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", SetStrToDebugRow);
+s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
+    char* rows = D_800E0758 + page * 378;
+
+    FieldDebugStringCopy(&rows[row * 14], str);
+    D_8009D824 = 1;
+    return 1;
+}
 
 s32 SetDebugStrRowColor(s16 page, s16 row, u8 color) {
     s32 offset = page * 378;
