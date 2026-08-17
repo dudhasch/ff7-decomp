@@ -346,6 +346,30 @@ void func_801D069C(void) {
 //     that crosses a call -- and only pays off together with the `value`
 //     pointer above.
 //
+// WHAT THIS BLOCK IS. func_80026A34 is PSY-Q's SetDrawMode: its arguments are
+// (dfe, dtd, tpage, RECT *texture_window), which src/main/18B8.c makes plain by
+// calling it as func_80026A34(0, 1, (u16)GetTPage(0, 2, 0x3C0, 0x100), &rect).
+// The RECT is a texture window and 0,0,0x100,0x100 means "no windowing", so the
+// four stores plus the call are a *batch terminator*: after appending sprites
+// that used one texture page, the code appends a draw-mode primitive resetting
+// the page and clearing the window so later primitives are unaffected. The
+// idiom appears ten times in this repo; in 18B8.c it is the last statement of
+// each drawing helper. Case 2 here is the window-colour screen, whose loop
+// draws the three R/G/B sliders before this terminator runs.
+//
+// That matters because it is a fixed idiom, not bespoke code, and every other
+// func_80026A34 site in the repo writes the fields in natural x, y, w, h order.
+// The y, w, x, h below is therefore a search artefact rather than source truth.
+// Written naturally the block scores 6, and the emitted store order is then
+// exactly the target's -- the only difference is that the target puts the x
+// store ahead of the call's argument setup. Since the target's layout is three
+// stores after the arguments and one before, the x store is probably not part
+// of this block at all in the original: sinking `rect.x = 0;` to the end of the
+// loop and writing the block y, w, h reproduces the target's whole block,
+// argument for argument, and also scores 4. Both 4-row forms are equal; the
+// sunk one localises the remaining difference to a single instruction, and the
+// permuted one below is kept only because it is what was measured first.
+//
 // WHAT IS LEFT. Three rounds of parallel search -- roughly 1700 measured
 // variants -- have not moved either pair, and both now have a mechanism
 // argument for why source-level rearrangement cannot reach them. Read these
