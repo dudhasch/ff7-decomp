@@ -5331,9 +5331,37 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIdlck);
 // Begin of field_opcode_window_color.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGwcol);
+s32 OpcodeFuncGwcol(void) {
+    s16 pane;
+    s32 corner;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSwcol);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("gwcol", 6);
+    }
+    pane = FieldEventReadMemoryU8(1, 3);
+    corner = pane * 3;
+    FieldEventWriteMemoryU8(2, 4, D_80049208[corner]);
+    FieldEventWriteMemoryU8(3, 5, D_80049208[corner + 1]);
+    FieldEventWriteMemoryU8(4, 6, D_80049208[corner + 2]);
+    PC_INC(7);
+    return 0;
+}
+
+s32 OpcodeFuncSwcol(void) {
+    s16 pane;
+    s32 corner;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("swcol", 6);
+    }
+    pane = FieldEventReadMemoryU8(1, 3);
+    corner = pane * 3;
+    D_80049208[corner] = FieldEventReadMemoryU8(2, 4);
+    D_80049208[corner + 1] = FieldEventReadMemoryU8(3, 5);
+    D_80049208[corner + 2] = FieldEventReadMemoryU8(4, 6);
+    PC_INC(7);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_field_effect.c
