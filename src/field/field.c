@@ -133,11 +133,19 @@ extern s16 g_WindowBufferPos[4];
 extern u8 g_WindowBuffer[4][16];
 extern s16 g_WindowTotalRowsHeight[4];
 
-extern u16 D_80114488;
+/* volatile: the movie stream sets this from an interrupt callback, and it is
+ * what keeps the s16 conversion in FieldUpdateMovieStream a separate
+ * sign-extension instead of folding into a signed load. */
+extern volatile u16 D_80114488;
 extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
-extern u8 D_80071C1C; // set while a movie opcode is driving playback
+extern u8 D_80071C1C;  // set while a movie opcode is driving playback
+extern u32 D_80075E10; // top of the buffer the movie stream decodes into
+extern s16 D_801142C8;
+void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
+void func_800354CC(void);                    // STR playback start
+void func_80035658(void);                    // STR playback stop
 extern s32 D_8009A010;
 extern s32 D_8009A014;
 extern s16 D_801144D4;
@@ -684,7 +692,57 @@ void FieldCameraAssign(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldUpdateMovieStream);
+/* Drive the CD stream that feeds the MDEC. While a field map is still loading
+ * the stream is not touched at all; otherwise the chain reader's status decides
+ * whether to arm the ring buffer, start playback, or tear it down. */
+void FieldUpdateMovieStream(void) {
+    u32 status;
+
+    if (g_isFieldLoading == 1) {
+        if (SystemCdromReadChain() == 0) {
+            g_isFieldLoading = 2;
+        }
+        return;
+    }
+    if (D_8009ABF4.eventCmd == EVTCMD_UNK14) {
+        func_80035658();
+        D_80114488 = 0;
+        g_FieldMoviePlayed = 0;
+        D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        return;
+    }
+    status = SystemCdromReadChain();
+    switch (status) {
+    case 0:
+        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE &&
+            D_8009ABF4.movieCommandState == MOVCMD_IDLE) {
+            if (D_80075E10 <= 0x801AFFFF) {
+                func_80034FC8(D_80075E10, D_8009ABF4.eventCmdParam);
+            } else {
+                func_80034FC8(0x801B0000, D_8009ABF4.eventCmdParam);
+            }
+            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+            g_FieldMoviePlayed = 1;
+        }
+        if ((s16)D_80114488 == 1) {
+            D_801142C8 = 1;
+            D_80114488 = 0;
+            g_FieldMoviePlayed = 0;
+            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        }
+        break;
+    case 0xA:
+        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE) {
+            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        }
+        if (D_8009ABF4.eventCmd == EVTCMD_PLAY_MOVIE) {
+            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+            func_800354CC();
+            D_80114488 = 1;
+        }
+        break;
+    }
+}
 
 /////////////////////////////////////////////////
 // Begin of field_rain.c
@@ -4371,14 +4429,6 @@ s32 OpcodeFuncWsizw(void) {
     return 1;
 }
 
-/* Every instruction matches except which register holds the PC_INC pointer.
- * The original loads the incremented value into $v0 -- the return register --
- * so `move v0,zero` cannot fill the load delay slot and the original carries a
- * `nop`; gcc picks $v1 and fills the slot, coming out one instruction short.
- * Neither declaration order nor hoisting the window id shifts the choice. */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsize);
-#else
 s32 OpcodeFuncWsize(void) {
     s16 x;
     s16 y;
@@ -4394,9 +4444,14 @@ s32 OpcodeFuncWsize(void) {
     GET_PARAM_S16(h, 8);
     FieldDialogSetSize(GET_PARAM_U8(1), x, y, w, h);
     PC_INC(10);
-    return 0;
+    /* Not cosmetic: the statement boundary stops gcc sinking `move v0,zero`
+     * into the load delay slot of the PC_INC read, which is what forces the
+     * original's $v0 for the incremented value and its trailing `nop`.
+     * Most likely a macro in the original. Found by decomp-permuter. */
+    do {
+        return 0;
+    } while (0);
 }
-#endif
 
 s32 OpcodeFuncWrow(void) {
     if (g_DebugLevel & 3) {
@@ -6188,8 +6243,9 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
 /* Every instruction matches except one: the original leaves the delay slot of
  * the first FieldEventReadMemoryU8 call empty and stores fadeType ahead of it,
  * where gcc sinks that store into the slot and comes out one instruction short.
- * It fills the slot the same way for the later three calls, and neither a temp
- * for the parameter nor a reordered store changes the first one. */
+ * It fills the slot the same way for the later three calls. Neither a temp for
+ * the parameter nor the do/while barrier that fixes OpcodeFuncWsize helps --
+ * the barrier costs six more instructions by breaking the g_FieldState CSE. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncNfade);
 #else
