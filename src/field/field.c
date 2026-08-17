@@ -75,6 +75,18 @@ extern char D_800A0270[4];
 extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
 extern s8 D_800E0630;
+extern u16 D_8009AC0A; // camera height bias applied to the tracked entity
+extern volatile u8 D_8009AC12; // entity the background scroll tracks
+extern u32 D_80114454;         // last raw pad state read this frame
+extern u32 D_8009AC5C; // pad 1: state, previous, newly pressed, newly released
+extern u32 D_8009AC60;
+extern u32 D_8009AC64;
+extern u32 D_8009AC68;
+extern u32 D_8009AC6C; // pad 2: same four
+extern u32 D_8009AC70;
+extern u32 D_8009AC74;
+extern u32 D_8009AC78;
+extern s32 func_8001C808(void);
 extern s16 D_800E0748[];
 extern s16 D_800E074A[];
 extern s16 D_800E074C[];
@@ -400,7 +412,38 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMainLoop);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
 
+/* Latch both pads: keep the raw state, the previous state, and the edges
+ * (newly pressed / newly released) derived from the two. */
+/* Two instructions out: gcc schedules the second pad's `nor`/`and` before the
+ * D_8009AC74 store, where the original stores first and reuses $a0. */
+/* Two instructions out: gcc schedules the second pad's `nor`/`and` before the
+ * D_8009AC74 store, where the original stores first and reuses $a0. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldButtonsUpdate);
+#else
+void FieldButtonsUpdate(void) {
+    u32 pad1;
+    u32 pad2;
+    u32 old1;
+    u32 old2;
+
+    pad1 = func_8001C808();
+    old1 = D_8009AC5C;
+    D_80114454 = pad1;
+    D_8009AC5C = pad1;
+    D_8009AC60 = old1;
+    D_8009AC64 = (pad1 ^ old1) & pad1;
+    D_8009AC68 = (pad1 ^ old1) & ~pad1;
+
+    pad2 = func_8001C8D4();
+    old2 = D_8009AC6C;
+    D_80114454 = pad2;
+    D_8009AC6C = pad2;
+    D_8009AC70 = old2;
+    D_8009AC74 = (pad2 ^ old2) & pad2;
+    D_8009AC78 = (pad2 ^ old2) & ~pad2;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
 
@@ -477,7 +520,18 @@ void FieldBGClampPos(s16* pos) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGGetEntityScreenPos);
+/* Project the tracked entity's world position onto the screen, lifting it by
+ * the camera's height bias. */
+s32 FieldBGGetEntityScreenPos(long* screenPos) {
+    SVECTOR pos;
+    volatile u8* tracked;
+
+    tracked = &D_8009AC12;
+    pos.vx = g_FieldEntity[*tracked].PosX >> 12;
+    pos.vy = g_FieldEntity[*tracked].PosY >> 12;
+    pos.vz = (g_FieldEntity[*tracked].PosZ >> 12) + D_8009AC0A;
+    return FieldCalcWorldToScreenPos(&pos, screenPos);
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
 
@@ -560,7 +614,49 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityBgTriggerActivate);
 const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
 
+/* One entry of the map's background-trigger block. Even `type`s arm the
+ * trigger, odd ones disarm it.
+ *
+ * FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
+ * the C matches, but gcc precedes the switch's jump table with `.align 3` and
+ * the original has it 4-byte aligned at .rodata+0xC4, so the table (and all
+ * later .rodata) shifts by 4. Same maspsx limitation as IfCheck and friends. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ u8 entityId;
+    /* 0x0D */ u8 unk0D;
+    /* 0x0E */ u8 type;
+    /* 0x0F */ u8 unk0F;
+} FieldBgTrigger;
+
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityBgTriggerInit);
+#else
+
+void FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, s32 on);
+
+void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
+    s32 i;
+
+    for (i = 0; i < 12; i++) {
+        if (triggers->entityId != 0xFF) {
+            switch (triggers->type) {
+            case 0:
+            case 2:
+            case 4:
+                FieldEntityBgTriggerActivate(triggers, 1);
+                break;
+            case 1:
+            case 3:
+            case 5:
+                FieldEntityBgTriggerActivate(triggers, 0);
+                break;
+            }
+        }
+        triggers++;
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_camera.c
@@ -3813,7 +3909,23 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncDir);
+/* Snap this entity to a facing, cancelling any turn in progress. Returns 1 when
+ * the entity actually has a model, unlike most opcodes. */
+s32 OpcodeFuncDir(void) {
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("dir", 2);
+        }
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir =
+            FieldEventReadMemoryU8(2, 2);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        PC_INC(3);
+        return 1;
+    }
+    PC_INC(3);
+    return 0;
+}
 
 /* SLIDR: set this entity's collision radius. The script value is in map units,
  * so it is scaled by the field's own scale and divided back down by 512. */
@@ -3923,7 +4035,30 @@ s32 OpcodeFuncGtdir(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPgtdr);
+s32 OpcodeFuncPgtdr(void) {
+    u8 slot;
+    u8 partyId;
+    u8 actorId;
+
+    slot = GET_PARAM_U8(2);
+    if (slot < 3) {
+        partyId = D_8009D391[slot];
+        if (partyId != 0xFF) {
+            actorId = D_8009AD30[partyId];
+            if (actorId != 0xFF) {
+                if (g_EntityToModel[actorId] != 0xFF) {
+                    if (g_DebugLevel & 3) {
+                        DebugPrintOpcode("pgtdr", 3);
+                    }
+                    FieldEventWriteMemoryU8(
+                        2, 3, g_FieldModels[g_EntityToModel[actorId]].Dir);
+                }
+            }
+        }
+    }
+    PC_INC(4);
+    return 0;
+}
 
 /* GETAI: write another entity's walkmesh triangle id back into a memory bank.
  */
@@ -3942,7 +4077,22 @@ s32 OpcodeFuncGetai(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncGetaxy);
+s32 OpcodeFuncGetaxy(void) {
+    u8 entityId;
+
+    entityId = GET_PARAM_U8(2);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("getaxy", 4);
+        }
+        FieldEventWriteMemoryS16(
+            1, 3, g_FieldModels[g_EntityToModel[entityId]].PosX >> 12);
+        FieldEventWriteMemoryS16(
+            2, 4, g_FieldModels[g_EntityToModel[entityId]].PosY >> 12);
+    }
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAxyzi);
 
@@ -5238,7 +5388,29 @@ s32 OpcodeFuncStpal(void) {
     return 0;
 }
 
+/* Four instructions out: gcc folds the palette address to
+ * base + (pal*32 + x*2); the original groups it (base + x*2) + pal*32. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncStpls);
+#else
+s32 OpcodeFuncStpls(void) {
+    RECT rect;
+    s16 x;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("stpls", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = GET_PARAM_U8(1) + 0x1E0;
+    x = GET_PARAM_U8(3);
+    rect.x = x;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    StoreImage(&rect, (u_long*)&D_80095DE0[GET_PARAM_U8(2) * 32 + x * 2]);
+    PC_INC(5);
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncLdpal(void) {
     RECT rect;
@@ -5256,7 +5428,28 @@ s32 OpcodeFuncLdpal(void) {
     return 0;
 }
 
+/* Same address-grouping residue as OpcodeFuncStpls above. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLdpls);
+#else
+s32 OpcodeFuncLdpls(void) {
+    RECT rect;
+    s16 x;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ldpls", 4);
+    }
+    FieldEventRectClear((s16*)&rect);
+    rect.y = GET_PARAM_U8(2) + 0x1E0;
+    x = GET_PARAM_U8(3);
+    rect.x = x;
+    rect.w = GET_PARAM_U8(4) + 1;
+    rect.h = 1;
+    LoadImage(&rect, (u_long*)&D_80095DE0[GET_PARAM_U8(1) * 32 + x * 2]);
+    PC_INC(5);
+    return 0;
+}
+#endif
 
 static void FieldEventRectClear(s16* arg0) {
     arg0[0] = 0;
@@ -5676,7 +5869,37 @@ s32 OpcodeFuncSolid(void) {
     return 0;
 }
 
+/* Set the camera's view offset. A non-zero mode eases from the current offset
+ * to the target over N steps; mode 0 applies it immediately and clears the
+ * animation state. */
+/* Every instruction matches except the tail merge: gcc cross-jumps the whole
+ * shared PC_INC(7) tail, where the original keeps the
+ * &g_FieldScriptPC[g_CurrentEntity] computation duplicated in both arms. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncVwoft);
+#else
+s32 OpcodeFuncVwoft(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("vwoft", 6);
+    }
+    if (GET_PARAM_U8(6)) {
+        g_FieldState->viewOffsetStart = g_FieldState->viewOffset;
+        g_FieldState->viewOffsetTarget = FieldEventReadMemoryS16(1, 2);
+        g_FieldState->viewOffsetNumSteps = FieldEventReadMemoryS16(2, 4);
+        g_FieldState->viewOffsetMode = GET_PARAM_U8(6);
+        g_FieldState->viewOffsetCurrentStep = 0;
+    } else {
+        g_FieldState->viewOffsetNumSteps = 0;
+        g_FieldState->viewOffset = FieldEventReadMemoryS16(1, 2);
+        g_FieldState->viewOffsetCurrentStep = 0;
+        g_FieldState->viewOffsetMode = 0;
+        g_FieldState->viewOffsetStart = 0;
+        g_FieldState->viewOffsetTarget = 0;
+    }
+    PC_INC(7);
+    return 0;
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_party_manage.c
@@ -7860,7 +8083,23 @@ s16 FieldDebugPagesResetPosSize(s16 x, s16 y, s16 w, s16 h) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageInit);
+/* `offClear` is deliberately a second copy of `off`: with one variable feeding
+ * both the test and the store gcc coalesces the multiply into $v0 and needs an
+ * extra `move` to get it into the address register. */
+void FieldDebugPageInit(s16 page, s16 x, s16 y, s16 w, s16 h) {
+    s32 off;
+    s32 offClear;
+
+    FieldDebugPageSetPosSize(page, x, y, w, h);
+    off = page * 378;
+    offClear = off;
+    if (D_800E08C0[off] != 2) {
+        FieldDebugPageResetStrings(page);
+    } else {
+        D_800E08C0[offClear] = 0;
+        D_8009D824 = 1;
+    }
+}
 
 void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
     D_800E0748[page * 189] = x;
@@ -7870,9 +8109,28 @@ void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
     D_8009D824 = 1;
 }
 
+/* gcc hoists the array's %hi/%lo into a register because the same address is
+ * read and written; the original rematerialises it through $at each time. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
+#else
+void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
+    D_8009D824 = 1;
+    D_800E0748[page * 189] += x;
+    D_800E074A[page * 189] += y;
+}
+#endif
 
+/* Same $at rematerialisation residue as FieldDebugPageAddPos above. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageAddSize);
+#else
+void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
+    D_8009D824 = 1;
+    D_800E074C[page * 189] += w;
+    D_800E074E[page * 189] += h;
+}
+#endif
 
 bool FieldDebugPageIsRender(s16 arg0) { return D_800E08C0[arg0 * 378] == 0; }
 
