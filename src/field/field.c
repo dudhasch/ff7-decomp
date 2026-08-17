@@ -123,6 +123,8 @@ extern s16 g_WindowTotalRowsHeight[4];
 extern u16 D_80114488;
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
+extern s32 D_8009A010;
+extern s32 D_8009A014;
 extern s16 D_801144D4;
 extern u8 D_80095DE0[];
 extern s32 g_BattleCharIdToCharId[11];
@@ -144,6 +146,7 @@ void FieldDialogSetWindowStyleCbc(s16 window, u8 style, s16 preventClose);
 void FieldDialogSetWindowHeight(s16 window, s16 height);
 void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h);
 void FieldDebugPageResetStrings(s16 page);
+void FieldDialogMove(s16 window, s16 dx, s16 dy);
 u16 func_80025310(u16 itemId);
 s32 OpcodeFuncWsize(void);
 s32 FieldWindowSetStateToClose(s16 window);
@@ -2958,9 +2961,37 @@ void FieldEventClearAkaoStruct(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAkao);
+s32 OpcodeFuncAkao(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("akao", 3);
+    }
+    FieldEventClearAkaoStruct();
+    *D_8009A000 = GET_PARAM_U8(4);
+    *D_8009A004 = FieldEventReadMemoryU8(1, 5);
+    *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 6);
+    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 8);
+    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 10);
+    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 12);
+    SystemAkaoExecute();
+    PC_INC(14);
+    return 0;
+}
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAkao2);
+s32 OpcodeFuncAkao2(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("akao2", 3);
+    }
+    FieldEventClearAkaoStruct();
+    *D_8009A000 = GET_PARAM_U8(4);
+    *D_8009A004 = (s16)FieldEventReadMemoryS16(1, 5);
+    *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 7);
+    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 9);
+    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 11);
+    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 13);
+    SystemAkaoExecute();
+    PC_INC(15);
+    return 0;
+}
 
 s32 OpcodeFuncSe(void) {
     if (g_DebugLevel & 3) {
@@ -3640,7 +3671,19 @@ s32 OpcodeFuncWrow(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWmove);
+s32 OpcodeFuncWmove(void) {
+    s16 dx;
+    s16 dy;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wmove", 8);
+    }
+    GET_PARAM_S16(dx, 2);
+    GET_PARAM_S16(dy, 4);
+    FieldDialogMove(GET_PARAM_U8(1), dx, dy);
+    PC_INC(6);
+    return 0;
+}
 
 s32 OpcodeFuncWrest(void) {
     if (g_DebugLevel & 3) {
