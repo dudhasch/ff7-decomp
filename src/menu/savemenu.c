@@ -515,24 +515,55 @@ static s32 func_801D1BE0(u8* arg0, u8* arg1) {
     }
 }
 
+// Bitmask of which of the 15 FF7 save slots exist on the card in slot arg0.
+// firstfile is retried up to 100 times because the card takes a moment to come
+// up after an insert; a card that never answers reports no saves at all.
+//
+// 58 of the 62 instructions match; four rows of residue, all of them the
+// function's tail. The original ends in two un-merged copies of the return:
+//
+//     18e0  j     18ec           <- normal path, jumping over the copy below
+//     18e4  andi  v0,s3,0xffff   <- ...its return value, sunk into the slot
+//     18e8  andi  v0,s3,0xffff   <- the `end:` copy, reached by `j` from 1888
+//     18ec  lw    ra,0x50(sp)
+//
+// gcc 2.7.2 cross-jumps the two identical `andi; return` tails below into one,
+// so the candidate falls straight through with a single copy and leaves the
+// outer loop's delay slot as `nop` where the original fills it with the
+// `move s0,zero` stolen from the loop top. Everything else -- register
+// allocation, both loops, the retry counter, the string selection -- is exact.
+//
+// Tried and rejected: two explicit `return var_s3;` statements (merged the
+// same way), an explicit `goto end;` before the label (deleted, since `end:`
+// then has two references), returning through a second variable (coalesced
+// during CSE, before cross-jumping runs), and nesting the scan loop inside the
+// retry loop's `if` (31 rows -- rewrites the whole allocation). Moving the
+// `var_s3 = 0` down to `end:` does fill the delay slot correctly and gets the
+// residue to two rows, but gcc then constant-folds the failure path's return
+// to `move v0,zero` where the original keeps `move s3,zero` + the shared
+// `andi`. decomp-permuter reaches score 5 on this only via an uninitialised
+// read, which is not a source we can commit.
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1C2C);
 #else
+const char D_801D017C[] = "bu10:*";
+const char D_801D0184[] = "bu00:*";
+
 u16 func_801D1C2C(s32 arg0) {
-    DIRENTRY sp10;
+    struct DIRENTRY sp10;
     const char* memcard;
     s32 i;
-    DIRENTRY* entry;
+    struct DIRENTRY* entry;
     u16 var_s3;
 
     var_s3 = 0;
     i = 0;
     while (1) {
-        memcard = &D_801D0184;
+        memcard = D_801D0184;
         if (arg0) {
-            memcard = &D_801D017C;
+            memcard = D_801D017C;
         }
-        entry = firstfile2(memcard, &sp10);
+        entry = firstfile(memcard, &sp10);
         if (entry) {
             break;
         }
@@ -550,6 +581,7 @@ u16 func_801D1C2C(s32 arg0) {
         }
         entry = nextfile(entry);
     }
+    return var_s3;
 end:
     return var_s3;
 }

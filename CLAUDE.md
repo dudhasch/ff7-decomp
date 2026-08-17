@@ -143,12 +143,11 @@ a near-miss, in rough order of frequency:
   duplicates the division into both arms (`OpcodeFuncIdlck`).
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
-Two near-misses that currently have no known fix, both variants of gcc
-hoisting a global array's address out of a loop where the original
-re-materialises it through the assembler's `$at` macro each time. The C is
-otherwise byte-for-byte correct, so they stay `INCLUDE_ASM`:
-`FieldDebugPagesResetPosSize` (2 extra instructions) and
-`AddStrNextDebugRow`.
+One near-miss that currently has no known fix: gcc hoists a global array's
+address out of a loop where the original re-materialises it through the
+assembler's `$at` macro each time. The C is otherwise byte-for-byte correct, so
+`AddStrNextDebugRow` stays `INCLUDE_ASM`. Its former twin
+`FieldDebugPagesResetPosSize` has since been solved and is plain C.
 
 #### Four ways a clean-looking diff lies
 
@@ -220,20 +219,33 @@ Some functions cannot be decompiled alone, and the failure shows up as a red
 
 Pass `--all` to triage a whole file at once.
 
-#### Known blocker: a string immediately followed by a jump table
+#### Known blocker: a jump table that the original put on a 4-byte boundary
 
 gcc emits `.rdata` / `.align 3` before every jump table, so GNU `as` puts the
-table on the next 8-byte boundary. Where the original has a string constant
-immediately before the table it instead sits 4 bytes further on, with 4 zero
-bytes in between (`spimdisasm` renders them as a stray `.asciz ""`). An
-8-byte alignment cannot produce that offset, so the original toolchain must
-have used 4-byte alignment plus a real 4-byte item, and maspsx has no knob for
-it. Until that is resolved these stay `INCLUDE_ASM` however good the C is —
-in `src/field/field.c` that is `IfCheck`, `If2CheckSigned`, `If2CheckUnsigned`,
-`OpcodeFuncSetx`, `OpcodeFuncGetx`, `OpcodeFuncSrchx`, `OpcodeFuncFade`,
-`OpcodeFuncFadew`, `OpcodeFuncSpcal`, `FieldEventWriteMemoryU8` and
-`FieldEventRequestRun`. Functions whose jump table does *not* follow a string
-are unaffected and match normally.
+table on the next 8-byte boundary. Wherever the original has it at an offset
+that is 4 mod 8, the table lands 4 bytes further on and every later `.rodata`
+item shifts with it. An 8-byte alignment cannot produce that offset, so the
+original toolchain must have used 4-byte alignment plus a real 4-byte item, and
+maspsx has no knob for it (`preprocess_lines` skips `.align` outright). Until
+that is resolved these stay `INCLUDE_ASM` however good the C is.
+
+The symptom depends on what precedes the table, but the cause is the same:
+
+* **a string constant** — the 4 zero bytes in between show up in the `.s` as a
+  stray `.asciz ""`. In `src/field/field.c`: `IfCheck`, `If2CheckSigned`,
+  `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`, `OpcodeFuncSrchx`,
+  `OpcodeFuncFade`, `OpcodeFuncFadew`, `OpcodeFuncSpcal`,
+  `FieldEventWriteMemoryU8` and `FieldEventRequestRun`.
+* **another jump table** — a unit whose `.rodata` is nothing but jump tables
+  packed back to back still lands half of them at 4 mod 8.
+  `func_800E5FB4` in `src/battle/battle3.c` is the worked example: its C
+  reproduces all 17 instructions byte for byte, and the only diff row is
+  `jtbl_800A1068` at `.rodata+0x298` where the original has `+0x294`.
+
+So "no string in this file's `.rodata`" is **not** a clearance. Read the target
+offset off `tools/checkfn.py`, which reports it as `want: .rodata+0x294 / got:
+.rodata+0x298`; if it is 4 mod 8 the function is blocked. Functions whose jump
+table lands on an 8-byte boundary anyway are unaffected and match normally.
 
 ### 4. Last-mile: decomp-permuter
 

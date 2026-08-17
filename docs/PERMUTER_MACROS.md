@@ -237,8 +237,9 @@ and, more usefully, it is *over* after 16 candidates whether or not it won.
 
 ### Worked example: a function randomization did not solve
 
-`FieldModelCreatePktsAndScale` is still `INCLUDE_ASM` in `src/field/field.c`. An
-earlier randomization run on it improved 205 → 165 and stopped there. `--debug`
+`FieldModelCreatePktsAndScale` was `INCLUDE_ASM` in `src/field/field.c` when this
+search was run. An earlier randomization run on it improved 205 → 165 and
+stopped there. `--debug`
 on the aligned scratch shows 21 register differences and one deletion — no
 reorderings, no stack differences — so the C is structurally right and something
 about the loop is holding a value in the wrong register.
@@ -277,7 +278,7 @@ covers three dimensions exhaustively, and a fourth would cost 384.
 
 ### Worked example: a fix the randomizer cannot express
 
-`UpdateFieldExitArrows` (also still `INCLUDE_ASM`): after alignment, the entire
+`UpdateFieldExitArrows` (also `INCLUDE_ASM` at the time): after alignment, the entire
 residue is five rows where the cached `&D_8009D5A6` sits in **a1** in the target
 but **a0** in the candidate. The function's `arg0` is never used — it dies at
 entry, freeing a0, and gcc 2.6.3 hands the freed register to the next temp.

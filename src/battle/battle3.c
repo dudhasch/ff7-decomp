@@ -900,8 +900,13 @@ static s32 func_800E5F70(void) {
     return ret;
 }
 
+// Blocked on the toolchain, not on the C. Compiled, the body below reproduces
+// all 17 instructions byte for byte; the only diff row is where its jump table
+// lands. cc1 emits `.rdata` / `.align 3` ahead of every table, so GNU as puts
+// jtbl_800A1068 at .rodata+0x298, while the original has it at +0x294 —
+// battle3's .rodata is jump tables packed back to back, and this one starts at
+// 4 mod 8. See "Known blocker" in CLAUDE.md; nothing about the C can fix it.
 #ifndef NON_MATCHING
-// might require a file split to match due to mis-aligned rodata
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E5FB4);
 #else
 s32 func_800E5FB4(u32 arg0, s32 arg1) {
