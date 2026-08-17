@@ -82,6 +82,7 @@ extern s16 D_800E074E[];
 extern u8 D_800E0750[];
 extern u8 D_800E0751[];
 extern u8 D_800E0752[];
+extern s16 D_800E0754[];
 extern s16 D_800E0756[];
 extern char D_800E0758[];
 extern u8 D_800E08A8[];
@@ -215,7 +216,7 @@ static void DebugPrintToFieldWindow(const char* str);
 static void FieldEventDebugError(const char* errmsg);
 void FieldWindowReset(s16 window);
 void FieldWindowResetTextAll(void);
-void AddStrNextDebugRow(s32 val, const char* msg_out);
+s32 AddStrNextDebugRow(s16 page, const char* str);
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str);
 static void FieldDebugStringCopy(char* dst, const char* src);
 static void FieldDebugStringConcat(char* arg0, char* arg1);
@@ -768,7 +769,24 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", LoadLocalFieldModelAndInitAll);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsAndScale);
+extern u8* FieldModelCreatePktsForPart(u8* part, u8* pkts, s32 arg2, s32 arg3);
+extern void FieldModelScaleModel(FieldModelEntry* model, s16 scale, s32 arg2);
+
+/* Reserves one 32-byte matrix slot per bone at the head of the packet buffer,
+ * then emits the drawing packets for every part behind them. */
+u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
+    u8* parts;
+    u32 i;
+
+    model->partMatrices = pkts;
+    pkts += model->boneCount * 32;
+    parts = model->modelData + model->partsOffset;
+    for (i = 0; i < model->partCount; i++) {
+        pkts = FieldModelCreatePktsForPart(&parts[i * 32], pkts, 0, arg2);
+    }
+    FieldModelScaleModel(model, model->scale, 0);
+    return pkts;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsForPart);
 
@@ -5589,7 +5607,27 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
 // Begin of field_opcode_intersect.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIdlck);
+/* IDLCK: set or clear the "player may not cross this walkmesh edge" bit for
+ * one triangle. blockedAccesses is a bitfield, eight triangles per byte. */
+s32 OpcodeFuncIdlck(void) {
+    s16 triId;
+    s32 byteIdx;
+    s32 bitIdx;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("idlck", 3);
+    }
+    GET_PARAM_S16(triId, 1);
+    byteIdx = triId / 8;
+    bitIdx = triId - byteIdx * 8;
+    if (GET_PARAM_U8(3)) {
+        g_FieldState->blockedAccesses[byteIdx] |= 1 << bitIdx;
+    } else {
+        g_FieldState->blockedAccesses[byteIdx] &= ~(1 << bitIdx);
+    }
+    PC_INC(4);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_window_color.c
@@ -5640,7 +5678,32 @@ s32 OpcodeFuncLstmp(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncShake);
+/* SHAKE: arm the randomized camera shake on either axis. Bit 0 of parameter 3
+ * enables the X shake, bit 1 the Y shake; a clear bit disables that axis. */
+s32 OpcodeFuncShake(void) {
+    s32 axes;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("shake", 7);
+    }
+    axes = GET_PARAM_U8(3);
+    if (axes & 1) {
+        g_FieldState->shakeX.enabled = 1;
+        g_FieldState->shakeX.amplitude = FieldEventReadMemoryU8(1, 4);
+        g_FieldState->shakeX.numStepsPerSegment = FieldEventReadMemoryU8(2, 5);
+    } else {
+        g_FieldState->shakeX.enabled = 0;
+    }
+    if (axes & 2) {
+        g_FieldState->shakeY.enabled = 1;
+        g_FieldState->shakeY.amplitude = FieldEventReadMemoryU8(3, 6);
+        g_FieldState->shakeY.numStepsPerSegment = FieldEventReadMemoryU8(4, 7);
+    } else {
+        g_FieldState->shakeY.enabled = 0;
+    }
+    PC_INC(8);
+    return 0;
+}
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_items.c
@@ -5872,7 +5935,22 @@ s32 OpcodeFuncGetpc(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpara);
+/* MPARA: bind one of a window's replaceable text parameters to a memory bank
+ * slot, so the window redraws with the current value of that variable. */
+s32 OpcodeFuncMpara(void) {
+    s32 window;
+    s32 param;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mpara", 4);
+    }
+    window = GET_PARAM_U8(2);
+    param = FieldEventReadMemoryU8(1, 3);
+    g_WindowReplaceBank[window][param] = GET_PARAM_U8(1) & 0xF;
+    g_WindowReplaceBankAddr[window][param] = GET_PARAM_U8(4);
+    PC_INC(5);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMpra2);
 
@@ -5995,7 +6073,38 @@ void SystemResoreParty(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMhmmx);
+/* MHMMX: debug helper that walks the three fixed party line-ups (characters
+ * 0-2, 3-5, 6-8) through SystemResoreParty, then puts the real party back. */
+s32 OpcodeFuncMhmmx(void) {
+    u8 saved[3];
+    u8* slot;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mhmmx", 0);
+    }
+    for (i = 0; i < 3; i++) {
+        saved[i] = D_8009CBDC[i];
+    }
+    for (i = 2, slot = &D_8009CBDC[2]; i >= 0; i--) {
+        *slot-- = i;
+    }
+    SystemResoreParty();
+    for (i = 2; i >= 0; i--) {
+        D_8009CBDC[i] = i + 3;
+    }
+    SystemResoreParty();
+    for (i = 2; i >= 0; i--) {
+        D_8009CBDC[i] = i + 6;
+    }
+    SystemResoreParty();
+    for (i = 0; i < 3; i++) {
+        D_8009CBDC[i] = saved[i];
+    }
+    SystemResoreParty();
+    PC_INC(1);
+    return 0;
+}
 
 s32 OpcodeFuncHmpmx(void) {
     s32 i;
