@@ -2185,9 +2185,6 @@ u32 IfCheck(void) {
  *
  * Compares two s16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIf2);
-#else
 s32 OpcodeFuncIf2(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("if2", 7);
@@ -2205,16 +2202,12 @@ s32 OpcodeFuncIf2(void) {
     }
     return 0;
 }
-#endif
 
 /*
  * Field-script opcode LIF2: Long if, 2 bytes, signed
  *
  * Compares two s16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLif2);
-#else
 s32 OpcodeFuncLif2(void) {
     s16 param;
 
@@ -2235,7 +2228,6 @@ s32 OpcodeFuncLif2(void) {
     }
     return 0;
 }
-#endif
 
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", If2CheckSigned);
@@ -2297,36 +2289,29 @@ u32 If2CheckSigned(void) {
  *
  * Compares two u16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncIf2u);
-#else
 s32 OpcodeFuncIf2u(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("if2", 7);
     }
-    if (If2CheckUnsigned()) {
+    if (If2CheckUnsigned() != 0) {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("if2=false", 0, 0);
+            FieldDebugAddParseValueToPage2("if2=true", 0, 0);
         }
         PC_INC(8);
     } else {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("if2=true", 0, 0);
+            FieldDebugAddParseValueToPage2("if2=false", 0, 0);
         }
         PC_INC(GET_PARAM_U8(7) + 7);
     }
     return 0;
 }
-#endif
 
 /*
  * Field-script opcode LIF2U: Long if, 2 bytes, unsigned
  *
  * Compares two u16 using a given logical operator.
  */
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLif2u);
-#else
 s32 OpcodeFuncLif2u(void) {
     s16 param;
 
@@ -2335,19 +2320,18 @@ s32 OpcodeFuncLif2u(void) {
     }
     if (If2CheckUnsigned() != 0) {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("lif2=false", 0, 0);
+            FieldDebugAddParseValueToPage2("lif2=true", 0, 0);
         }
         PC_INC(9);
     } else {
         if (g_DebugLevel & 3) {
-            FieldDebugAddParseValueToPage2("lif2=true", 0, 0);
+            FieldDebugAddParseValueToPage2("lif2=false", 0, 0);
         }
         GET_PARAM_S16(param, 7);
         PC_INC(param + 7);
     }
     return 0;
 }
-#endif
 
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", If2CheckUnsigned);
