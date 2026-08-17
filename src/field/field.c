@@ -137,6 +137,7 @@ extern u16 D_80114488;
 extern u8 D_8009D5A6[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
+extern u8 D_80071C1C; // set while a movie opcode is driving playback
 extern s32 D_8009A010;
 extern s32 D_8009A014;
 extern s16 D_801144D4;
@@ -3906,28 +3907,55 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstw);
+/* Block until this entity's offset animation finishes. OfsType 3 means the last
+ * step ran, so clear it and fall through; 0 means there was never one. */
+s32 OpcodeFuncOfstw(void) {
+    FieldEntity* model;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("ofstw", 0);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(1);
+        return 0;
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->OfsType != 0 && model->OfsType != 3) {
+        return 1;
+    }
+    model->OfsType = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStep = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetSteps = 0;
+    PC_INC(1);
+    return 0;
+}
 
 /* Block until this entity's turn finishes. Returning 1 without advancing the
  * PC re-runs the opcode next frame; TurnType 3 means the turn just completed,
  * so clear it and fall through.
  *
- * Instruction-for-instruction identical, but the original keeps the entity id
- * loaded at the top of the function live in $a0 and lets the model == 0xFF path
- * fall into the PC_INC tail without reloading it; gcc reloads on both paths. */
+ * Instruction-for-instruction identical; what is left is where gcc cross-jumps
+ * the PC_INC tail. The original merges the three paths *after* the reload of
+ * g_CurrentEntity, so the model == 0xFF path reuses the copy loaded at the top
+ * of the function; gcc merges two instructions earlier and reloads. Writing the
+ * tail out twice stops it cross-jumping at all (9 extra instructions), and
+ * inverting the test to an early return flips the branch to `bne`. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnw);
 #else
 s32 OpcodeFuncTurnw(void) {
+    FieldEntity* model;
+
     if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("turnw", 0);
         }
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 0) {
-            if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType != 3) {
+        model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+        if (model->TurnType != 0) {
+            if (model->TurnType != 3) {
                 return 1;
             }
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
+            model->TurnType = 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
         }
@@ -4343,7 +4371,32 @@ s32 OpcodeFuncWsizw(void) {
     return 1;
 }
 
+/* Every instruction matches except which register holds the PC_INC pointer.
+ * The original loads the incremented value into $v0 -- the return register --
+ * so `move v0,zero` cannot fill the load delay slot and the original carries a
+ * `nop`; gcc picks $v1 and fills the slot, coming out one instruction short.
+ * Neither declaration order nor hoisting the window id shifts the choice. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncWsize);
+#else
+s32 OpcodeFuncWsize(void) {
+    s16 x;
+    s16 y;
+    s16 w;
+    s16 h;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("wsize", 8);
+    }
+    GET_PARAM_S16(x, 2);
+    GET_PARAM_S16(y, 4);
+    GET_PARAM_S16(w, 6);
+    GET_PARAM_S16(h, 8);
+    FieldDialogSetSize(GET_PARAM_U8(1), x, y, w, h);
+    PC_INC(10);
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncWrow(void) {
     if (g_DebugLevel & 3) {
@@ -5368,9 +5421,75 @@ s32 OpcodeFuncBgrol2(void) {
 // Begin of field_opcode_movie.c
 ////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncPmvie);
+/* Preload the movie named by the parameter, blocking until the load finishes.
+ * Same post-then-poll shape as OpcodeFuncMovie, one event command earlier. */
+s32 OpcodeFuncPmvie(void) {
+    s16 movieId;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMovie);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("pmvie", 1);
+    }
+    if (D_800716CC != 0) {
+        PC_INC(2);
+        return 0;
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_LOAD_MOVIE:
+        switch (g_FieldState->movieCommandState) {
+        case MOVCMD_ACTIVE:
+            break;
+        case MOVCMD_DONE:
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            PC_INC(2);
+            return 0;
+        }
+        return 1;
+    case EVTCMD_NONE:
+        g_FieldState->eventCmd = EVTCMD_LOAD_MOVIE;
+        movieId = GET_PARAM_U8(1);
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        g_FieldState->eventCmdParam = movieId;
+        break;
+    }
+    return 1;
+}
+
+/* Play the field map's movie, blocking until it finishes. Returning 1 without
+ * advancing the PC re-runs the opcode next frame, so the request is posted once
+ * as an event command and then polled. */
+s32 OpcodeFuncMovie(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("movie", 0);
+    }
+    D_80071C1C = 1;
+    if (D_800716CC != 0) {
+        D_801144D4 = 0;
+        PC_INC(1);
+        return 0;
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_PLAY_MOVIE:
+        switch (g_FieldState->movieCommandState) {
+        case MOVCMD_ACTIVE:
+            break;
+        case MOVCMD_DONE:
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case EVTCMD_UNK14:
+        PC_INC(1);
+        return 0;
+    case EVTCMD_NONE:
+        g_FieldState->eventCmd = EVTCMD_PLAY_MOVIE;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        break;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncMvief(void) {
     if (g_DebugLevel & 3) {
@@ -5425,7 +5544,24 @@ s32 OpcodeFuncScrlc(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrla);
+/* Scroll the camera to an entity over a number of frames. Unlike SCR2D the
+ * target is an entity id, so a missing model makes the opcode a no-op. */
+s32 OpcodeFuncScrla(void) {
+    u8 entityId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("scrla", 0);
+    }
+    entityId = GET_PARAM_U8(4);
+    if (g_EntityToModel[entityId] != 0xFF) {
+        g_FieldState->cameraScrollMode = GET_PARAM_U8(5);
+        g_FieldState->cameraScrollTargetId = g_EntityToModel[entityId];
+        g_FieldState->cameraScrollNumSteps = FieldEventReadMemoryS16(2, 2);
+        g_FieldState->cameraScrollState = 0;
+    }
+    PC_INC(6);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncScrlp);
 
@@ -6049,7 +6185,28 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinEndTurn);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
 
+/* Every instruction matches except one: the original leaves the delay slot of
+ * the first FieldEventReadMemoryU8 call empty and stores fadeType ahead of it,
+ * where gcc sinks that store into the slot and comes out one instruction short.
+ * It fills the slot the same way for the later three calls, and neither a temp
+ * for the parameter nor a reordered store changes the first one. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncNfade);
+#else
+s32 OpcodeFuncNfade(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("nfade", 8);
+    }
+    g_FieldState->fadeType = GET_PARAM_U8(3);
+    g_FieldState->nFadeRedTarget = FieldEventReadMemoryU8(1, 4);
+    g_FieldState->nFadeGreenTarget = FieldEventReadMemoryU8(2, 5);
+    g_FieldState->nFadeBlueTarget = FieldEventReadMemoryU8(3, 6);
+    g_FieldState->fadeAdjust = 0;
+    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(4, 7);
+    PC_INC(9);
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
 
@@ -8256,7 +8413,31 @@ void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
 
 bool FieldDebugPageIsRender(s16 arg0) { return D_800E08C0[arg0 * 378] == 0; }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageResetStrings);
+/* Blank all 24 rows of a debug page and restore its default colour. The row
+ * text is a 14-byte record per row, the per-row colour a single byte, so the
+ * two arrays walk the page at different strides. */
+void FieldDebugPageResetStrings(s16 page) {
+    s32 i;
+    s32 off;
+    u8* colors;
+
+    i = 0;
+    colors = &D_800E08A8[page * 378];
+    off = page * 378;
+    while (i < 24) {
+        D_800E0758[off] = 0;
+        *colors++ = 0;
+        i++;
+        off += 14;
+    }
+    D_800E0750[page * 378] = 7;
+    D_800E0751[page * 378] = 0xF;
+    D_800E0752[page * 378] = 0x1F;
+    D_800E0756[page * 189] = 0;
+    D_800E0754[page * 189] = 0;
+    D_800E08C0[page * 378] = 0;
+    D_8009D824 = 1;
+}
 
 static void FieldDebugRenderClear(void) {
     g_FieldDebugRChars = 0;
