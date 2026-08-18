@@ -503,6 +503,6 @@ void* func_800D6260(void*, u_long**, int, void*);
 void func_800D3994(s32 arg0, s32 arg1, void* arg2);
 void func_800D5444(int, int, int, void (*func)(int));
 s32 func_800D54BC(s32 arg0);
-void func_800D55F4(void* arg0, ...);
+void func_800D55F4(s32 arg0, ...);
 s32 func_800D56A8(SVECTOR* sv);
 int func_800D574C(int);
