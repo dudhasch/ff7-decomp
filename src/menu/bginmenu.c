@@ -21,6 +21,8 @@ extern Unk80026448 D_801D0860[];
 extern s8 D_801D086B;
 extern u8 D_8009D78A[];
 extern s32 D_8009CE60[];
+extern SavePartyMember D_8009C738[8]; // Savemap.party
+extern u16 D_8009D3FC[]; // Savemap + 0xD18: per-member HP-ratio scratch
 
 // Initializes window parameters and UI elements for party selection screen
 // (bginmenu).
@@ -103,11 +105,101 @@ static void func_801D026C(Unk801D026C* arg0, u16 arg1) {
 INCLUDE_ASM("asm/us/menu/nonmatchings/bginmenu", func_801D027C);
 
 // Removes specified item, materia, or character ID from party/inventory.
-INCLUDE_ASM("asm/us/menu/nonmatchings/bginmenu", func_801D0324);
+void func_801D0324(s32 arg0) {
+    s32 i, j;
+    s32 minus_one;
+    s32* base;
+    s32* party0;
+    s32* party1;
+    s32* inventory;
+    s32 target;
+
+    target = arg0 | ~0xFF;
+    i = 0;
+    minus_one = -1;
+    base = (s32*)D_8009D78A;
+    party1 = (s32*)((u8*)base - 0xFF2);
+    party0 = (s32*)((u8*)base - 0x1012);
+
+    for (; i < 9; i++) {
+        if (((*(u16*)base) >> i) & 1) {
+            for (j = 0; j < 8; j++) {
+                if (party0[j] == target) {
+                    party0[j] = minus_one;
+                    return;
+                }
+            }
+            for (j = 0; j < 8; j++) {
+                if (party1[j] == target) {
+                    party1[j] = minus_one;
+                    return;
+                }
+            }
+        }
+        party1 = (s32*)((u8*)party1 + 0x84);
+        party0 = (s32*)((u8*)party0 + 0x84);
+    }
+
+    inventory = D_8009CE60;
+    for (j = 0; j < 200; j++) {
+        if (inventory[j] == target) {
+            inventory[j] = -1;
+            return;
+        }
+    }
+}
 
 // Checks if a 32-bit ID (item, materia, or character) exists in party or
 // inventory.
-INCLUDE_ASM("asm/us/menu/nonmatchings/bginmenu", func_801D0408);
+s32 func_801D0408(s32 arg0) {
+    s32 i;
+    s32 new_var;
+    s32 j;
+    s32 flags;
+    u32 mask;
+    u8* base;
+    u32* party0;
+    u32* party1;
+    u32* inventory;
+    u32 new_var2;
+
+    i = 0;
+    base = D_8009D78A;
+    flags = *(u16*)base;
+    mask = 0xFFFFFF;
+    party1 = (u32*)(base - 0xFF2);
+    party0 = (u32*)(base - 0x1012);
+
+    for (; i < 9; i++) {
+        new_var = flags >> i;
+        if (new_var & 1) {
+            for (j = 0; j < 8; j++) {
+                new_var2 = party0[j] >> 8;
+                if (new_var2 == mask && (u8)party0[j] == arg0) {
+                    return 1;
+                }
+            }
+            for (j = 0; j < 8; j++) {
+                new_var2 = party1[j] >> 8;
+                if (new_var2 == mask && (u8)party1[j] == arg0) {
+                    return 1;
+                }
+            }
+        }
+        party1 = (u32*)((u8*)party1 + 0x84);
+        party0 = (u32*)((u8*)party0 + 0x84);
+    }
+
+    inventory = (u32*)D_8009CE60;
+    for (j = 0; j < 200; j++) {
+        new_var2 = inventory[j] >> 8;
+        if (new_var2 == 0xFFFFFF && (u8)inventory[j] == arg0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 // Checks if a character ID (byte) exists in active party list or inventory.
 s32 func_801D0500(s32 arg0) {
