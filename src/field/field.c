@@ -7879,7 +7879,51 @@ s32 OpcodeFuncNfade(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+/* FADEW (0x6C): block the script until the active screen fade completes. The
+ * wait test depends on the fade type: subtractive fades complete when
+ * fadeAdjust reaches 0, the hold-colour fades when fadeAdjust reaches
+ * fadeSpeed, and the rest when fadeAdjust hits 0. Returns 1 while waiting, 0
+ * (advancing the PC) once done. Jump-table fadeType dispatch; the .rodata phase
+ * wall. Codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+#else
+s32 OpcodeFuncFadew(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fadew", 0);
+    }
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_INSTANT:
+    case FFT_INSTANT_BLACK:
+    case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
+    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
+    case FFT_FIELD_TO_STANDARD_ADD_HOLD_COLOR:
+    default:
+        if (g_FieldState->fadeAdjust == g_FieldState->fadeSpeed) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_intersect.c
