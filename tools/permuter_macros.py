@@ -315,67 +315,59 @@ that a later expression reads.
 """,
     ),
     Recipe(
-        "delay-slot-swap",
-        "two independent instructions are swapped between a branch's delay slot "
-        "and the following call's, and no statement reordering moves them",
-        "sites x perms x 2, then unbounded",
+        "conserved-pair",
+        "a residue of pure reorderings where every single-site fix is exactly "
+        "neutral and everything else is catastrophic -- no gradient",
+        "sites x fillers (finite); never PERM_RANDOMIZE",
         """
-/* The store that must land either in the loop tail or in the block: PERM_ONCE
- * places it at exactly one site, so every alternative stays correct C. */
+/* The store has two homes and reorg re-steals it at whichever one you pick,
+ * so permute the *sink site* and the *back-edge filler* jointly. A macro at
+ * one site alone cannot see the trade: every candidate scores identically. */
     func_80027B84(pr);
-    PERM_ONCE(rectx, rect.x = 0;)
+    PERM_ONCE(sink, rect.x = 0;)
+    PERM_GENERAL(, dy += 12;, i++;, rowY += 12;)   /* back-edge slot bait */
 }
-PERM_ONCE(rectx, rect.x = 0;)
+PERM_ONCE(sink, rect.x = 0;)
 PERM_LINESWAP(
 rect.y = 0;
 rect.w = 0x100;
 rect.h = 0x100;
 )
-func_80026A34(0, 1, 0x1F, PERM_GENERAL(pr, &rect));
-
-/* Only once that finite space is exhausted, and scoped to the arm that
- * actually diverges -- never the whole function. */
-PERM_RANDOMIZE(
-if ((D_80062D7E & 0x2000) && setting != 2) {
-    value = value + 1;
-    func_801D0040(1);
-    setting = value;
-    value = value << 6;
-    Savemap.config = (Savemap.config & 0xFF3F) | value;
-}
-)
 """,
         """
 Written for func_801D080C in src/menu/cnfgmenu.c, whose last four rows are two
-of these swaps, but the shape is general -- delay-slot residues outlive every
-other kind on this target.
+such pairs, but the shape recurs wherever reorg competes with the scheduler.
 
-The mechanism first, because it says what NOT to search. reorg fills a call's
-delay slot from whatever the scheduler left adjacent to the `jal`, and a call's
-argument setup is emitted at the call, so an argument load is always adjacent
-and always wins the slot. The branch before it then takes whatever is left.
-That is why permuting the statements around the call does nothing: it cannot
-change which insn is emitted last. Three rounds of directed search on this
-function -- about 1700 variants -- moved neither pair, and seven spellings of a
-loop increment all scored the same. Do not spend a run re-enumerating statement
-order.
+Recognise it by the *shape of the score landscape*, which is the cheap part.
+Sink the statement on its own: the rows at that site clear and the same number
+reappear at a nearby branch, total unchanged. That conservation is the
+signature. It means the two sites are one degree of freedom, and a macro that
+offers a choice at only one of them spans a space in which every point has the
+same score.
 
-What can still move it is anything that changes RTL emission order at that
-point *without* changing the instruction count, which is what the randomizer's
-temp-introduction and expression-splitting passes do and what hand-written
-alternatives generally do not. Hence the shape above: a small finite space for
-the structural choices, then PERM_RANDOMIZE scoped to the one arm.
+The landscape is then neutral-or-catastrophic with nothing in between, and both
+halves are worth knowing. On this function 1.5M permuter iterations produced
+30,504 candidates tied at the base score and not one below it; a directed batch
+of 17 hand-written variants split the same way -- `value++` for `value + 1`,
+`value += 1`, the call and the increment on one source line, and routing a
+single field through `pr` all scored *exactly* the base, while every spelling
+gcc could not fold scored 5, 6, 64, 89 or 149. gcc 2.7.2 folds the whole
+neighbourhood of legal rephrasings to identical RTL, so the plateau is not the
+search failing to find a gradient -- there is no gradient to find, and more
+iterations buy nothing.
 
-Two cautions specific to a function this close to matching. Scope the
-randomization: with 1201 of 1205 instructions already byte-identical, an
-unscoped run spends essentially all of its candidates rewriting code that
-already matches, and can also destroy load-bearing constructs elsewhere in the
-function (in this one, `value` doubling as a byte pointer, the `s8*`/`short*`
-loop invariants, and the named 0x100). And re-measure the floor before trusting
-`--stop-on-zero`: this function has unalignable Savemap interiors and two
-compiler-generated jump tables, so its aligned score never reaches 0. Take the
-floor from the `--debug` two-column diff and watch for that number, not for
-zero.
+So do not reach for PERM_RANDOMIZE here, even scoped. An unbounded search over
+a provably flat region is the one case where the permuter cannot help, and it
+will happily burn a core-day proving it again. Spend the run on the finite
+joint space above, or leave the function alone.
+
+Two things to check before you conclude a pair is conserved rather than
+reachable. Confirm the rows are *reorderings* -- asm-differ marks a moved
+instruction with `<` against the row it left, so the pair shows up as one CHG
+plus one INS with the same text, not as a real insertion. And read the
+function's own comment block first: on a function this close to matching, the
+mechanism has usually already been worked out and written down, and re-deriving
+it costs a batch for nothing (it did here).
 """,
     ),
     Recipe(

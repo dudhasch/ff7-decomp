@@ -404,6 +404,14 @@ void func_801D069C(void) {
 // argument for why source-level rearrangement cannot reach them. Read these
 // before spending more time here.
 //
+// A permuter run has since settled the question for the search half. With the
+// scratch retargeted (base score 220, floor ~40), 1.5M iterations produced
+// 30,504 candidates tied at 220 and none below it, and a directed batch of 17
+// variants split the same way: everything gcc folds scores exactly 4, and
+// everything it cannot fold scores 5, 6, 64, 89 or 149. The neighbourhood is
+// flat, not unsearched. Do not run the permuter on this function again --
+// see `permuter_macros.py recipe conserved-pair`, which is written from it.
+//
 //   * 2 rows after case 2's loop: the target emits `sh zero,0x20(sp)`
 //     (rect.x = 0) as the first instruction of the block, ahead of the call's
 //     argument setup; we emit it with the other three stores. gcc 2.7.2's
@@ -431,10 +439,12 @@ void func_801D069C(void) {
 //     instead of `addiu s2,s2,0xc`, costing two rows at the back-edge. The
 //     pair is conserved; total is 4 either way. That holds with `pr` present,
 //     across every back-edge form, and in the induction-variable world.
-//     Writing the block through `pr` does not help and is measurable harm:
-//     `pr->x = 0` compiles to `sh zero,0(a3)`, reusing the call's own argument
-//     register, which adds a dependence on `move a3,s6` and pins the store
-//     harder behind the arguments -- +1 row per field routed that way.
+//     Writing the block through `pr` does not help: `pr->x = 0` compiles to
+//     `sh zero,0(a3)`, reusing the call's own argument register, which adds a
+//     dependence on `move a3,s6` and pins the store harder behind the
+//     arguments. Routing x alone re-measures as neutral, not +1 as recorded
+//     here earlier -- that figure predates the checkfn alias fix, which moved
+//     the baseline from 5 to 4. Routing more than one field still costs.
 //
 //   * 2 rows in the ATB case: the target fills the `beq`'s delay slot with
 //     `li a0,0x1` and the `jal`'s with `addiu s0,s0,1`; we fill them the other
