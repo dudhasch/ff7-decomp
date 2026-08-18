@@ -5,11 +5,11 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 129 |
+| remaining `INCLUDE_ASM` | 76 |
 | handwritten — can never match | 20 |
-| blocked on a `.rodata` group | 21 |
-| **actionable** | **88** |
-| …of which already parked near-miss | 22 |
+| blocked on a `.rodata` group | 6 |
+| **actionable** | **50** |
+| …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
 `div` hardware divisions, `jt` jump table, `rank` = `mako.sh rank` score
@@ -20,48 +20,48 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `FieldDebugPageAddPos` | 30 | 0 |  |  |  |  |  | P |
-| 2 | `FieldDebugPageAddSize` | 30 | 0 |  |  |  |  |  | P |
-| 3 | `KawaiSetColorToModelPkts` | 53 | 1 |  |  |  |  |  | P |
-| 4 | `FieldButtonsUpdate` | 42 | 2 |  |  |  |  |  | P |
-| 5 | `AddColorStrNextDebugRow` | 74 | 1 |  |  |  |  |  | P |
-| 6 | `FieldEntityCollisionCheck` | 97 | 0 |  |  |  |  |  | P |
-| 7 | `OpcodeFuncTurnw` | 86 | 1 |  |  |  |  |  | P |
-| 8 | `FieldEntityAnimationUpdate` | 99 | 0 |  |  |  |  |  | P |
-| 9 | `AddStrNextDebugRow` | 63 | 1 |  |  |  |  |  |  |
-| 10 | `OpcodeFuncLdpls` | 66 | 3 |  |  |  |  |  | P |
-| 11 | `OpcodeFuncStpls` | 66 | 3 |  |  |  |  |  | P |
-| 12 | `OpcodeFuncNfade` | 68 | 3 |  |  |  |  |  | P |
-| 13 | `KawaiInitSplashPkts` | 73 | 1 |  |  |  |  |  |  |
-| 14 | `FieldEntityLineInteract` | 107 | 1 |  |  |  |  |  | P |
-| 15 | `OpcodeFuncVwoft` | 101 | 2 |  |  |  |  |  | P |
-| 16 | `FieldEntityBgTriggerActivate` | 52 | 0 |  |  | yes |  |  | P |
-| 17 | `FieldEntityBgTriggerInit` | 48 | 1 |  |  | yes |  |  | P |
-| 18 | `FieldModelStructInit` | 123 | 0 |  |  |  |  |  |  |
-| 19 | `PreloadNextFieldMap` | 125 | 2 |  |  |  |  |  | P |
-| 20 | `FieldEnablePartyModels` | 125 | 0 |  |  |  |  |  |  |
-| 21 | `KawaiLoadEyesMouthTexToVram` | 113 | 1 |  |  |  |  |  |  |
-| 22 | `FieldEventSplitJoinSetTurn` | 119 | 1 |  |  |  |  |  |  |
-| 23 | `OpcodeFuncMgame` | 122 | 1 |  |  |  |  |  |  |
-| 24 | `FieldRainUpdate` | 168 | 0 |  |  |  |  |  | P |
-| 25 | `FieldEntitySqrDistToLine` | 129 | 0 |  | 1 |  |  |  | P |
-| 26 | `FieldDebugInitBuffers` | 140 | 2 |  |  |  |  |  |  |
-| 27 | `OpcodeFuncFadew` | 73 | 1 |  |  | yes |  |  |  |
-| 28 | `FieldLoadMimToVram` | 135 | 3 |  |  |  |  |  |  |
-| 29 | `FieldModelBsxTdbModify` | 147 | 2 |  |  |  |  |  |  |
-| 30 | `OpcodeFuncFmove` | 157 | 2 |  |  |  |  |  |  |
-| 31 | `FieldEventSetDirByActorId` | 170 | 1 |  |  |  |  |  |  |
-| 32 | `FieldBGScrollInit` | 105 | 0 |  |  | yes |  |  |  |
-| 33 | `FieldEntityLineCheck` | 165 | 2 |  |  |  |  |  |  |
-| 34 | `OpcodeFuncJump` | 167 | 2 |  |  |  |  |  |  |
-| 35 | `FieldEventSplitSet` | 133 | 5 |  |  |  |  |  |  |
-| 36 | `OpcodeFuncSetx` | 102 | 3 |  |  | yes |  |  | P |
-| 37 | `OpcodeFuncGetx` | 103 | 3 |  |  | yes |  |  | P |
-| 38 | `OpcodeFuncCmove` | 173 | 2 |  |  |  |  |  |  |
-| 39 | `KawaiFadeModelColor` | 190 | 1 |  |  |  |  |  |  |
-| 40 | `FieldEntityCheckTalk` | 191 | 1 |  |  |  |  |  |  |
+| 1 | `OpcodeFuncFadew` | 73 | 1 |  |  | yes |  |  |  |
+| 2 | `OpcodeFuncFmove` | 157 | 2 |  |  |  |  |  |  |
+| 3 | `OpcodeFuncCmove` | 173 | 2 |  |  |  |  |  |  |
+| 4 | `KawaiFadeModelColor` | 190 | 1 |  |  |  |  |  |  |
+| 5 | `FieldEntityCheckTalk` | 191 | 1 |  |  |  |  |  |  |
+| 6 | `FieldModelLoadAndInit` | 125 | 7 |  |  |  |  |  |  |
+| 7 | `FieldEntityTriggerCheck` | 163 | 4 |  |  |  |  |  |  |
+| 8 | `FieldEntityDirByVec` | 134 | 1 |  | 2 |  |  |  |  |
+| 9 | `OpcodeFuncFade` | 126 | 2 |  |  | yes |  |  |  |
+| 10 | `KawaiSetModelTransparency` | 245 | 0 |  |  |  |  |  |  |
+| 11 | `KawaiSetCustomLighting` | 234 | 1 |  |  |  |  |  |  |
+| 12 | `KawaiColorFadeBelowLvl` | 237 | 1 |  |  |  |  |  |  |
+| 13 | `OpcodeFuncTurn` | 225 | 2 |  |  |  |  |  |  |
+| 14 | `FieldMoveToEntityUpdate` | 252 | 0 |  |  |  |  |  |  |
+| 15 | `FieldEntityInitPos` | 234 | 2 |  |  |  |  |  |  |
+| 16 | `FieldEventRunInit` | 152 | 4 | yes |  |  |  |  |  |
+| 17 | `OpcodeFuncOfstd` | 243 | 2 |  |  |  |  |  |  |
+| 18 | `FieldDebugRenderString` | 191 | 0 |  |  | yes |  |  |  |
+| 19 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
+| 20 | `FieldBGScrollUpdate` | 160 | 4 |  |  | yes |  |  |  |
+| 21 | `FieldArrowsAddToRender` | 221 | 6 |  |  |  |  |  |  |
+| 22 | `KawaiSetVertexColorFromLighting` | 293 | 0 |  |  |  |  |  |  |
+| 23 | `OpcodeFuncMove` | 272 | 2 |  |  |  |  |  |  |
+| 24 | `FieldCalcPointOnLine` | 137 | 0 |  | 4 |  |  |  |  |
+| 25 | `FieldUpdateAnimationState` | 234 | 0 |  |  | yes |  |  |  |
+| 26 | `FieldEntityWalkmechCross` | 291 | 2 |  |  |  |  |  |  |
+| 27 | `OpcodeFuncCanmEx` | 223 | 1 |  | 2 |  |  |  |  |
+| 28 | `OpcodeFuncTurnr` | 305 | 2 |  |  |  |  |  |  |
+| 29 | `DrawFieldExitArrow` | 330 | 0 |  |  |  |  |  |  |
+| 30 | `FieldEventJoinSet` | 264 | 6 |  |  |  |  |  |  |
+| 31 | `FieldEntityTurnToEntity` | 345 | 1 |  |  |  |  |  |  |
+| 32 | `OpcodeFuncCanim` | 246 | 1 |  | 3 |  |  |  |  |
+| 33 | `FieldBattleCheck` | 295 | 4 |  | 1 |  |  |  |  |
+| 34 | `FieldModelLoadBcx` | 307 | 2 |  |  | yes |  |  |  |
+| 35 | `FieldBackgroundInitPackets` | 395 | 5 |  |  |  |  |  |  |
+| 36 | `OpcodeFuncLader` | 403 | 2 |  | 1 |  |  |  |  |
+| 37 | `FieldInitDefaultValues` | 484 | 0 |  |  |  |  |  |  |
+| 38 | `FieldEventSplitJoinSetMove` | 429 | 2 |  | 1 |  |  |  |  |
+| 39 | `HandleKawaiDataInModel` | 482 | 5 |  |  |  |  |  |  |
+| 40 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
 
-_48 more actionable functions below the cut._
+_10 more actionable functions below the cut._
 
 A `yes` in `jt` is a warning, not a verdict: the function may still be
 stuck on jump-table `.rodata` alignment until this unit is split on its
@@ -72,27 +72,12 @@ alignment" before spending a budget on one.
 
 | function | i | verdict | why |
 | --- | --- | --- | --- |
-| `OpcodeFuncMenu2` | 42 | BORROWS | D_800A0F38 owned by OpcodeFuncMenu |
-| `OpcodeFuncCppal` | 70 | LENDS | D_800A0C68 needed by OpcodeFuncCppal2 |
-| `OpcodeFuncCppal2` | 83 | BORROWS | D_800A0C68 owned by OpcodeFuncCppal |
-| `OpcodeFuncMjump` | 131 | LENDS | D_800A0848 needed by OpcodeFuncMenu |
-| `OpcodeFuncTutor` | 97 | LENDS | D_800A08D0 needed by OpcodeFuncMenu |
 | `OpcodeFuncRtpal2` | 112 | BORROWS | D_800A0C70 owned by OpcodeFuncRtpal |
 | `OpcodeFuncRtpal` | 114 | LENDS | D_800A0C70 needed by OpcodeFuncRtpal2 |
 | `OpcodeFuncMppal2` | 132 | LENDS | D_800A0C80 needed by OpcodeFuncMppal |
 | `OpcodeFuncMppal` | 135 | BORROWS | D_800A0C80 owned by OpcodeFuncMppal2 |
-| `OpcodeFuncMenu` | 141 | BORROWS | D_800A0848 owned by OpcodeFuncMjump |
 | `OpcodeFuncAdpal` | 155 | LENDS | D_800A0C78 needed by OpcodeFuncAdpal2 |
 | `OpcodeFuncAdpal2` | 157 | BORROWS | D_800A0C78 owned by OpcodeFuncAdpal |
-| `If2CheckUnsigned` | 163 | BORROWS | D_800A0674 owned by IfCheck |
-| `IfCheck` | 163 | LENDS | D_800A0674 needed by If2CheckSigned, If2CheckUnsigned |
-| `If2CheckSigned` | 171 | BORROWS | D_800A0674 owned by IfCheck |
-| `FieldEventRequest` | 411 | BORROWS | D_800A02B8 owned by DebugUpdateActor |
-| `FieldEventWriteMemoryU8` | 343 | BORROWS | D_800A032C owned by FieldEventReadMemoryU8 |
-| `FieldEventReadMemoryU8` | 359 | LENDS | D_800A0300 needed by FieldEventReadMemoryS16 |
-| `FieldEventWriteMemoryS16` | 579 | BORROWS | D_800A032C owned by FieldEventReadMemoryU8 |
-| `FieldEventReadMemoryS16` | 592 | BORROWS | D_800A0300 owned by FieldEventReadMemoryU8 |
-| `DebugUpdateActor` | 2102 | LENDS | D_800A02B8 needed by FieldEventRequest |
 
 ## Handwritten — never attempt
 
