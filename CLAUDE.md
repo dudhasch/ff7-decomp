@@ -560,9 +560,10 @@ The batch shape that works:
 ## Adding a MAGIC spell overlay
 
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
-same slot at `0x801B0000`. Six are in the build: `BARRIER.BIN`, `MABARIA.BIN`,
-`REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and `ALMIGHTY.BIN`, all under
-`src/magic/`. They are the cheapest
+same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
+`BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
+`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is half, with three functions still
+`INCLUDE_ASM`. They are the cheapest
 work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
 entanglement — and the ones near barrier in size are near-clones of it, so the
 matching C is largely a transcription with different field offsets.
@@ -618,6 +619,19 @@ The recipe, start to finish:
    renaming everything twice. The `.data` block is transcribed as
    `static s32 <name>_a1[] = {...}` from `od -A n -t x4 -v -j <off> -N <len>`,
    and the descriptor struct at its tail is a `Unk801B0C98`.
+
+   **On an overlay too big for one pass, take the incremental route instead**
+   (`ESCAPE.BIN` did): declare *one* symbol per contiguous region in
+   `config/symbols.magic-<name>.us.txt` with a `// size:` annotation, and one
+   matching global object in the `.c`. splat then renders every interior
+   reference as `SYM+0x…`, so the functions still in `asm/` resolve while the
+   ones you have written are C. Two things bite here. A global initialised to
+   zero becomes a *common* symbol, which the linker places wherever it likes —
+   fold it into an object that has at least one non-zero initialiser, or the
+   whole `.data`/`.bss` slides and every address in the diff is wrong. And an
+   `INCLUDE_ASM` function whose *address* you take needs a real declaration:
+   without one gcc substitutes 0 for the identifier, emits `move a0,zero`, and
+   the build says nothing (see *A compile error that ninja calls a success*).
 
 6. **The verdict is the overlay's SHA-1**, not `checkfn.py`. Once the file is
    plain C there are no `.s` files left for `checkfn` to compare against — it
