@@ -75,18 +75,22 @@ extern char D_800A0270[4];
 extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
 extern s8 D_800E0630;
-extern u16 D_8009AC0A; // camera height bias applied to the tracked entity
-extern volatile u8 D_8009AC12; // entity the background scroll tracks
-extern u32 D_80114454;         // last raw pad state read this frame
-extern u32 D_8009AC5C;  // pad 1: state, previous, newly pressed, newly released
-extern u8 D_8009ACE6[]; // per-entity background-trigger bits, one byte each
-extern u32 D_8009AC60;
-extern u32 D_8009AC64;
-extern u32 D_8009AC68;
-extern u32 D_8009AC6C; // pad 2: same four
-extern u32 D_8009AC70;
-extern u32 D_8009AC74;
-extern u32 D_8009AC78;
+extern u16 g_FieldBGCameraHeightBias; // camera height bias applied to the
+                                      // tracked entity
+extern volatile u8
+    g_FieldBGTrackedEntity; // entity the background scroll tracks
+extern u32 g_FieldPadRaw;   // last raw pad state read this frame
+extern u32
+    g_FieldPad1State; // pad 1: state, previous, newly pressed, newly released
+extern u8 g_FieldEntityBgTrigger[]; // per-entity background-trigger bits, one
+                                    // byte each
+extern u32 g_FieldPad1PrevState;
+extern u32 g_FieldPad1Pressed;
+extern u32 g_FieldPad1Released;
+extern u32 g_FieldPad2State; // pad 2: same four
+extern u32 g_FieldPad2PrevState;
+extern u32 g_FieldPad2Pressed;
+extern u32 g_FieldPad2Released;
 extern s32 func_8001C808(void);
 extern s16 D_800E0748[];
 extern s16 D_800E074A[];
@@ -117,7 +121,7 @@ extern u16 g_FieldDebugTransp;
 extern char g_DebugText[];          // debug text
 extern char g_DebugMessageBuffer[]; // debug value transformed into text
 
-extern u8 D_80114498[];
+extern u8 g_FieldScriptDebugEntities[];
 extern u8 g_actorIdCur;
 extern u8 g_RandomTableStep;
 extern u8 g_RandomTableIndex;
@@ -141,14 +145,15 @@ extern s16 g_WindowTotalRowsHeight[4];
 /* volatile: the movie stream sets this from an interrupt callback, and it is
  * what keeps the s16 conversion in FieldUpdateMovieStream a separate
  * sign-extension instead of folding into a signed load. */
-extern volatile u16 D_80114488;
-extern u8 D_8009D5A6[];
+extern volatile u16 g_FieldMovieStreamActive;
+extern u8 g_FieldExitArrowState[];
 extern u8 D_8009D5A7;
 extern u8 D_800716CC;
-extern u8 D_80071C1C;    // set while a movie opcode is driving playback
-extern u32 D_80075E10;   // top of the buffer the movie stream decodes into
+extern u8
+    g_FieldMovieOpcodeActive; // set while a movie opcode is driving playback
+extern u32 D_80075E10;        // top of the buffer the movie stream decodes into
 extern u16 D_800E42A8[]; // per-model default walk speed, indexed by model id
-extern s16 D_801142C8;
+extern s16 g_FieldMovieStreamDone;
 void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
 void func_800354CC(void);                    // STR playback start
 void func_80035658(void);                    // STR playback stop
@@ -159,13 +164,13 @@ extern u8 D_80095DE0[];
 extern s32 g_BattleCharIdToCharId[11];
 extern u8 D_8009AD30[];
 extern FieldState D_8009ABF4;
-extern u8 D_8009C540;
-extern u8 D_8009AD2C;
+extern u8 g_FieldRandListIndex;
+extern u8 g_FieldRandListOffset;
 extern s32 D_8009A108;
 extern s32 D_80099FCC[];
-extern u8 D_8009AC2D;
-extern u8 D_8009AC26;
-extern u8 D_8009AC27;
+extern u8 g_FieldCameraMatrixSel;
+extern u8 g_FieldAnimLock;
+extern u8 g_FieldAnimFreeze;
 extern u8 D_80081DC4;
 extern s16 D_80114464;
 extern s16 D_80114468;
@@ -339,7 +344,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
 
 // External Declarations
 extern u8 D_8009ABF5;
-extern u8 D_8009AC26;
+extern u8 g_FieldAnimLock;
 extern s16 D_80071A5C;
 
 // D_8009ABF5 = g_FieldState -> command
@@ -365,7 +370,7 @@ void PreloadNextFieldMap(FieldEntity* Player, FieldLine* gateway) {
     scratchpad[1] = Player->PosY >> 12;
     scratchpad[2] = Player->PosZ >> 12;
 
-    if (D_8009AC26 == 0) {
+    if (g_FieldAnimLock == 0) {
         counter = 0;
         term_val = 0x7FFF;
         ptr_a1 = (gateway + 0x12);
@@ -446,26 +451,26 @@ void FieldButtonsUpdate(void) {
     u32 old2;
 
     pad1 = func_8001C808();
-    old1 = D_8009AC5C;
-    D_80114454 = pad1;
-    D_8009AC5C = pad1;
-    D_8009AC60 = old1;
-    D_8009AC64 = (pad1 ^ old1) & pad1;
-    D_8009AC68 = (pad1 ^ old1) & ~pad1;
+    old1 = g_FieldPad1State;
+    g_FieldPadRaw = pad1;
+    g_FieldPad1State = pad1;
+    g_FieldPad1PrevState = old1;
+    g_FieldPad1Pressed = (pad1 ^ old1) & pad1;
+    g_FieldPad1Released = (pad1 ^ old1) & ~pad1;
 
     pad2 = func_8001C8D4();
-    old2 = D_8009AC6C;
-    D_80114454 = pad2;
-    D_8009AC6C = pad2;
-    D_8009AC70 = old2;
-    D_8009AC74 = (pad2 ^ old2) & pad2;
+    old2 = g_FieldPad2State;
+    g_FieldPadRaw = pad2;
+    g_FieldPad2State = pad2;
+    g_FieldPad2PrevState = old2;
+    g_FieldPad2Pressed = (pad2 ^ old2) & pad2;
     /* The do/while is not cosmetic: without the statement boundary gcc hoists
-     * this whole expression above the D_8009AC74 store. It is most likely a
-     * macro in the original. What is left is one register choice -- the
-     * original puts the `nor` in $a0, freed by the store just above, where gcc
-     * reuses $v0. */
+     * this whole expression above the g_FieldPad2Pressed store. It is most
+     * likely a macro in the original. What is left is one register choice --
+     * the original puts the `nor` in $a0, freed by the store just above, where
+     * gcc reuses $v0. */
     do {
-        D_8009AC78 = (pad2 ^ old2) & ~pad2;
+        g_FieldPad2Released = (pad2 ^ old2) & ~pad2;
     } while (0);
 }
 #endif
@@ -624,10 +629,10 @@ s32 FieldBGGetEntityScreenPos(long* screenPos) {
     SVECTOR pos;
     volatile u8* tracked;
 
-    tracked = &D_8009AC12;
+    tracked = &g_FieldBGTrackedEntity;
     pos.vx = g_FieldEntity[*tracked].PosX >> 12;
     pos.vy = g_FieldEntity[*tracked].PosY >> 12;
-    pos.vz = (g_FieldEntity[*tracked].PosZ >> 12) + D_8009AC0A;
+    pos.vz = (g_FieldEntity[*tracked].PosZ >> 12) + g_FieldBGCameraHeightBias;
     return FieldCalcWorldToScreenPos(&pos, screenPos);
 }
 
@@ -642,7 +647,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityInitPos);
 
 void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
-    if (D_8009AC26 == 0) {
+    if (g_FieldAnimLock == 0) {
         if (D_8009ABF4.activeKeys2 & PADR1) {
             g_FieldEntity[entityIdx].MoveDirAdd = 0xE0;
         } else if (D_8009ABF4.activeKeys2 & PADL1) {
@@ -656,7 +661,7 @@ void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
 /* Advance one entity's animation clock. animCurrentFrame counts in 1/16ths of
  * a frame, so the comparisons scale animLastFrame by 16. The player's own
  * model loops back to the start; every other entity holds on its last frame.
- * D_8009AC27 freezes all field animation at once.
+ * g_FieldAnimFreeze freezes all field animation at once.
  *
  * Not matching: the original reserves an unused 8-byte frame, and its clamp
  * arm keeps animLastFrame live across the branch to recompute `* 16` in the
@@ -675,12 +680,12 @@ void FieldEntityAnimationUpdate(s32 entityId) {
     }
     model = &g_FieldModelData->modelEntries[entryIndex];
     anims = model->modelData + model->animationOffset;
-    if (D_8009AC27 != 0) {
+    if (g_FieldAnimFreeze != 0) {
         return;
     }
     g_FieldEntity[entityId].animCurrentFrame +=
         g_FieldEntity[entityId].animSpeed;
-    if (entityId == g_PlayerModelId && D_8009AC26 == 0) {
+    if (entityId == g_PlayerModelId && g_FieldAnimLock == 0) {
         g_FieldEntity[entityId].animLastFrame =
             *(u16*)&anims[g_FieldEntity[entityId].activeAnimId * 16] - 1;
         if (g_FieldEntity[entityId].animLastFrame * 16 <
@@ -901,7 +906,7 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
     from[0] = entity->PosX >> 12;
     from[1] = entity->PosY >> 12;
     from[2] = entity->PosZ >> 12;
-    pad2 = &D_8009AC6C;
+    pad2 = &g_FieldPad2State;
     for (i = 0; i < 32; i++, line++) {
         if (line->isActive != 1) {
             continue;
@@ -1036,23 +1041,23 @@ s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     case 0:
     case 2:
     case 4:
-        old = D_8009ACE6[trigger->entityId];
+        old = g_FieldEntityBgTrigger[trigger->entityId];
         bit = 1 << trigger->unk0D;
         if ((old & bit) == 0) {
             changed = 1;
         }
-        D_8009ACE6[trigger->entityId] = bit | old;
+        g_FieldEntityBgTrigger[trigger->entityId] = bit | old;
         break;
     case 1:
     case 3:
     case 5:
         mask = ~(1 << trigger->unk0D);
-        old = D_8009ACE6[trigger->entityId];
+        old = g_FieldEntityBgTrigger[trigger->entityId];
         merged = old | mask;
         if (merged == 0xFF) {
             changed = 1;
         }
-        D_8009ACE6[trigger->entityId] = mask & old;
+        g_FieldEntityBgTrigger[trigger->entityId] = mask & old;
         break;
     }
     return changed;
@@ -1106,7 +1111,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", HandleKawaiDataInModel);
 void DebugRunEveryLoop(void) {}
 
 void FieldCameraAssign(void) {
-    if (D_80114488 == 0 || D_8009AC2D == 1) {
+    if (g_FieldMovieStreamActive == 0 || g_FieldCameraMatrixSel == 1) {
         D_80071E40 = *D_80083578;
     } else {
         D_80071E40 = D_80083270;
@@ -1127,7 +1132,7 @@ void FieldUpdateMovieStream(void) {
     }
     if (D_8009ABF4.eventCmd == EVTCMD_UNK14) {
         func_80035658();
-        D_80114488 = 0;
+        g_FieldMovieStreamActive = 0;
         g_FieldMoviePlayed = 0;
         D_8009ABF4.movieCommandState = MOVCMD_DONE;
         return;
@@ -1145,9 +1150,9 @@ void FieldUpdateMovieStream(void) {
             D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
             g_FieldMoviePlayed = 1;
         }
-        if ((s16)D_80114488 == 1) {
-            D_801142C8 = 1;
-            D_80114488 = 0;
+        if ((s16)g_FieldMovieStreamActive == 1) {
+            g_FieldMovieStreamDone = 1;
+            g_FieldMovieStreamActive = 0;
             g_FieldMoviePlayed = 0;
             D_8009ABF4.movieCommandState = MOVCMD_DONE;
         }
@@ -1159,7 +1164,7 @@ void FieldUpdateMovieStream(void) {
         if (D_8009ABF4.eventCmd == EVTCMD_PLAY_MOVIE) {
             D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
             func_800354CC();
-            D_80114488 = 1;
+            g_FieldMovieStreamActive = 1;
         }
         break;
     }
@@ -1310,11 +1315,11 @@ void FieldRainUpdate(void) {
 /////////////////////////////////////////////////
 
 u8 FieldGetRandomU8FromList(void) {
-    D_8009C540++;
-    if (D_8009C540 == 0) {
-        D_8009AD2C += 13;
+    g_FieldRandListIndex++;
+    if (g_FieldRandListIndex == 0) {
+        g_FieldRandListOffset += 13;
     }
-    return g_RandomTable[D_8009C540] - D_8009AD2C;
+    return g_RandomTable[g_FieldRandListIndex] - g_FieldRandListOffset;
 }
 
 u8 FieldGetNextRandomU8(void) {
@@ -1586,7 +1591,7 @@ void FieldEventInit(
     D_8009FE8C = 0;
     if (flags & 0x100) {
         D_80095DCC = 1;
-        D_80099FFC = 4;
+        g_FieldScriptRunState = 4;
     }
     if (scripts->eventDataVersion < 2) {
         SystemError('K', 10);
@@ -1628,8 +1633,8 @@ void FieldEventUpdate(s32 arg0) {
             SystemError('K', 12);
         }
     }
-    if (D_80099FFC != 4) {
-        if (D_80099FFC != 5 || D_80070788 != 0) {
+    if (g_FieldScriptRunState != 4) {
+        if (g_FieldScriptRunState != 5 || D_80070788 != 0) {
             FieldEventOpcodeCycle();
         }
     }
@@ -1734,7 +1739,7 @@ void FieldEventOpcodeCycle(void) {
         if (g_CurrentEntity >= g_FieldScripts->numEntities) {
             g_CurrentEntity = 0;
         }
-        if (D_80071E24 & 3) {
+        if (g_FieldScriptDebugFlags & 3) {
             DebugUpdateActor(4, g_CurrentEntity);
         }
 
@@ -1744,8 +1749,9 @@ void FieldEventOpcodeCycle(void) {
         if (g_EntitySplitJoinState[g_CurrentEntity] == 0 ||
             g_EntityForSplitJoin == g_CurrentEntity) {
             for (j = 8; j != 0; j--) {
-                if (D_80099FFC == 5 && g_DebugLevel & 1 &&
-                    (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity])) {
+                if (g_FieldScriptRunState == 5 && g_DebugLevel & 1 &&
+                    (!(g_FieldScriptDebugFlags & 4) ||
+                     g_FieldScriptDebugEntities[g_CurrentEntity])) {
                     for (i = 1; i < 9; i++) {
                         SetStrToDebugRow(3, i, D_800A013C);
                     }
@@ -1755,15 +1761,17 @@ void FieldEventOpcodeCycle(void) {
 
                 // Script can yield early if opcode returns 1.
                 if (g_FieldOpcodes[g_FieldCurrentOpcode]()) {
-                    if (D_80099FFC == 5 && g_DebugLevel & 1 &&
-                        (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity])) {
+                    if (g_FieldScriptRunState == 5 && g_DebugLevel & 1 &&
+                        (!(g_FieldScriptDebugFlags & 4) ||
+                         g_FieldScriptDebugEntities[g_CurrentEntity])) {
                         g_CurrentEntity++;
                         goto done;
                     }
                     break;
                 }
-                if (D_80099FFC == 5 && g_DebugLevel & 1 &&
-                    (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity])) {
+                if (g_FieldScriptRunState == 5 && g_DebugLevel & 1 &&
+                    (!(g_FieldScriptDebugFlags & 4) ||
+                     g_FieldScriptDebugEntities[g_CurrentEntity])) {
                     if (++D_8009A064 >= 8) {
                         D_8009A064 = 0;
                         g_CurrentEntity++;
@@ -1774,14 +1782,15 @@ void FieldEventOpcodeCycle(void) {
         }
         g_CurrentEntity++;
         count--;
-        if (D_80099FFC == 5 && D_80071E24 & 1 &&
-            (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity])) {
+        if (g_FieldScriptRunState == 5 && g_FieldScriptDebugFlags & 1 &&
+            (!(g_FieldScriptDebugFlags & 4) ||
+             g_FieldScriptDebugEntities[g_CurrentEntity])) {
             break;
         }
     } while (count != 0);
 
 done:
-    if (D_80099FFC == 5) {
+    if (g_FieldScriptRunState == 5) {
         D_80070788 = 0;
     }
     FieldUpdateAnimationState();
@@ -1923,17 +1932,18 @@ void ResetFieldRenderState(void) {
 }
 
 /* Unprototyped on purpose: the original passes nothing, but arg0 has to stay
- * live across the call for the cached &D_8009D5A6 to land in $a1. */
+ * live across the call for the cached &g_FieldExitArrowState to land in $a1. */
 void DrawFieldExitArrow();
 
 /* Select toggles the exit arrows on and off (bit 0); bit 1 is a debug override
  * that shows them regardless of the toggle and of the movement lock. */
 void UpdateFieldExitArrows(s32 arg0) {
     if (g_FieldState->newActiveKeys2 & (1 << 8)) {
-        D_8009D5A6[0] ^= 1;
+        g_FieldExitArrowState[0] ^= 1;
     }
-    if (((D_8009D5A6[0] == 1) && (g_FieldState->characterLock == 0)) ||
-        (D_8009D5A6[0] & 2)) {
+    if (((g_FieldExitArrowState[0] == 1) &&
+         (g_FieldState->characterLock == 0)) ||
+        (g_FieldExitArrowState[0] & 2)) {
         DrawFieldExitArrow(arg0);
     }
 }
@@ -1948,13 +1958,14 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", DebugUpdateActor);
 
 /* Traces one field-script opcode to debug page 3 and/or the on-screen window:
  * the mnemonic first, then one "arg<n>=<byte>" line per operand read straight
- * back out of the script stream. Bit 4 of D_80071E24 restricts tracing to the
- * entities flagged in D_80114498. */
+ * back out of the script stream. Bit 4 of g_FieldScriptDebugFlags restricts
+ * tracing to the entities flagged in g_FieldScriptDebugEntities. */
 void DebugPrintOpcode(char* name, u32 numArgs) {
     u32 total;
     u32 i;
 
-    if ((D_80071E24 & 4) && !D_80114498[g_CurrentEntity]) {
+    if ((g_FieldScriptDebugFlags & 4) &&
+        !g_FieldScriptDebugEntities[g_CurrentEntity]) {
         return;
     }
     FieldDebugStringCopy(g_DebugText, &D_800E0630);
@@ -1985,7 +1996,8 @@ void DebugPrintOpcode(char* name, u32 numArgs) {
 }
 
 static void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
-    if (!(D_80071E24 & 4) || D_80114498[g_CurrentEntity]) {
+    if (!(g_FieldScriptDebugFlags & 4) ||
+        g_FieldScriptDebugEntities[g_CurrentEntity]) {
         FieldDebugStringCopy(g_DebugText, str);
         switch (kind) {
         case 1:
@@ -6000,7 +6012,7 @@ s32 OpcodeFuncMovie(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("movie", 0);
     }
-    D_80071C1C = 1;
+    g_FieldMovieOpcodeActive = 1;
     if (D_800716CC != 0) {
         D_801144D4 = 0;
         PC_INC(1);
@@ -7822,7 +7834,7 @@ static void FieldEventDebugError(const char* errmsg) {
     FieldDebugPageSetColor(0, 0x7F, 0, 0);
     AddStrNextDebugRow(0, errmsg);
     D_80095DCC = 1;
-    D_80099FFC = 4;
+    g_FieldScriptRunState = 4;
 }
 
 void FieldWindowResetAll(void) {
@@ -9018,10 +9030,10 @@ static void InitFieldDebugPages(void) {
     FieldDebugPageInit(1, 0, 0, 0x6C, 0xCA);
     AddStrNextDebugRow(1, &D_800E0628);
     FieldDebugPageHide(1);
-    D_80099FFC = 3;
+    g_FieldScriptRunState = 3;
     D_8007EBCC = 4;
     D_8007EBDC = 8;
-    D_80071E24 = 0;
+    g_FieldScriptDebugFlags = 0;
     g_DebugLevel = 0;
     D_80070788 = 0;
     g_FieldDebugCurPage = 5;

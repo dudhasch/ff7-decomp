@@ -808,7 +808,7 @@ extern u16 g_SavedFieldScriptPC[48][8]; // Program counters of paused scripts
 extern s16 D_80071A5C;
 extern u8 g_FieldScriptSyncWaitEntity[48][8];
 extern s8 g_FieldDebugCurPage;
-extern u8 D_80071E24;
+extern u8 g_FieldScriptDebugFlags;
 extern u8 g_WindowCount;
 extern u8 D_80071E30;
 extern MATRIX* D_80071E40;
@@ -850,7 +850,7 @@ extern volatile u16 D_80095DD4;
 extern s16 g_PlayerModelId;
 extern s16 g_isFieldLoading;
 extern volatile s16 D_800965EC;
-extern u8 D_80099FFC;
+extern u8 g_FieldScriptRunState;
 extern s16 D_8009A000[1];
 extern u32 D_8009A004[1];
 extern s32 D_8009A008[1];
