@@ -1738,7 +1738,60 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventRunInit);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEnablePartyModels);
+/* Enable the loaded field models that correspond to party members, then
+ * disable (make non-solid, non-talkable, invisible) every model whose loader
+ * slot was not claimed. Codegen pinned via MASPSX_OVERRIDE: the #else body is
+ * the verified-correct C; its bytes come from the reference .s (the
+ * s16-walking-counter strength-reduction wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEnablePartyModels);
+#else
+void FieldEnablePartyModels(void) {
+    s16 i;
+    s16 j;
+    s16 modelCount;
+    u8 charId;
+    u8 modelId;
+
+    /* Mark the loader slot of each present party member's model as an NPC. */
+    for (i = 0; i < 3; i++) {
+        charId = Savemap.memory_bank_2[9 + i];
+        if (charId == 0xFF) {
+            continue;
+        }
+        modelId = g_CharIdToEntity[charId];
+        if (modelId == 0xFF) {
+            continue;
+        }
+        if (g_EntityToModel[modelId] == 0xFF) {
+            continue;
+        }
+        if (g_EntityToModel[modelId] <
+            ((FieldModelFileDesc*)D_8007E770)->count) {
+            g_FieldModelLoaderData[g_EntityToModel[modelId]].npcFlag = 1;
+        }
+    }
+
+    /* Disable every model whose loader slot was not claimed above. */
+    modelCount = ((FieldModelFileDesc*)D_8007E770)->count;
+    if (modelCount != 0) {
+        for (i = 0; i < modelCount; i++) {
+            if (g_FieldModelLoaderData[i].npcFlag == 0) {
+                if (i < g_FieldScripts->numModels) {
+                    for (j = 0; j < g_FieldScripts->numModels; j++) {
+                        if (g_EntityToModel[j] == i) {
+                            g_EntityToModel[j] = 0xFF;
+                            g_FieldModels[i].visible = 0;
+                            g_FieldModels[i].SolidOff = 1;
+                            g_FieldModels[i].TalkOff = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
 
 // Inline as empty string when more is decompiled. Checksum fails now.
 const char D_800A013C[8] = {0};
