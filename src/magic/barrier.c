@@ -1,5 +1,8 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/BARRIER.BIN -- "Barrier": the physical-damage barrier, cast from
+// Barrier Materia at level 1. See docs/spells/magic/barrier.md.
+
 #include "common.h"
 #include "../battle/battle.h"
 

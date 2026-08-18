@@ -1,5 +1,9 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/MABARIA.BIN -- "MBarrier" (magic barrier): the magical-damage
+// barrier, cast from Barrier Materia at level 2. Japanese マバリア, which is
+// where the file name comes from. See docs/spells/magic/mbarrier.md.
+
 #include "common.h"
 #include "../battle/battle.h"
 

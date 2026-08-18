@@ -1,5 +1,12 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/GATTAI.BIN -- "gattai" (合体, "merge"). Not one of the 54 Materia
+// spells: this overlay only flags the two party members other than the
+// caster and starts a 30-frame countdown, which is the screen setup an
+// ability plays before taking the camera. Which ability that is has not been
+// established -- the overlay-to-ability map needs the CD directory, not the
+// file name.
+
 #include "common.h"
 #include "../battle/battle.h"
 

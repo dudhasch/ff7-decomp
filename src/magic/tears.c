@@ -1,5 +1,11 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/TEARS.BIN -- "tears" (涙). Not one of the 54 Materia spells: the
+// overlay rains three droplets per frame for 30 frames, each spawned at a
+// random angle and distance around the target and falling until it passes
+// the ground plane. Which ability or status it belongs to has not been
+// established.
+
 #include "common.h"
 #include "../battle/battle.h"
 

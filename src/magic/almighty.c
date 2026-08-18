@@ -1,5 +1,10 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/ALMIGHTY.BIN -- "almighty" (全能). Not one of the 54 Materia spells:
+// the overlay bursts three or six shards out of the target, each integrating
+// its own velocity with decay and a pitch that eases downward. Which ability
+// it belongs to has not been established.
+
 #include "common.h"
 #include "../battle/battle.h"
 

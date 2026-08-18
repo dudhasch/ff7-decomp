@@ -1,5 +1,9 @@
 //! PSYQ=3.3 CC1=2.6.3
 
+// MAGIC/REFREC.BIN -- "Reflect": bounces the next four reflectable spells
+// back at their caster, from Barrier Materia at level 3. Japanese リフレク.
+// See docs/spells/magic/reflect.md.
+
 #include "common.h"
 #include "../battle/battle.h"
 
