@@ -4981,7 +4981,40 @@ void OpcodeFuncPdira(void) {
     FieldEventSetDirByActorId(actorId);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+/* Face the current entity towards another entity. Reads both models' fixed
+ * point positions, computes the direction with FieldEntityDirByVec, and snaps
+ * the current entity's Dir to it, cancelling any turn in progress. No-op when
+ * either entity has no model. The g_FieldModels *0x84 base regalloc is the
+ * wall; codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+#else
+void FieldEventSetDirByActorId(u8 actorId) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    u8 curModel;
+    u8 targetModel;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        return;
+    }
+    targetModel = g_EntityToModel[actorId];
+    if (targetModel == 0xFF) {
+        return;
+    }
+    from.vx = g_FieldModels[curModel].PosX >> 12;
+    from.vy = g_FieldModels[curModel].PosY >> 12;
+    from.vz = g_FieldModels[curModel].PosZ >> 12;
+    to.vx = g_FieldModels[targetModel].PosX >> 12;
+    to.vy = g_FieldModels[targetModel].PosY >> 12;
+    to.vz = g_FieldModels[targetModel].PosZ >> 12;
+    g_FieldModels[curModel].Dir = FieldEntityDirByVec(&from, &to, &sqrDist);
+    g_FieldModels[curModel].TurnType = 0;
+    g_FieldModels[curModel].TurnStep = 0;
+}
+#endif
 
 void OpcodeFuncTura(void) {
     if (g_DebugLevel & 3) {
