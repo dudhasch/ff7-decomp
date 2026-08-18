@@ -110,23 +110,55 @@ static void EscapeCaptureScreen(void) {
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
-/* 54 of 361 instructions, one root cause: the target has more register
- * pressure here than we do. It spills `col * 2 - 0x2A` and `row * 2 - 0x20`
- * to the stack as induction variables (frame 0x60, slots 0x20 and 0x28) and
- * re-materialises `&EscapeGrid` inside the loop; we make neither a giv --
- * computing both inline as `addiu`/`sll` -- and spend the freed slot on a
- * hoisted `&EscapeGrid` instead (frame 0x58). Everything else, including the
- * whole distance-table loop and every register in the tile loop, is identical,
- * and the function is exactly the right length.
+/* 52 of 361 instructions. One structural difference, and it is a cost decision
+ * inside gcc's loop optimiser rather than anything about the C. The target
+ * carries five values in the tile loop's stack frame (0x60):
  *
- * Tried, in order: `col * 2 - 0x2A` written out (gcc makes a giv starting at 0
- * and adds the constant separately); `(col - 21) * 2` (no giv at all -- what is
- * below, and the best of the three); dedicated `vx`/`vy` locals assigned at the
- * top of the inner loop, the form that turned `col * 8 - 0xA0` into a perfect
- * giv in the distance-table loop above (218 rows, worse); the same reusing `x`
- * and `y` (274 rows). Permuter: base 3450, plateaued at 1610 over ~2000
- * iterations, and only by rewriting every `a * b` as a call to an inline
- * multiply helper -- noise, not a finding. */
+ *     16(sp) n            24(sp) row * 8      48(sp) row * 8 + 8
+ *     32(sp) col * 2 - 42 40(sp) row * 2 - 32
+ *
+ * We carry four (frame 0x58) -- n, row * 8, row * 8 + 8, and, in place of the
+ * two arithmetic ones, a giv holding `&EscapeGrid[0][col]` that we spill and
+ * reload for Corner[0]. The target has no such giv: it rematerialises the bare
+ * `&EscapeGrid` constant and adds its col*12 and row*492 givs to it, and
+ * recomputes nothing, spending the freed slots on `col * 2 - 42` and
+ * `row * 2 - 32` instead of the `addiu`/`sll` pair we emit inline. Everything
+ * else -- both earlier loops, the prim setup, all four Corner stores, every
+ * register -- is identical, and the function is exactly the right length.
+ *
+ * Tried and rejected, each measured as an instruction-sequence diff against the
+ * retail overlay (rows = exact, shape = after normalising stack offsets and
+ * branch targets, so a frame-size change does not cascade; base is 104/46):
+ *
+ *   - every spelling of the two products: `col * 2 - 42`, `(col - 21) << 1`,
+ *     `2 * (col - 21)`, `col + col - 42`. All compile identically to what is
+ *     below (104/46) or, with the constant split out, to 164/152.
+ *   - hoisting them into locals, which is the form that makes `col * 8 - 0xA0`
+ *     a perfect giv in the distance loop above: at the top of the inner loop
+ *     218/164, reusing x and y 274/226, and `row * 2 - 32` in the outer loop
+ *     (where it is genuinely invariant) 222/208. A user variable wins a
+ *     register outright; the target wants a spill slot, which no C phrasing
+ *     asks for.
+ *   - seven phrasings of the Corner block, to stop the address giv forming:
+ *     a `EscapeCell *c` walked by +1/+41/+42 (264/206), a row pointer
+ *     (288/246), flat `&EscapeGrid[0][row * 41 + col]` (324/272), `+` instead
+ *     of `&[]` (266/208), and reordering the four stores (212/156). All worse:
+ *     the block as written is what the target compiles.
+ *   - separate loop counters for the distance table (162/110).
+ *
+ * What did help, and is in the code below: writing `rand()` as the *first*
+ * operand of the two Vel sums. `(rand() & 3) + (col - 21) * 2` is two rows
+ * better than `(col - 21) * 2 + (rand() & 3)` and the same again for vy --
+ * 108/50 to 104/46 -- because the induction value is then computed after the
+ * call instead of having to survive it.
+ *
+ * Permuter: base 2400, best 840 over 27k iterations at -j20, and that 840 is an
+ * artefact. Its find is the usual `inline int inline_fn(a, b) { return a * b;
+ * }` rewrite; `inline` without `static` emits an out-of-line copy of the
+ * helper, which lands ahead of the function and shifts the whole address range.
+ * Written as `static inline` so no copy is emitted, the same rewrite measures
+ * 140/134 -- worse than doing nothing. The permuter's score does not track the
+ * real distance for this function; re-measure anything it produces here. */
 void func_801B009C(void) {
     s32 row;
     s32 col;
@@ -158,8 +190,8 @@ void func_801B009C(void) {
 
             EscapeTiles[n].Pos.vx = EscapeTiles[n].Pos.vy =
                 EscapeTiles[n].Pos.vz = 0;
-            EscapeTiles[n].Vel.vx = (col - 21) * 2 + (rand() & 3);
-            EscapeTiles[n].Vel.vy = (row - 16) * 2 + (rand() & 3);
+            EscapeTiles[n].Vel.vx = (rand() & 3) + (col - 21) * 2;
+            EscapeTiles[n].Vel.vy = (rand() & 3) + (row - 16) * 2;
             EscapeTiles[n].Vel.vz = rand() | 0xFF80;
 
             SetPolyFT4(&EscapeTiles[n].prim[0]);
