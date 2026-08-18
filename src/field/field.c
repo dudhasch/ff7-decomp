@@ -1620,7 +1620,62 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToPartPkts);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetSplashToPktsBelowLvl);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiInitSplashPkts);
+extern s32 D_800E0200;
+
+/* Initialise the two-primitive splash/water GPU packets for one field model.
+ * Walks a 0x5C-byte packet per of 31 levels, setting the sprite code, the
+ * semi-transparency/shade flags, the CLUT/tpage, and the per-level UV from the
+ * model's part data. The $s0 base is computed into the `jal GetGraphType`
+ * delay slot and the packet pointer strength-reduces through the loop — a
+ * scheduler/strength-reduction coupling gcc cannot reproduce from C. Codegen
+ * pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiInitSplashPkts);
+#else
+void KawaiInitSplashPkts(void* arg0, s32 arg1) {
+    s16 clut;
+    s32 i;
+    u8* pkt;
+    u16* parts;
+    u8* base;
+
+    base = (u8*)D_800E0200 + arg1 * 0xAC8;
+    if (GetGraphType() == 1 || GetGraphType() == 2) {
+        clut = 0x22B;
+    } else {
+        clut = 0x9B;
+    }
+    i = 1;
+    pkt = base + 0x5C;
+    parts = (u16*)(*(u32*)((u8*)arg0 + 0x1C) + 4);
+    do {
+        pkt[0x7] = 0x2C;
+        pkt[0x2F] = 0x2C;
+        i++;
+        pkt[0x3] = 9;
+        pkt[0x2B] = 9;
+        pkt[0x2E] = 0x80;
+        pkt[0x6] = 0x80;
+        pkt[0x2D] = 0x80;
+        pkt[0x5] = 0x80;
+        pkt[0x2C] = 0x80;
+        pkt[0x4] = 0x80;
+        *(s16*)(pkt + 0x36) = 0x6C2C;
+        *(s16*)(pkt + 0xE) = 0x6C2C;
+        *(s16*)(pkt + 0x3E) = clut;
+        *(s16*)(pkt + 0x16) = clut;
+        *(s16*)(pkt + 0x50) = 0;
+        *(s16*)(pkt + 0x52) = 0;
+        *(s16*)(pkt + 0x54) = 0;
+        pkt[0x7] |= 2;
+        pkt[0x2F] |= 2;
+        *(s16*)(pkt + 0x5A) = 0;
+        *(s16*)(pkt + 0x58) = -*(s16*)parts;
+        parts += 2;
+        pkt += 0x5C;
+    } while (i < 0x1F);
+}
+#endif
 
 s32 KawaiSetPartAttribute(FieldModelEntry* model, u8* data) {
     u8* parts;
