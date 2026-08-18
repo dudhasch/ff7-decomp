@@ -1350,13 +1350,13 @@ void FieldEntityGatewayCheck(
 }
 
 /* One entry of the map's background-trigger block. Even `type`s arm the
- * trigger, odd ones disarm it. */
+ * trigger, odd ones disarm it. The pos is reused as the trigger's line. */
 typedef struct {
-    /* 0x00 */ u8 unk00[0xC];
+    /* 0x00 */ LinePos pos;
     /* 0x0C */ u8 entityId;
     /* 0x0D */ u8 unk0D;
     /* 0x0E */ u8 type;
-    /* 0x0F */ u8 unk0F;
+    /* 0x0F */ u8 unk0F; // sound-effect index into D_800A00BC
 } FieldBgTrigger;
 
 /* Arms (even type) or disarms (odd type) one background trigger, and reports
@@ -1407,7 +1407,81 @@ s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
 #endif
 
 const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+
+void func_8001117C(u16 arg0); // AKAO SFX player
+
+/* Walk the 12 background triggers against one entity and arm/disarm each it
+ * crosses or comes near. In-proximity arms directly when the entity stands on
+ * the line, else needs the entity facing it within +/-64; crossing types 4/5
+ * arm/disarm on the back-side sign test. Each state change plays the trigger's
+ * sound effect. Verified C kept as the #else; codegen pinned via
+ * MASPSX_OVERRIDE (the dual walking-pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+#else
+void FieldEntityTriggerCheck(
+    FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
+    s16 seIds[4];
+    s32* from;
+    s32* nearest;
+    FieldBgTrigger* trigger;
+    s32 sqrDist;
+    s32 cross;
+    u8 dir;
+    s32 i;
+
+    memcpy(seIds, (void*)D_800A00BC, 8);
+    from = (s32*)0x1F800000;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    for (i = 0; i < 12; i++) {
+        trigger = &triggers[i];
+        if (trigger->entityId == 0xFF) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine((FieldLine*)trigger, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            if (from[0] == nearest[0] && from[1] == nearest[1]) {
+                if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                    func_8001117C(seIds[trigger->unk0F]);
+                }
+                continue;
+            }
+            dir =
+                FieldEntityDirByVec((VECTOR*)from, (VECTOR*)nearest, &sqrDist);
+            if ((u8)(dir - entity->MoveDir + 0x40) >= 0x80) {
+                continue;
+            }
+            if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+            continue;
+        }
+        if (trigger->type >= 4) {
+            cross = (trigger->pos.x2 - trigger->pos.x1) *
+                        (from[1] - trigger->pos.y1) -
+                    (from[0] - trigger->pos.x1) *
+                        (trigger->pos.y2 - trigger->pos.y1);
+            if (cross > 0) {
+                continue;
+            }
+        }
+        if (trigger->type == 2 || trigger->type == 4) {
+            if (FieldEntityBgTriggerActivate(trigger, 1) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+        if (trigger->type == 3 || trigger->type == 5) {
+            if (FieldEntityBgTriggerActivate(trigger, 0) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+    }
+}
+#endif
 
 /* FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
  * the C matches, but gcc precedes the switch's jump table with `.align 3` and
