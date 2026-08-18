@@ -553,8 +553,9 @@ The batch shape that works:
 ## Adding a MAGIC spell overlay
 
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
-same slot at `0x801B0000`. Two are in the build: `BARRIER.BIN` (`src/magic/
-barrier.c`) and `MABARIA.BIN` (`src/magic/mabaria.c`). They are the cheapest
+same slot at `0x801B0000`. Three are in the build: `BARRIER.BIN` (`src/magic/
+barrier.c`), `MABARIA.BIN` (`src/magic/mabaria.c`) and `REFREC.BIN`
+(`src/magic/refrec.c`) — the latter two each landed in one pass. They are the cheapest
 work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
 entanglement — and the ones near barrier in size are near-clones of it, so the
 matching C is largely a transcription with different field offsets.
