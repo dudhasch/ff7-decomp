@@ -871,7 +871,71 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
     *(u16*)&D_8009ABF4.pcDirection = gateway->destDirection;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+/* Per-frame talk scan: on the rising edge of the OK button, score every entity
+ * by how directly the player faces it (and how near), then request the talk
+ * script of the best candidate. Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE (the walking quality-array pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+#else
+void FieldEntityCheckTalk(void) {
+    VECTOR from;
+    VECTOR to;
+    s16 quality[16];
+    s32 sqrDist;
+    s16 best;
+    u16 bestId;
+    u8 dirTo;
+    s32 i;
+
+    if (!(g_FieldPad2State & 0x20) || (g_FieldPad2PrevState & 0x20)) {
+        return;
+    }
+    from.vx = g_FieldEntity[g_PlayerModelId].PosX >> 12;
+    from.vy = g_FieldEntity[g_PlayerModelId].PosY >> 12;
+    from.vz = g_FieldEntity[g_PlayerModelId].PosZ >> 12;
+    for (i = 0; i < D_8009AC1C; i++) {
+        quality[i] = 0x100;
+        if (i == g_PlayerModelId) {
+            continue;
+        }
+        if (g_FieldEntity[i].TalkOff != 0) {
+            continue;
+        }
+        to.vx = g_FieldEntity[i].PosX >> 12;
+        to.vy = g_FieldEntity[i].PosY >> 12;
+        to.vz = g_FieldEntity[i].PosZ >> 12;
+        if (from.vx == to.vx && from.vy == to.vy) {
+            continue;
+        }
+        if ((u32)(from.vz - to.vz + 0xFF) >= 0x1FF) {
+            continue;
+        }
+        dirTo = FieldEntityDirByVec(&from, &to, &sqrDist);
+        if ((u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo) >= 0x81) {
+            quality[i] =
+                0x100 - (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        } else {
+            quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        }
+        if (sqrDist >= g_FieldEntity[i].TalkRange +
+                           g_FieldEntity[g_PlayerModelId].SolidRange) {
+            quality[i] = 0x100;
+        }
+    }
+    best = 0x40;
+    bestId = g_PlayerModelId;
+    for (i = 0; i < D_8009AC1C; i++) {
+        if (quality[i] < best) {
+            best = quality[i];
+            bestId = i;
+        }
+    }
+    if (bestId != g_PlayerModelId && best != 0x40) {
+        g_FieldEntity[bestId].requestTalkScript = 1;
+    }
+}
+#endif
 
 s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
 
