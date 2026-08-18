@@ -1496,7 +1496,73 @@ void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
+/* Header of the shared field-model texture block at *D_800DFCA0. */
+typedef struct {
+    /* 0x0 */ u32 magic;
+    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
+    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
+    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
+    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
+} FieldTexBlockHeader;
+
+/* One record of a TDB ("texture delta") chunk inside a BSX model file. */
+typedef struct {
+    /* 0x00 */ u32 opcode; // 0=memcpy, 1=page patch, 2=CLUT patch, 3=LoadImage
+    /* 0x04 */ u32 srcOff; // source RECT (0,3) / pixels (1,2), rel. to tdb
+    /* 0x08 */ u32 size;   // memcpy byte count (op 0)
+    /* 0x0C */ u32 dstOff; // dest rel. tdb (0) / page idx (1) / CLUT idx (2) /
+                           // RECT (3)
+} TdbRecord;               // size 0x14
+
+/* Apply a TDB ("texture delta") chunk from a BSX model file. Each record
+ * relocates a raw blob (op 0), splices one 0x200-byte page (op 1) or one
+ * 0x20-byte CLUT (op 2) into the shared model texture block at *D_800DFCA0, or
+ * uploads an embedded image straight to VRAM (op 3). The fixed-size copies are
+ * gcc's inlined memcpy expansion (dual lwl/lw form) — a scheduler/expansion
+ * coupling. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
+#else
+void FieldModelBsxTdbModify(u8* tdb) {
+    FieldTexBlockHeader* block;
+    TdbRecord* rec;
+    s32 count;
+    s32 i;
+
+    if (tdb == NULL) {
+        return;
+    }
+    count = *(s32*)tdb;
+    if (count <= 0) {
+        return;
+    }
+    rec = (TdbRecord*)(tdb + 8);
+    for (i = 0; i < count; i++, rec = (TdbRecord*)((u8*)rec + 0x14)) {
+        switch (rec->opcode) {
+        case 0:
+            memcpy(tdb + rec->dstOff, tdb + rec->srcOff, rec->size);
+            break;
+        case 1:
+            block = (FieldTexBlockHeader*)D_800DFCA0;
+            if (rec->dstOff < block->numPages) {
+                memcpy((u8*)block + block->pageOffset + (rec->dstOff << 9),
+                       tdb + rec->srcOff, 0x200);
+            }
+            break;
+        case 2:
+            block = (FieldTexBlockHeader*)D_800DFCA0;
+            if (rec->dstOff < block->numCluts) {
+                memcpy((u8*)block + block->clutOffset + (rec->dstOff << 5),
+                       tdb + rec->srcOff, 0x20);
+            }
+            break;
+        case 3:
+            LoadImage((RECT*)(tdb + rec->dstOff), (u_long*)(tdb + rec->srcOff));
+            break;
+        }
+    }
+}
+#endif
 
 extern s32 D_800E0204;
 
