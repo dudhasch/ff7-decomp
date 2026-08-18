@@ -272,15 +272,119 @@ u8* GetCharacterName(s32 battleCharId) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025800);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuAddHpByPartyId);
+// Add `amount` HP to the battle record of party slot `partyId`, clamped to the
+// member's max HP, then mirror the new value into the save-game party record
+// (Savemap.party[charId].hp_cur). Empty party slots (0xFF) are a no-op.
+void SystemMenuAddHpByPartyId(s32 partyId, s32 amount) {
+    u8 battleCharId;
+    s32 new_var;
+    s32 emptySlot;
+    s32 charId;
+
+    battleCharId = D_8009CBDC[partyId];
+    emptySlot = 0xFF;
+    if (battleCharId != emptySlot) {
+        new_var = g_BattleCharIdToCharId[battleCharId];
+        charId = new_var;
+        D_8009D84C[partyId].hp += amount;
+        if (D_8009D84C[partyId].hp > D_8009D84C[partyId].unk12) {
+            D_8009D84C[partyId].hp = D_8009D84C[partyId].unk12;
+        }
+        Savemap.party[charId].hp_cur = D_8009D84C[partyId].hp;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025988);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuAddMpByPartyId);
+// Add `amount` MP to the battle record of party slot `partyId`, clamped to the
+// member's max MP, then mirror the new value into the save-game party record
+// (Savemap.party[charId].mp_cur). Empty party slots (0xFF) are a no-op.
+void SystemMenuAddMpByPartyId(s32 partyId, s32 amount) {
+    u8 battleCharId;
+    s32 new_var;
+    s32 emptySlot;
+    s32 charId;
 
+    battleCharId = D_8009CBDC[partyId];
+    emptySlot = 0xFF;
+    if (battleCharId != emptySlot) {
+        new_var = g_BattleCharIdToCharId[battleCharId];
+        charId = new_var;
+        D_8009D84C[partyId].mp += amount;
+        if (D_8009D84C[partyId].mp > D_8009D84C[partyId].unk16) {
+            D_8009D84C[partyId].mp = D_8009D84C[partyId].unk16;
+        }
+        Savemap.party[charId].mp_cur = D_8009D84C[partyId].mp;
+    }
+}
+
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuRemovePartyGold);
+#else
+/* PARKED — 6 changed, 2 inserted. Semantics exact; only codegen shape differs.
+ * Target walks a cached `u32*` to D_8009D260 in $a1 (lui/addiu, all lw/sw via
+ * 0(a1)), hoists the `subu v0,v1,a0` into the bnez delay slot, and reloads the
+ * old gold / returns arg0 via two addu delay-slot fillers. gcc 2.7.2 instead:
+ *  - folds &D_8009D260 to a %lo-form global access in $v1 (never $a1) and
+ *    re-materialises the address via a 2nd lui+$at for EACH store (2 extra
+ *    instrs) — the SAME $a1-vs-%lo wall as sibling SystemMenuAddPartyGold.
+ * Levers tried (all fail the same wall, just different costume):
+ *  - Direct `D_8009D260` access, diff hoisted as dead local: gcc puts diff in
+ *    $a1, gold in $v1, %lo-form per store (7 changed/2 inserted).
+ *  - `u32* goldp = &D_8009D260` local + store `gold - arg0` inline (kills the
+ *    dead local): gcc const-folds goldp back to %lo global, diff now in v0 —
+ *    best direct-C shape (6 changed/2 inserted), but still %lo+$at, not $a1.
+ *  - File-scope `u32* s_PartyGold = &D_8009D260`: gcc caches the pointer and
+ *    walks 0(a1) — but loads the pointer VALUE from $gp (%gp_rel), not
+ *    lui/addiu (2 changed: lui/addiu vs lw $gp_rel + nop).
+ *  - `__attribute__((section(".data")))` on that pointer: forces lui/lw of the
+ *    pointer's value — one indirection the target doesn't have (3 changed).
+ * The blocker is gcc 2.7.2's refusal to keep &D_8009D260 materialised in $a1
+ * with 0(a1) offset form — identical wall to the sibling (see its note below).
+ * Solve one and the recipe transfers. Needs permuter or a toolchain lever. */
+u32 SystemMenuRemovePartyGold(u32 arg0) {
+    u32 gold = D_8009D260;
 
+    if (gold < arg0) {
+        D_8009D260 = 0;
+        return gold;
+    }
+    D_8009D260 = gold - arg0;
+    return arg0;
+}
+#endif
+
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuAddPartyGold);
+#else
+/* PARKED — 7 changed, 3 inserted. Semantics are exact; only codegen shape
+ * differs. Target walks a cached `u32*` to D_8009D260 in $a1 (lui/addiu, then
+ * 0(a1) for lw/sw), and merges the -1 store into the beqz delay slot via a
+ * single reload
+ * (`sw v0,0(a1)` + `j`). gcc 2.7.2 will not reproduce this:
+ *  - Direct `D_8009D260 + arg0` (m2c seed): gcc folds &D_8009D260 to a %lo-form
+ *    global access, puts the address in $v0 (not $a1), and re-materialises it
+ * via a second lui+$at for EACH store — so no delay-slot sink, 3 extra instrs.
+ *  - `u32* gold = &D_8009D260` local: gcc constant-folds the local pointer
+ * straight back to the %lo-form global — identical output to the direct form
+ * (no lever).
+ *  - `volatile u32* gold`: forces the pointer but gcc splits the volatile
+ * address materialisation (worse: 9 changed/4 inserted). The blocker is
+ * gcc 2.7.2's register allocator choosing $v0 over $a1 for the address and
+ * refusing to sink the store across the branch — same cross-TU / small-data
+ * alloc wall noted in repo memory for 1255C.c. Needs a permuter run or a
+ * toolchain address-form lever. */
+void SystemMenuAddPartyGold(s32 arg0) {
+    u32* gold = &D_8009D260;
+    u32 sum = *gold + arg0;
+
+    if (sum < *gold) {
+        *gold = -1;
+        return;
+    }
+    *gold = sum;
+}
+#endif
 
 s32 SystemMenuGetPartyGold(void) { return Savemap.gil; }
 
