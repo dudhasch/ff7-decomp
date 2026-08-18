@@ -7608,7 +7608,48 @@ s32 OpcodeFuncSplit(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventJoinSet);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+/* Drive one party member through a SPLIT: state 0 starts the move, state 1
+ * waits for the move then starts the turn, state 2 waits for the turn, state 3
+ * is done. Returns 1 while a step is still in progress. The g_FieldModels
+ * *0x84 base regalloc and the s16 arg-widening (<<0x10/>>0x10) are the wall;
+ * codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+#else
+s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("split p1=", entityId, 2);
+    }
+    if (entityId == 0xFF) {
+        return 1;
+    }
+    switch (g_EntitySplitJoinState[entityId]) {
+    case 0:
+        FieldEventSplitJoinSetMove(entityId, x, y, turnDir, a4);
+        g_EntitySplitJoinState[entityId] = 1;
+        return 0;
+    case 1:
+        if (FieldEventSplitJoinEndMove(entityId) == 0) {
+            return 0;
+        }
+        g_FieldModels[g_EntityToModel[entityId]].SolidOff = 0;
+        g_FieldModels[g_EntityToModel[entityId]].TalkOff = 0;
+        FieldEventSplitJoinSetTurn(
+            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir, a4 & 0xFF);
+        g_EntitySplitJoinState[entityId] = 2;
+        return 0;
+    case 2:
+        if (FieldEventSplitJoinEndTurn(entityId) == 0) {
+            return 0;
+        }
+        g_EntitySplitJoinState[entityId] = 3;
+        return 1;
+    case 3:
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetMove);
 
