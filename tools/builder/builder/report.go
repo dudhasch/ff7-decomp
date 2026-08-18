@@ -24,7 +24,7 @@ func Report(version string, outputFile string) error {
 	if err := writeSplatConfigs(b); err != nil {
 		return err
 	}
-	if err := writeSha1Check(b); err != nil {
+	if err := writeSha1Check(b, nil); err != nil {
 		return err
 	}
 	_ = os.Setenv("FF7_PROGRESS_REPORT", "1")
