@@ -1,23 +1,39 @@
 #include "common.h"
 
-INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A0000);
-
-INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A00CC);
-
-INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A015C);
-
-INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A01A0);
-
-INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A0514);
-
-s32 func_800A0514(s32 arg0);
-
 typedef struct {
     u16 magic[4];
     u16 unk8;
     u16 unkA;
     u16 colors[1];
 } BromStruct;
+
+extern s32 func_80017108(void* src, void* dst); // gzip decompress
+extern void LoadImage(void* rect, void* p);
+
+s32 func_800A0514(s32 arg0);
+void func_800A0534(BromStruct* arg0);
+u16 func_800A05D4(BromStruct* img, s32 arg1, s32 arg2);
+
+INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A0000);
+
+INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A00CC);
+
+void func_800A015C(void) {
+    if (func_80017108((void*)0x801B0000, (void*)0x801C0000) > 0) {
+        func_800A0534((BromStruct*)0x801C0000);
+        func_800A05D4((BromStruct*)0x801C0000, -1, -1);
+    }
+}
+
+INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A01A0);
+
+s32 func_800A0514(s32 arg0) {
+    s32 g = arg0 & 0x3E0;
+    s32 b = arg0 & 0x1F;
+    s32 r = (u32)(arg0 & 0x7C00) >> 10;
+
+    return (b << 10) | (r | g);
+}
 
 void func_800A0534(BromStruct* arg0) {
     s32 total_pixels;
@@ -40,8 +56,6 @@ void func_800A0534(BromStruct* arg0) {
         } while (i < limit);
     }
 }
-
-extern void LoadImage(void* rect, void* p);
 
 u16 func_800A05D4(BromStruct* img, s32 arg1, s32 arg2) {
     s16 rect[4];
