@@ -25,6 +25,27 @@ void func_800A015C(void) {
     }
 }
 
+// The BRO browser's main loop: pick an index with the d-pad, gzip-inflate that
+// file over the overlay at 0x801B0000 through func_800A015C, and draw it into
+// one of two OTs while the other is on screen. Seeded and taken from 87 rows to
+// 59; started over rather than left half-applied. What is established:
+//
+//   * m2c collapses the stack buffer to a bare `u8`, which gets the frame wrong
+//     (0x40 against 0x98). Only sp+0x10 is ever named -- everything else goes
+//     through registers -- and the saved registers occupy 0x70..0x94, so the
+//     locals are one 0x60-byte buffer at 0x10. `u8 buf[0x60]` restores the
+//     frame; the first 8 bytes hold the template copied from D_800A06BC and
+//     the digits are written back into bytes 3..0.
+//   * The index and its scratch copy are s32, not m2c's u16. The target
+//     compares them full-width (`bgez s3`, `slti v0,s3,0x400`), so every u16
+//     spelling costs an `andi 0xffff` at each test -- that alone was 5 rows.
+//   * s8 holds `sp + 0x10` as a loop invariant. gcc will instead spend s8 on
+//     the 0xCCCCCCCD magic for the `/ 10` in the digit loop, so the two compete
+//     for the register and that is the thing to aim at next.
+//   * The outer loop is guarded, not a do/while: the target tests the exit flag
+//     before entering even though it was just zeroed. Writing `while (!done)`
+//     is not enough on its own -- gcc still folds the test -- so the guard has
+//     to come from somewhere else.
 INCLUDE_ASM("asm/us/brom/nonmatchings/brom", func_800A01A0);
 
 s32 func_800A0514(s32 arg0) {
