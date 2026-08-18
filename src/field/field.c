@@ -1596,7 +1596,68 @@ s32 KawaiSetColorToModelPkts(FieldModelEntry* model, u8* data) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLoadEyesMouthTexToVram);
+/* Load this model's animated eye/mouth textures into VRAM. The face selector
+ * (arg1) is four bytes: two mouth frames, one eye frame, and a "has animation"
+ * flag; values 0x21+ in the flag mean the model has no animated face and the
+ * function is a no-op. Each present variant is looked up in a per-textureFaceId
+ * index table (mouth: stride 7, eye: stride 3, 0x7E = none) and the matching
+ * 0x200-byte page of the model's texture block is uploaded to its VRAM tile.
+ *
+ * Semantically right, codegen pinned via MASPSX_OVERRIDE: the verified C is the
+ * #else. The target keeps the table base in a callee-saved register and
+ * strength-reduces faceId*7 / faceId*3; gcc picks different registers. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiLoadEyesMouthTexToVram);
+#else
+extern u8 D_800DFCA4[]; /* mouth texture index table, stride 7 per face */
+extern u8 D_800DFD94[]; /* eye texture index table, stride 3 per face */
+
+s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
+    RECT rect;
+    u8* texBlock;
+    u8* texData;
+    s32 n;
+    s32 q;
+    u8 faceId;
+
+    n = faceSel[3];
+    if (n >= 0x21) {
+        return 1;
+    }
+    texBlock = (u8*)D_800DFCA0;
+    faceId = model->textureFaceId;
+
+    /* First mouth frame. */
+    q = n >> 2;
+    rect.x = ((n - q * 4) << 4) + 0x300;
+    rect.y = (q << 5) + 0x100;
+    rect.w = 8;
+    rect.h = 0x20;
+    texData = *(u8**)(texBlock + 8);
+    LoadImage(
+        &rect, (u_long*)(texData + (D_800DFCA4[faceId * 7 + faceSel[0]] << 9)));
+
+    /* Second mouth frame, one tile to the right. */
+    rect.x = ((n - q * 4) << 4) + 0x308;
+    rect.y = (q << 5) + 0x100;
+    rect.w = 8;
+    rect.h = 0x20;
+    texData = *(u8**)(texBlock + 8);
+    LoadImage(
+        &rect, (u_long*)(texData + (D_800DFCA4[faceId * 7 + faceSel[1]] << 9)));
+
+    /* Eye frame. */
+    q = n >> 3;
+    rect.x = ((n - q * 8) << 3) + 0x300;
+    rect.y = (q << 5) + 0x1A0;
+    rect.w = 8;
+    rect.h = 0x20;
+    texData = *(u8**)(texBlock + 8);
+    LoadImage(
+        &rect, (u_long*)(texData + (D_800DFD94[faceId * 3 + faceSel[2]] << 9)));
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
 
