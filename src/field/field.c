@@ -7191,7 +7191,43 @@ s32 FieldEventSplitJoinEndMove(s16 entityId) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetTurn);
+/* Begin a party member's turn to a facing during a SPLIT or JOIN. Sets the
+ * turn target and step budget, then if the raw delta would exceed half a
+ * circle wraps the target the short way round. Codegen pinned via
+ * MASPSX_OVERRIDE: the #else body is the verified-correct C; its bytes come
+ * from the reference .s (the g_FieldModels *0x84 base register allocation). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetTurn);
+#else
+void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
+    FieldEntity* model;
+    s16 delta;
+
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("set turn=", endDir & 0xFF, 2);
+    }
+    if (g_EntityToModel[entityId] != 0xFF) {
+        model = &g_FieldModels[g_EntityToModel[entityId]];
+        model->TurnStart = startDir & 0xFF;
+        g_FieldModels[g_EntityToModel[entityId]].TurnType = 2;
+        g_FieldModels[g_EntityToModel[entityId]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[entityId]].TurnSteps = 0x10;
+        g_FieldModels[g_EntityToModel[entityId]].TurnEnd = endDir & 0xFF;
+        model = &g_FieldModels[g_EntityToModel[entityId]];
+        delta = model->TurnEnd - model->TurnStart;
+        if (delta < 0) {
+            delta = ~delta + 1;
+        }
+        if (delta >= 0x81) {
+            if ((s16)model->TurnStart < (s16)model->TurnEnd) {
+                model->TurnEnd -= 0x100;
+            } else {
+                model->TurnEnd += 0x100;
+            }
+        }
+    }
+}
+#endif
 
 /* Poll one party member's turn during a SPLIT or JOIN. Returns 1 once the
  * entity has finished turning -- or has no model to turn -- and 0 while it is
