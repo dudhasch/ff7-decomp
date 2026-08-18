@@ -674,7 +674,83 @@ void FieldBGShakeUpdate(FieldShakeData* shake) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+/* Seed the background-scroll state machine from the requested scroll mode.
+ * Only runs while idle (D_8009AC13 == 0). Modes: 0 stops and recentres; 1 arms
+ * scrolling in place; 2/3 begin a single-target scroll; 4 teleports the current
+ * position to the alt source; 5-9 begin a dual-target (eased) scroll. The
+ * target positions/step/fraction are what FieldBGScrollUpdate consumes each
+ * frame.
+ *
+ * Instructions all match; the only diff is the jump table landing at
+ * .rodata+0x54 (target) vs +0x58 (ours) — the field overlay's .rodata base is
+ * 4 mod 8 and this function needs the --phase 4 jump-table demotion, but the
+ * overlay carries both phases at once (the file-split residue). Codegen pinned
+ * via MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+#else
+extern u8 D_8009AC11;  // scroll mode (jump-table selector)
+extern u8 D_8009AC13;  // scroll state (0 = idle)
+extern s16 D_8009A100; // scroll enable
+extern u16 D_8009AC14; // scroll source X
+extern u16 D_8009ABFE; // alt scroll source X
+extern u16 D_8009AC00; // alt scroll source Y
+extern s16 D_80071E38; // current scroll X
+extern s16 D_80071E3C; // current scroll Y
+extern s16 D_8009C558; // scroll step
+extern s16 D_80075CF8; // scroll sub-position / fraction
+extern s16 D_80075E14; // target scroll X
+extern s16 D_80075E1C; // target scroll Y
+extern s16 D_80075E18; // alt target scroll X
+extern s16 D_80075E20; // alt target scroll Y
+
+void FieldBGScrollInit(void) {
+    if (D_8009AC13 != 0) {
+        return;
+    }
+    switch (D_8009AC11) {
+    case 0:
+        D_8009A100 = 0;
+        D_80071E38 = 0;
+        D_80071E3C = 0;
+        D_8009AC13 = 2;
+        break;
+    case 1:
+        D_8009A100 = 1;
+        D_8009AC13 = 1;
+        break;
+    case 2:
+    case 3:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        break;
+    case 4:
+        D_8009A100 = 1;
+        D_8009AC13 = 2;
+        D_80071E38 = D_8009ABFE;
+        D_80071E3C = D_8009AC00;
+        break;
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        D_80075E18 = D_8009ABFE;
+        D_80075E20 = D_8009AC00;
+        break;
+    }
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
 
