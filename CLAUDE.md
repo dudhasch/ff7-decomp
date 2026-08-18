@@ -496,6 +496,32 @@ SMT enabled, two workers sharing a physical core each run near half speed.
 Memory is not the limit (workers are well under 1 GB each), so the only reason
 to go below `nproc - 2` is wanting the machine responsive for other work.
 
+**In a worktree, the clone has to sit beside the *worktree*.**
+`tools/docker-build.ps1` mounts `$repoRoot/../decomp-permuter` at
+`/decomp-permuter`, and `$repoRoot` is the worktree — so the sibling it looks
+for is `.claude/worktrees/decomp-permuter`, not the one next to the main
+checkout. Copy it there (a few MB; delete the copied `.git`) or `import.py`
+dies with `FileNotFoundError: 'mips-linux-gnu-as'` or is simply missing.
+
+**Do not pipe the run through `tail`.** The permuter's progress line is the
+only sign it is alive, and a pipe buffers it until the process exits — which,
+without `--stop-on-zero` firing, is never. Run it with `python3 -u` and no
+pipe. Either way the durable signal is on disk: every improvement lands in
+`nonmatchings/<fn>/output-<score>-<n>/source.c`, so
+`ls -d nonmatchings/*/output-* | sed 's/.*output-//' | sort -n | head` is the
+score board, and `diff nonmatchings/<fn>/base.c <that>/source.c` is the finding.
+
+**Read the finding, do not paste it.** The permuter reaches for two tricks that
+are noise rather than insight: rewriting every `a * b` as a call to an `inline
+int inline_fn(a, b) { return a * b; }`, and introducing a `new_var = 0` to pass
+where a literal `0` stood. Both are semantically identical to what you wrote and
+tell you nothing. What *is* worth taking is a structural change you can restate
+in ordinary C — naming a subexpression, splitting a statement. In `ESCAPE.BIN`
+the one real find was `n = (x * wave) >> 12;` hoisted out of the store that
+followed it: the target interleaves the two multiplies (`mflo v1`, then `mult`
+again before v1 is read), which only happens once the first result is named.
+That single line took `func_801B063C` from 93 differing instructions to 18.
+
 #### Toolchain overrides
 
 decomp-permuter defaults to an N64 toolchain in three places, none of which
@@ -562,8 +588,10 @@ The batch shape that works:
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
 same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
-`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is half, with three functions still
-`INCLUDE_ASM`. They are the cheapest
+`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is half, with three functions parked
+under `#else /* NON_MATCHINGS */` — `func_801B0020` (16 rows),
+`func_801B063C` (8 of 497 instructions) and `func_801B009C` (54 of 361), each
+with its diff and its rejected hypotheses written down. They are the cheapest
 work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
 entanglement — and the ones near barrier in size are near-clones of it, so the
 matching C is largely a transcription with different field offsets.
@@ -625,18 +653,77 @@ The recipe, start to finish:
    `config/symbols.magic-<name>.us.txt` with a `// size:` annotation, and one
    matching global object in the `.c`. splat then renders every interior
    reference as `SYM+0x…`, so the functions still in `asm/` resolve while the
-   ones you have written are C. Two things bite here. A global initialised to
-   zero becomes a *common* symbol, which the linker places wherever it likes —
-   fold it into an object that has at least one non-zero initialiser, or the
-   whole `.data`/`.bss` slides and every address in the diff is wrong. And an
-   `INCLUDE_ASM` function whose *address* you take needs a real declaration:
-   without one gcc substitutes 0 for the identifier, emits `move a0,zero`, and
-   the build says nothing (see *A compile error that ninja calls a success*).
+   ones you have written are C. Two things bite here. A global declared with no
+   initialiser at all becomes a *common* symbol, which the linker places
+   wherever it likes — give it an explicit initialiser, or fold it into an
+   object that has one, or the whole `.data`/`.bss` slides and every address in
+   the diff is wrong. (`= 0` is enough: cc1-psx-26 emits an explicitly
+   zero-initialised global into `.data` in declaration order, so `EscapeBuf`,
+   `EscapeWobble` and `EscapeUnk18` sit around the non-zero `EscapeScale`
+   exactly where the original put them.) And an `INCLUDE_ASM` function whose
+   *address* you take needs a real declaration: without one gcc substitutes 0
+   for the identifier, emits `move a0,zero`, and the build says nothing (see
+   *A compile error that ninja calls a success*).
+
+   **Collapse the regions back into separate objects before tuning the diff.**
+   One symbol per region is a scaffold for the intermediate state, not the
+   shape the original had, and keeping it costs matches: gcc picks the base for
+   a strength-reduced address from the whole object, so `EscapeWork.Tiles[n]`
+   gives a giv based at `EscapeWork` and every access pays `%lo(EscapeWork +
+   0x2ab8)` where the target pays `0x70(s0)` — plus four instructions per
+   iteration to rebuild `&EscapeWork.Tiles[n]` for the calls that take its
+   address. The tell is in the target: a base register used both with small
+   offsets *and* bare (`move a0,s0`) means that base is its own object. Splitting
+   `EscapeWork` into `EscapeGrid`/`EscapeTiles`/`EscapeBackPrims` took
+   `func_801B009C` from 13695 to 4291 in one step. Splitting is safe — the splat
+   rule is per-overlay (`add_splat_config` in `tools/ninja/gen.py`), so only
+   that overlay's `asm/` is rewritten and no other overlay's `.s` is touched.
 
 6. **The verdict is the overlay's SHA-1**, not `checkfn.py`. Once the file is
    plain C there are no `.s` files left for `checkfn` to compare against — it
    reports `no target asm`. `build/us/<name>.exe: OK` in the `make build` tail
    means every instruction *and* every data byte matched.
+
+   That leaves no per-function signal while you are tuning one, and the three
+   obvious substitutes each lie:
+
+   * `checkfn.py` dies with `Not able to find .o file for function` — its
+     `diff.py` call has no `-f`, so the map lookup never finds an overlay
+     function. Call `diff.py` directly instead:
+     `diff.py -o --format=plain -f build/us/src/magic/<ovl>.c.o <fn>`.
+   * That compares against `expected/build/us/src/magic/<ovl>.c.o`, which is a
+     *committed snapshot*. Rename one symbol and every reference to it reads as
+     a difference for the rest of the session — `func_801B009C` scored 3986
+     against an expected object that still said `EscapeWork`, when the real
+     residue was 54 instructions. Use it for structure, never for a score.
+   * Comparing `build/us/<ovl>.exe` against the retail `.BIN` word by word is
+     ground truth only when the lengths already agree. One inserted instruction
+     shifts the rest of the function and every later word "differs" — the same
+     `func_801B009C` read as 250 differing words when 54 instructions differed.
+
+   The honest measure is a diff of the *instruction sequence*, stripped of
+   addresses and encodings, over the function's address range:
+
+   ```shell
+   dump() { mipsel-linux-gnu-objdump -D -b binary -m mips:3000 -EL \
+       --adjust-vma=0x801B0000 "$1" | sed -n "/$2:/,/$3:/p" \
+       | sed -e 's/^ *//' -e 's/\t/ /g' -e 's/^[0-9a-f]*: [0-9a-f]* //'; }
+   dump disks/us/MAGIC/ESCAPE.BIN 801b063c 801b0dfc > /tmp/w.txt
+   dump build/us/escape.exe       801b063c 801b0dfc > /tmp/g.txt
+   diff -y --suppress-common-lines /tmp/w.txt /tmp/g.txt
+   ```
+
+   Equal line counts on both sides means the length is right; the diff is then
+   the real work left, and it names the registers so the story is readable.
+
+7. **A parked function's `.s` freezes at the symbol names of the moment it
+   became C.** splat writes `nonmatchings/<fn>.s` only for functions the `.c`
+   still holds as `INCLUDE_ASM`, so once you replace the stub the file stops
+   being maintained. Rename a `.bss` symbol afterwards and the stale `.s` still
+   refers to the old name; park the function again and the link fails with
+   `undefined reference to EscapeWork` naming a symbol nothing defines any more.
+   `touch config/symbols.magic-<name>.us.txt` re-runs splat and rewrites every
+   `.s` in that overlay against the current names.
 
 Naming: keep the entry point `MAGIC_<Spell>` and prefix the statics, since all
 these overlays share the `0x801B0000` address space and `config/

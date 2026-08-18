@@ -6,87 +6,67 @@
 // The effect grabs the framebuffer, cuts it into a 21x40 grid of textured
 // quads and blows the grid apart. EscapeCaptureScreen copies the two halves of
 // the drawing area into the texture pages the quads sample from;
-// EscapeBuildGrid lays the grid out and gives every tile its own random drift;
+// func_801B009C lays the grid out and gives every tile its own random drift;
 // EscapeUpdateGrid runs the two phases of the animation.
 
 #include "common.h"
 #include "../battle/battle.h"
 
-// One cell of the radial distance table: the sqrt of the squared distance from
-// the screen centre, sampled on the same 8-pixel lattice as the grid.
+// A screen point. Grid corners are copied straight into a POLY_FT4's x/y pair,
+// which is only 2-byte aligned, so this cannot be a VECTOR.
+typedef struct EscapePoint {
+    /* 0x0 */ s16 x;
+    /* 0x2 */ s16 y;
+} EscapePoint;
+
+// One corner of the grid: where that corner currently sits on screen, plus the
+// distance from the screen centre to it, sampled once on the 8-pixel lattice
+// and reused every frame as the phase of the ripple.
 typedef struct EscapeCell {
-    /* 0x0 */ s16 unk0;
-    /* 0x2 */ s16 unk2;
+    /* 0x0 */ EscapePoint Pos;
     /* 0x4 */ s32 Dist;
     /* 0x8 */ s16 unk8;
     /* 0xA */ s16 unkA;
 } EscapeCell;
 
 // One tile of the shattered screen: the two POLY_FT4s it is drawn with (one
-// per frame buffer) followed by its own position, velocity and spin.
+// per frame buffer), the four grid corners it spans, and its own position,
+// velocity, rotation and spin.
 typedef struct EscapeTile {
     /* 0x00 */ POLY_FT4 prim[2];
-    /* 0x50 */ s32 unk50;
-    /* 0x54 */ s32 unk54;
-    /* 0x58 */ s32 unk58;
-    /* 0x5C */ s32 unk5C;
-    /* 0x60 */ s16 unk60;
-    /* 0x62 */ s16 unk62;
-    /* 0x64 */ s16 unk64;
-    /* 0x66 */ s16 unk66;
-    /* 0x68 */ s16 unk68;
-    /* 0x6A */ s16 unk6A;
-    /* 0x6C */ s16 unk6C;
-    /* 0x6E */ s16 unk6E;
-    /* 0x70 */ s16 unk70;
-    /* 0x72 */ s16 unk72;
-    /* 0x74 */ s16 unk74;
-    /* 0x76 */ s16 unk76;
-    /* 0x78 */ s16 unk78;
-    /* 0x7A */ s16 unk7A;
-    /* 0x7C */ s16 unk7C;
-    /* 0x7E */ s16 unk7E;
+    /* 0x50 */ EscapeCell* Corner[4];
+    /* 0x60 */ SVECTOR Pos;
+    /* 0x68 */ SVECTOR Vel;
+    /* 0x70 */ SVECTOR Rot;
+    /* 0x78 */ SVECTOR RotVel;
 } EscapeTile;
 
-// Battle effect instance, as this overlay lays it out: the slot is only used
-// to flag the effect finished.
+// Battle effect instance, as this overlay lays it out.
 typedef struct EscapeData {
-    s16 Id;
-    char pad2[0x1E];
+    /* 0x0 */ s16 Id;
+    /* 0x2 */ s16 AnimationFrame;
+    char pad4[0x1C];
 } EscapeData;
 
 // Battle effect instances.
 extern EscapeData D_80162978[];
 extern u8 D_800F8380;
 
-// .data and .bss are each declared as one object so the two functions still
-// assembled from asm/ can reach every field through a single symbol. Split
-// them up once those land.
-typedef struct EscapeStateT {
-    /* 0x00 */ s32 Frame;
-    /* 0x04 */ s32 unk04;
-    /* 0x08 */ s32 unk08;
-    /* 0x0C */ s32 unk0C;
-    /* 0x10 */ s32 unk10;
-    /* 0x14 */ s32 unk14;
-    /* 0x18 */ s32 unk18;
-} EscapeStateT;
+s32 EscapeBuf = 0;
+s32 EscapeWobble = 0;
+VECTOR EscapeScale = {0x4000, 0x4000, 0x4000, 0};
+s32 EscapeUnk18 = 0;
+EscapeCell EscapeGrid[22][41];
+EscapeTile EscapeTiles[840];
+POLY_F4 EscapeBackPrims[2];
 
-typedef struct EscapeWorkT {
-    /* 0x00000 */ EscapeCell DistTable[22][41];
-    /* 0x02A48 */ EscapeTile Tiles[21][40];
-    /* 0x1CE48 */ POLY_F4 BackPrims[2];
-} EscapeWorkT;
-
-EscapeStateT EscapeState = {0, 0, 0x4000, 0x4000, 0x4000, 0, 0};
-EscapeWorkT EscapeWork;
-
-// Still assembled from asm/; declared so calling them and taking their address
-// works.
+// All three are assembled from asm/ in the matching build; declared so calling
+// them and taking their address works. Without a declaration gcc substitutes 0
+// for the identifier and emits `move a0,zero` with no diagnostic the build
+// surfaces.
 void func_801B0020(void);
 void func_801B009C(void);
 void func_801B063C(void);
-
 static void EscapeMainSetup(void);
 
 void MAGIC_Escape(void) { EscapeMainSetup(); }
@@ -122,9 +102,268 @@ static void EscapeCaptureScreen(void) {
 }
 #endif
 
+// Lays out the 21x40 grid: first the radial distance table the ripple is
+// driven from, then one tile per cell -- two prims chained into a single list,
+// the texture window it samples (the captured screen is split across two
+// texture pages, at u 0x300 and 0x280), the four corners it spans, and a
+// random velocity and spin.
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
+#else
+/* 54 of 361 instructions, one root cause: the target has more register
+ * pressure here than we do. It spills `col * 2 - 0x2A` and `row * 2 - 0x20`
+ * to the stack as induction variables (frame 0x60, slots 0x20 and 0x28) and
+ * re-materialises `&EscapeGrid` inside the loop; we make neither a giv --
+ * computing both inline as `addiu`/`sll` -- and spend the freed slot on a
+ * hoisted `&EscapeGrid` instead (frame 0x58). Everything else, including the
+ * whole distance-table loop and every register in the tile loop, is identical,
+ * and the function is exactly the right length.
+ *
+ * Tried, in order: `col * 2 - 0x2A` written out (gcc makes a giv starting at 0
+ * and adds the constant separately); `(col - 21) * 2` (no giv at all -- what is
+ * below, and the best of the three); dedicated `vx`/`vy` locals assigned at the
+ * top of the inner loop, the form that turned `col * 8 - 0xA0` into a perfect
+ * giv in the distance-table loop above (218 rows, worse); the same reusing `x`
+ * and `y` (274 rows). Permuter: base 3450, plateaued at 1610 over ~2000
+ * iterations, and only by rewriting every `a * b` as a call to an inline
+ * multiply helper -- noise, not a finding. */
+void func_801B009C(void) {
+    s32 row;
+    s32 col;
+    s32 n;
+    s32 x;
+    s32 y;
 
+    for (row = 0; row < 10; row++) {
+        D_801518E4[row].D_80151909 = (D_801518E4[row].D_80151909 & 0x7F) | 2;
+    }
+
+    for (row = 0; row < 22; row++) {
+        for (col = 0; col < 41; col++) {
+            x = col * 8 - 0xA0;
+            y = row * 8 - 0x78;
+            EscapeGrid[row][col].Dist = SquareRoot0(x * x + y * y);
+        }
+    }
+
+    n = 0;
+
+    for (row = 0; row < 21; row++) {
+        for (col = 0; col < 40; col++) {
+            EscapeTiles[n].Rot.vx = EscapeTiles[n].Rot.vy =
+                EscapeTiles[n].Rot.vz = 0;
+            EscapeTiles[n].RotVel.vx = (rand() & 0x3FF) - 0x200;
+            EscapeTiles[n].RotVel.vy = (rand() & 0x3FF) - 0x200;
+            EscapeTiles[n].RotVel.vz = (rand() & 0x3FF) - 0x200;
+
+            EscapeTiles[n].Pos.vx = EscapeTiles[n].Pos.vy =
+                EscapeTiles[n].Pos.vz = 0;
+            EscapeTiles[n].Vel.vx = (col - 21) * 2 + (rand() & 3);
+            EscapeTiles[n].Vel.vy = (row - 16) * 2 + (rand() & 3);
+            EscapeTiles[n].Vel.vz = rand() | 0xFF80;
+
+            SetPolyFT4(&EscapeTiles[n].prim[0]);
+            setRGB0(&EscapeTiles[n].prim[0], 0x80, 0x80, 0x80);
+            SetPolyFT4(&EscapeTiles[n].prim[1]);
+            setRGB0(&EscapeTiles[n].prim[1], 0x80, 0x80, 0x80);
+
+            if (col < 20) {
+                EscapeTiles[n].prim[0].u0 = EscapeTiles[n].prim[1].u0 =
+                    EscapeTiles[n].prim[0].u2 = EscapeTiles[n].prim[1].u2 =
+                        col * 8;
+                EscapeTiles[n].prim[0].u1 = EscapeTiles[n].prim[1].u1 =
+                    EscapeTiles[n].prim[0].u3 = EscapeTiles[n].prim[1].u3 =
+                        col * 8 + 8;
+                EscapeTiles[n].prim[0].tpage = GetTPage(2, 0, 0x300, 0);
+                EscapeTiles[n].prim[1].tpage = GetTPage(2, 0, 0x300, 0);
+            } else {
+                EscapeTiles[n].prim[0].u0 = EscapeTiles[n].prim[1].u0 =
+                    EscapeTiles[n].prim[0].u2 = EscapeTiles[n].prim[1].u2 =
+                        (col - 20) * 8;
+                EscapeTiles[n].prim[0].u1 = EscapeTiles[n].prim[1].u1 =
+                    EscapeTiles[n].prim[0].u3 = EscapeTiles[n].prim[1].u3 =
+                        (col - 20) * 8 + 8;
+                EscapeTiles[n].prim[0].tpage = GetTPage(2, 0, 0x280, 0x100);
+                EscapeTiles[n].prim[1].tpage = GetTPage(2, 0, 0x280, 0x100);
+            }
+
+            EscapeTiles[n].prim[0].v0 = EscapeTiles[n].prim[1].v0 =
+                EscapeTiles[n].prim[0].v1 = EscapeTiles[n].prim[1].v1 = row * 8;
+            EscapeTiles[n].prim[0].v2 = EscapeTiles[n].prim[1].v2 =
+                EscapeTiles[n].prim[0].v3 = EscapeTiles[n].prim[1].v3 =
+                    row * 8 + 8;
+
+            EscapeTiles[n].Corner[0] = &EscapeGrid[row][col];
+            EscapeTiles[n].Corner[1] = &EscapeGrid[row][col + 1];
+            EscapeTiles[n].Corner[2] = &EscapeGrid[row + 1][col];
+            EscapeTiles[n].Corner[3] = &EscapeGrid[row + 1][col + 1];
+
+            if (n != 0) {
+                CatPrim(&EscapeTiles[n - 1].prim[0], &EscapeTiles[n].prim[0]);
+                CatPrim(&EscapeTiles[n - 1].prim[1], &EscapeTiles[n].prim[1]);
+            }
+
+            n++;
+        }
+    }
+
+    SetPolyF4(&EscapeBackPrims[0]);
+    setRGB0(&EscapeBackPrims[0], 0, 0, 0);
+    setXYWH(&EscapeBackPrims[0], 0, 0, 0x140, 0xA6);
+    SetPolyF4(&EscapeBackPrims[1]);
+    setRGB0(&EscapeBackPrims[1], 0, 0, 0);
+    setXYWH(&EscapeBackPrims[1], 0, 0, 0x140, 0xA6);
+}
+#endif
+
+// One frame of the animation. Frames 0..29 ripple the grid in place -- every
+// corner is pushed away from the screen centre by a sine wave whose phase is
+// that corner's distance from the centre -- and the tiles just track their four
+// corners. Frames 30..59 cut the tiles loose: each becomes its own quad, spun
+// and thrown by the velocity it was given in func_801B009C. Frames 60..64 draw
+// nothing, then the effect ends.
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B063C);
+#else
+/* 8 of 497 instructions, all one root cause: the phase-1 temporary holding
+ * `(x * wave) >> 12` shares a pseudo with `n`, the phase-2 loop counter, so gcc
+ * gives it the callee-saved s7; the target keeps it in v1 and uses s7 for the
+ * counter. That one choice also swaps `row` (s7 -> s6) and `frame * 500`
+ * (s6 -> s8). Everything else matches.
+ *
+ * The temporary itself is needed and was found by the permuter: the target
+ * interleaves the two multiplies (`mflo v1` then `mult s5,v0` before v1 is
+ * used), which only happens when the x result is named. Without it the function
+ * is 93 instructions off. Giving the temporary its own local does put it in v1
+ * and fixes these 8 rows, but then phase 2 spills its counter instead and the
+ * function is 271 instructions off; reusing `h` is worse again (88). Permuter:
+ * base 185, no improvement in 3500 iterations. */
+void func_801B063C(void) {
+    // Scratchpad: the tile's four corners, then their centre in the fifth
+    // slot's vx/vy, then the matrix it is drawn with.
+    SVECTOR* corner = (SVECTOR*)0x1F800000;
+    MATRIX* m = (MATRIX*)0x1F800028;
+    EscapeData* effect = &D_80162978[D_8015169C];
+    POLY_FT4* prim;
+    s32 frame = effect->AnimationFrame;
+    s32 row;
+    s32 col;
+    s32 n;
+    s32 x;
+    s32 y;
+    s32 wave;
+    s32 h;
+    long p;
+    long flag;
+
+    if (frame < 30) {
+        EscapeWobble += 0x18;
+
+        for (row = 0; row < 22; row++) {
+            for (col = 0; col < 41; col++) {
+                x = col * 8 - 0xA0;
+                y = row * 8 - 0x78;
+                wave = rsin(EscapeGrid[row][col].Dist * 100 - frame * 500);
+                wave = ((wave * EscapeWobble) >> 12) + 0x1000;
+                wave += EscapeWobble;
+                n = (x * wave) >> 12;
+                EscapeGrid[row][col].Pos.x = n + 0xA0;
+                EscapeGrid[row][col].Pos.y = ((y * wave) >> 12) + 0x78;
+            }
+        }
+
+        for (n = 0; n < 840; n++) {
+            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x0 =
+                EscapeTiles[n].Corner[0]->Pos;
+            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x1 =
+                EscapeTiles[n].Corner[1]->Pos;
+            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x2 =
+                EscapeTiles[n].Corner[2]->Pos;
+            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x3 =
+                EscapeTiles[n].Corner[3]->Pos;
+        }
+
+    } else {
+        frame -= 30;
+
+        if (frame < 30) {
+            h = ReadGeomScreen() * 4;
+
+            for (n = 0; n < 840; n++) {
+                corner[0].vx = EscapeTiles[n].Corner[0]->Pos.x - 0xA0;
+                corner[0].vy = EscapeTiles[n].Corner[0]->Pos.y - 0x78;
+                corner[0].vz = 0;
+                corner[1].vx = EscapeTiles[n].Corner[1]->Pos.x - 0xA0;
+                corner[1].vy = EscapeTiles[n].Corner[1]->Pos.y - 0x78;
+                corner[1].vz = 0;
+                corner[2].vx = EscapeTiles[n].Corner[2]->Pos.x - 0xA0;
+                corner[2].vy = EscapeTiles[n].Corner[2]->Pos.y - 0x78;
+                corner[2].vz = 0;
+                corner[3].vx = EscapeTiles[n].Corner[3]->Pos.x - 0xA0;
+                corner[3].vy = EscapeTiles[n].Corner[3]->Pos.y - 0x78;
+                corner[3].vz = 0;
+
+                corner[4].vx = (corner[0].vx + corner[1].vx + corner[2].vx +
+                                corner[3].vx) >>
+                               2;
+                corner[4].vy = (corner[0].vy + corner[1].vy + corner[2].vy +
+                                corner[3].vy) >>
+                               2;
+
+                corner[0].vx -= corner[4].vx;
+                corner[0].vy -= corner[4].vy;
+                corner[1].vx -= corner[4].vx;
+                corner[1].vy -= corner[4].vy;
+                corner[2].vx -= corner[4].vx;
+                corner[2].vy -= corner[4].vy;
+                corner[3].vx -= corner[4].vx;
+                corner[3].vy -= corner[4].vy;
+
+                EscapeTiles[n].Pos.vx += EscapeTiles[n].Vel.vx;
+                EscapeTiles[n].Pos.vy += EscapeTiles[n].Vel.vy;
+                EscapeTiles[n].Pos.vz += EscapeTiles[n].Vel.vz;
+                EscapeTiles[n].Vel.vz -= EscapeTiles[n].Vel.vz >> 4;
+                EscapeTiles[n].Vel.vy += 4;
+
+                RotMatrixYXZ(&EscapeTiles[n].Rot, m);
+                ScaleMatrix(m, &EscapeScale);
+
+                m->t[0] = corner[4].vx * 4 + EscapeTiles[n].Pos.vx;
+                m->t[1] = corner[4].vy * 4 + EscapeTiles[n].Pos.vy;
+                m->t[2] = h + EscapeTiles[n].Pos.vz;
+
+                SetRotMatrix(m);
+                SetTransMatrix(m);
+                prim = &EscapeTiles[n].prim[EscapeBuf];
+                RotTransPers4(&corner[0], &corner[1], &corner[2], &corner[3],
+                              (long*)&prim->x0, (long*)&prim->x1,
+                              (long*)&prim->x2, (long*)&prim->x3, &p, &flag);
+
+                EscapeTiles[n].Rot.vx += EscapeTiles[n].RotVel.vx;
+                EscapeTiles[n].Rot.vy += EscapeTiles[n].RotVel.vy;
+                EscapeTiles[n].Rot.vz += EscapeTiles[n].RotVel.vz;
+            }
+
+        } else {
+            frame -= 30;
+
+            if (frame >= 5) {
+                effect->Id = -1;
+                return;
+            }
+
+            goto flip;
+        }
+    }
+
+    AddPrims(&g_cDb->unk4080[1], &EscapeTiles[0].prim[EscapeBuf],
+             &EscapeTiles[839].prim[EscapeBuf]);
+
+flip:
+    EscapeBuf ^= 1;
+    effect->AnimationFrame++;
+}
+#endif
 
 // Runs once the grid has finished flying apart: releases every battle model
 // and marks the effect done, which is what actually ends the battle.
