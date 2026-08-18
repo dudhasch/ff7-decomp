@@ -236,6 +236,24 @@ a near-miss, in rough order of frequency:
   When the value *stored* is itself the loop counter, the reduction goes the
   other way — gcc walks a pointer for the address and you have to write that
   pointer by hand (`OpcodeFuncMhmmx`'s first store loop).
+* **One variable across several sequential loops, not one per loop.** Where a
+  function walks the same thing more than once — a grid built, then copied,
+  then transformed — the original usually reuses a single counter, and that is
+  not a style detail. gcc 2.6.3 allocates one pseudo per variable and orders
+  allocation by roughly `refs / live_length`, so merging three loops' counters
+  into one variable sums their reference counts and wins the pseudo a
+  callee-saved register early; writing three variables splits the count three
+  ways and gcc spills the one that loses, adding a `lw`/`addiu`/`sw` to every
+  iteration. `func_801B063C` in `src/magic/escape.c` matched on exactly this:
+  one `row` serving the ripple loop, the corner-copy loop and the tile loop.
+  The tell is a loop counter living on the stack in your build and in a
+  register in the target, while the register counts are otherwise equal.
+* **Put a call first in a sum: `f() + expr`, not `expr + f()`.** Written second,
+  the call forces `expr` to be computed *before* it and to survive it, so the
+  value needs a callee-saved register or a spill slot; written first, `expr` is
+  computed afterwards into a caller-saved temp. Same arithmetic, two
+  instructions apart per statement — `(rand() & 3) + (col - 21) * 2` is what
+  `func_801B009C` needs, twice.
 * **`(x & 7) << 5` narrows the loads, `(x & 7) * 32` does not.** With the
   shift, combine's `force_to_mode` pushes the 3-bit mask back through the
   `plus` and into the `mem`s, so two `s16` fields load as `lbu`/`lbu` (or
@@ -511,16 +529,26 @@ pipe. Either way the durable signal is on disk: every improvement lands in
 `ls -d nonmatchings/*/output-* | sed 's/.*output-//' | sort -n | head` is the
 score board, and `diff nonmatchings/<fn>/base.c <that>/source.c` is the finding.
 
-**Read the finding, do not paste it.** The permuter reaches for two tricks that
-are noise rather than insight: rewriting every `a * b` as a call to an `inline
-int inline_fn(a, b) { return a * b; }`, and introducing a `new_var = 0` to pass
-where a literal `0` stood. Both are semantically identical to what you wrote and
-tell you nothing. What *is* worth taking is a structural change you can restate
-in ordinary C — naming a subexpression, splitting a statement. In `ESCAPE.BIN`
-the one real find was `n = (x * wave) >> 12;` hoisted out of the store that
-followed it: the target interleaves the two multiplies (`mflo v1`, then `mult`
-again before v1 is read), which only happens once the first result is named.
-That single line took `func_801B063C` from 93 differing instructions to 18.
+**Read the finding, do not paste it — and re-measure it.** The permuter reaches
+for two tricks that are noise rather than insight: rewriting every `a * b` as a
+call to an `inline int inline_fn(a, b) { return a * b; }`, and introducing a
+`new_var = 0` to pass where a literal `0` stood. Both are semantically identical
+to what you wrote. The first is worse than inert: the helper is declared
+`inline`, not `static inline`, so gcc 2.6.3 emits an out-of-line copy of it —
+which on an overlay lands ahead of the function and shifts the whole address
+range, and the scorer reads that as a large improvement. On `func_801B009C` it
+reported 840 against a base of 2400; rewritten as `static inline` so no copy is
+emitted, the same change measures *worse* than doing nothing. Score every
+permuter output against the real overlay before believing it.
+
+What *is* worth taking is a structural change you can restate in ordinary C —
+naming a subexpression, splitting a statement. Even then a find is only true of
+the state it was found in. The permuter's one real result on `ESCAPE.BIN`,
+`n = (x * wave) >> 12;` hoisted out of the store that followed it, was worth 75
+instructions when `.bss` was still one big `EscapeWork` object; after that was
+split into the separate objects the original had, the plain inline expression is
+what the target compiles and the named temporary costs eight rows. Re-derive a
+find after any change to the layout it was measured against.
 
 #### Toolchain overrides
 
@@ -588,13 +616,13 @@ The batch shape that works:
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
 same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
-`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is half, with three functions parked
-under `#else /* NON_MATCHINGS */` — `func_801B0020` (16 rows),
-`func_801B063C` (8 of 497 instructions) and `func_801B009C` (54 of 361), each
-with its diff and its rejected hypotheses written down. They are the cheapest
-work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
-entanglement — and the ones near barrier in size are near-clones of it, so the
-matching C is largely a transcription with different field offsets.
+`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is nearly so, with two functions parked
+under `#else /* NON_MATCHINGS */` — `func_801B0020` (16 rows) and
+`func_801B009C` (52 of 361 instructions), each with its diff and its rejected
+hypotheses written down. They are the cheapest work in the repo — a few
+kilobytes each, six or seven functions, no `.rodata` entanglement — and the ones
+near barrier in size are near-clones of it, so the matching C is largely a
+transcription with different field offsets.
 
 The recipe, start to finish:
 
@@ -715,6 +743,35 @@ The recipe, start to finish:
 
    Equal line counts on both sides means the length is right; the diff is then
    the real work left, and it names the registers so the story is readable.
+
+   Count it two ways. The raw diff is the verdict — zero is the only success —
+   but as a *search signal* it lies, because a change of one stack slot moves
+   the frame pointer offset of every `sw`/`lw` in the function and every branch
+   target after it. `func_801B009C`'s residue is 52 instructions; the raw count
+   reads 104 rows, of which more than half are the prologue, the epilogue and
+   the spill traffic all shifted by eight bytes. Normalising
+
+   ```shell
+   norm() { sed -e 's/-\{0,1\}[0-9]\{1,\}(sp)/N(sp)/g' -e 's/0x801b[0-9a-f]*/L/g'; }
+   ```
+
+   before the diff gives a second number — call it the shape — that moves only
+   when something structural changes. Rank candidates by the shape and confirm
+   with the raw count.
+
+   **Sweep phrasings in batches, not one at a time.** `ninja build/us/<ovl>.exe`
+   plus the two dumps is about two seconds, so a container invocation that loops
+   over a directory of candidate `.c` files scores a dozen or more of them in a
+   couple of minutes. Generate the candidates on the host (one `cp` of a pinned
+   base plus a `perl -0pi` edit each — the same discipline `variant_eval.py`
+   enforces for `checkfn`-scored functions), then run the loop inside the
+   container and print `name rows= shape=` per line. Fifty-eight phrasings of
+   `func_801B009C` were scored this way in six batches; the one that helped —
+   `rand()` written as the first operand rather than the second — is not
+   something anyone would have picked out of a list of guesses, and the ones
+   that were worse are now in the park note instead of being re-tried next
+   session. Gate each build on the compile diagnostics (`^src/.*:[0-9]+: `
+   minus warnings), or a variant with a typo scores as "no change".
 
 7. **A parked function's `.s` freezes at the symbol names of the moment it
    became C.** splat writes `nonmatchings/<fn>.s` only for functions the `.c`
