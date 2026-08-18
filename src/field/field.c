@@ -4274,7 +4274,49 @@ s32 OpcodeFuncFmusc(void) {
 }
 
 // In Akao because it uses the AKAO block area
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTutor);
+/* TUTOR (0x21): open the main menu and play the tutorial with the given id.
+ * First call arms the PARTY_MENU event command, flags the menu overlay and
+ * resolves the tutorial's block into D_800E48E0 for the main loop to stream;
+ * once the menu reports MOVCMD_DONE, clear the command and advance past the
+ * operand. Verified C is the #else; codegen pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTutor);
+#else
+extern u8* D_800E48E0;
+
+s32 OpcodeFuncTutor(void) {
+    s16 tutorialId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("tutor", 1);
+    }
+    if (g_FieldState->eventCmd == EVTCMD_NONE) {
+        g_FieldState->eventCmd = EVTCMD_PARTY_MENU;
+        D_8007EBE0 = 1;
+        g_FieldState->eventCmdParam = 1;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        tutorialId = GET_PARAM_U8(1);
+        if (g_DebugLevel & 3) {
+            FieldDebugAddParseValueToPage2("data=", tutorialId, 2);
+        }
+        D_800E48E0 = (u8*)g_FieldScripts + GetAkaoBlockOffset(tutorialId);
+        return 1;
+    }
+    if (g_FieldState->eventCmd == EVTCMD_PARTY_MENU) {
+        if (g_DebugLevel & 3) {
+            FieldDebugAddParseValueToPage2(
+                "evt result=", g_FieldState->movieCommandState, 2);
+        }
+        if (g_FieldState->movieCommandState == MOVCMD_DONE) {
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            g_FieldState->movieCommandState = MOVCMD_IDLE;
+            PC_INC(2);
+            return 0;
+        }
+    }
+    return 1;
+}
+#endif
 
 /////////////////////////////////////////////////
 // Start of field_opcode_movie_overlay.c
