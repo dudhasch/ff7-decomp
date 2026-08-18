@@ -109,6 +109,26 @@ extern u8 D_800E3B28[];
 extern u8 D_800E3FA8[];
 extern u8 D_800E4128[];
 extern u16 D_800E4200[];
+extern u8 D_800E4D90[];
+extern u8 D_800E4D94[];
+extern u8 D_800E4D98[];
+extern u8 D_800E4D9A[];
+extern u8 D_800E4D9C[];
+extern u8 D_800E4D9E[];
+extern u8 D_800E4DA4[];
+extern u8 D_800E4DA8[];
+extern u8 D_800E4DAC[];
+extern u8 D_800E4DAE[];
+extern u8 D_800E4DB0[];
+extern u8 D_800E4DB2[];
+extern u8 D_800E4DB4[];
+extern u8 D_800E4DD4[];
+extern u8 D_800E4DD8[];
+extern u8 D_800E4DDC[];
+extern u8 D_800E4DDE[];
+extern u8 D_800E4DE0[];
+extern u8 D_800E4DE2[];
+extern u8 D_800E4DE4[];
 extern u8 D_800DFDFC[];
 extern u8 D_80071C20;
 extern u8 g_EntityForSplitJoin;
@@ -440,7 +460,66 @@ const u32 D_800A0044[] = {0x00E80000, 0x00080140};
 const u32 D_800A004C[] = {0x01D00000, 0x00080140};
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMainLoop);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
+/* Parse a MIM (field background map image) header and upload its palettes and
+ * tile pages to VRAM. arg1 points at the loaded MIM; the header's size and
+ * dimensions seed a per-layer state block at D_800E4D90, then each palette
+ * (LoadImage) and texture page (LoadTPage) is uploaded with a DrawSync between
+ * steps. The $at-rematerialisation wall: the original rebuilds the state-block
+ * base through $at on every store where gcc CSEs it. Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
+#else
+void FieldLoadMimToVram(s32 arg0, u8* mim) {
+    RECT rect;
+    u8* layerData;
+    u32 size;
+    u32 layerOff;
+
+    size = *(u32*)mim;
+    *(u32*)&D_800E4D94[0] = size;
+    *(u16*)&D_800E4D98[0] = *(u16*)(mim + 4);
+    *(u16*)&D_800E4D9A[0] = *(u16*)(mim + 6);
+    *(u16*)&D_800E4D9C[0] = *(u16*)(mim + 8);
+    layerOff = (size >> 2) * 4 - 0xC;
+    *(u8**)&D_800E4D90[0] = mim + 0xC;
+    *(u16*)&D_800E4D9E[0] = *(u16*)(mim + 0xA);
+    layerData = mim + 0xC + layerOff;
+
+    /* First texture page block. */
+    *(u32*)&D_800E4DA8[0] = *(u32*)layerData;
+    *(u16*)&D_800E4DAC[0] = *(u16*)(layerData + 4);
+    *(u16*)&D_800E4DAE[0] = *(u16*)(layerData + 6);
+    *(u16*)&D_800E4DB0[0] = *(u16*)(layerData + 8) * 2;
+    *(u16*)&D_800E4DB2[0] = *(u16*)(layerData + 0xA);
+    *(u8**)&D_800E4DA4[0] = layerData + 0xC;
+
+    rect.x = 0;
+    rect.y = 0x1E0;
+    rect.w = 0x100;
+    rect.h = 0x10;
+    DrawSync(0);
+    LoadImage(&rect, *(u_long**)&D_800E4D90[0]);
+    DrawSync(0);
+    *(u16*)&D_800E4DB4[0] =
+        LoadTPage(*(u_long**)&D_800E4DA4[0], 1, 0, *(u16*)&D_800E4DB0[0],
+                  *(u16*)&D_800E4DB2[0]);
+
+    /* Second texture page block. */
+    *(u32*)&D_800E4DD8[0] = *(u32*)(layerData + 0xC);
+    *(u16*)&D_800E4DDC[0] = *(u16*)(layerData + 0x10);
+    *(u16*)&D_800E4DDE[0] = *(u16*)(layerData + 0x12);
+    *(u16*)&D_800E4DE0[0] = *(u16*)(layerData + 0x14) * 2;
+    *(u16*)&D_800E4DE2[0] = *(u16*)(layerData + 0x16);
+    *(u8**)&D_800E4DD4[0] = layerData + 0x18;
+
+    DrawSync(0);
+    *(u16*)&D_800E4DE4[0] =
+        LoadTPage(*(u_long**)&D_800E4DD4[0], 1, 0, *(u16*)&D_800E4DE0[0],
+                  *(u16*)&D_800E4DE2[0]);
+    DrawSync(0);
+}
+#endif
 
 /* Latch both pads: keep the raw state, the previous state, and the edges
  * (newly pressed / newly released) derived from the two. */
@@ -595,7 +674,83 @@ void FieldBGShakeUpdate(FieldShakeData* shake) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+/* Seed the background-scroll state machine from the requested scroll mode.
+ * Only runs while idle (D_8009AC13 == 0). Modes: 0 stops and recentres; 1 arms
+ * scrolling in place; 2/3 begin a single-target scroll; 4 teleports the current
+ * position to the alt source; 5-9 begin a dual-target (eased) scroll. The
+ * target positions/step/fraction are what FieldBGScrollUpdate consumes each
+ * frame.
+ *
+ * Instructions all match; the only diff is the jump table landing at
+ * .rodata+0x54 (target) vs +0x58 (ours) — the field overlay's .rodata base is
+ * 4 mod 8 and this function needs the --phase 4 jump-table demotion, but the
+ * overlay carries both phases at once (the file-split residue). Codegen pinned
+ * via MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+#else
+extern u8 D_8009AC11;  // scroll mode (jump-table selector)
+extern u8 D_8009AC13;  // scroll state (0 = idle)
+extern s16 D_8009A100; // scroll enable
+extern u16 D_8009AC14; // scroll source X
+extern u16 D_8009ABFE; // alt scroll source X
+extern u16 D_8009AC00; // alt scroll source Y
+extern s16 D_80071E38; // current scroll X
+extern s16 D_80071E3C; // current scroll Y
+extern s16 D_8009C558; // scroll step
+extern s16 D_80075CF8; // scroll sub-position / fraction
+extern s16 D_80075E14; // target scroll X
+extern s16 D_80075E1C; // target scroll Y
+extern s16 D_80075E18; // alt target scroll X
+extern s16 D_80075E20; // alt target scroll Y
+
+void FieldBGScrollInit(void) {
+    if (D_8009AC13 != 0) {
+        return;
+    }
+    switch (D_8009AC11) {
+    case 0:
+        D_8009A100 = 0;
+        D_80071E38 = 0;
+        D_80071E3C = 0;
+        D_8009AC13 = 2;
+        break;
+    case 1:
+        D_8009A100 = 1;
+        D_8009AC13 = 1;
+        break;
+    case 2:
+    case 3:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        break;
+    case 4:
+        D_8009A100 = 1;
+        D_8009AC13 = 2;
+        D_80071E38 = D_8009ABFE;
+        D_80071E3C = D_8009AC00;
+        break;
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        D_80075E18 = D_8009ABFE;
+        D_80075E20 = D_8009AC00;
+        break;
+    }
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
 
@@ -882,7 +1037,84 @@ s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
+/* Walk the map's 32 trigger lines against one entity and raise the script
+ * requests each is due. Entering a line's radius arms touch-on (and, if the
+ * entity crossed the line this frame and faces it within +/-64, push and
+ * isOnLine), leaving arms touch-off. Returns 1 if any line is in range. The
+ * crossing test is the four-way sign ladder; the walking flag pointer is the
+ * regalloc wall. Codegen pinned via MASPSX_OVERRIDE; the #else is verified C.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
+#else
+u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
+    s32* from;
+    s32* to;
+    s32* nearest;
+    FieldLine* line;
+    s32 sqrDist;
+    s32 crossFrom;
+    s32 crossTo;
+    u8 hit;
+    s32 i;
+
+    from = (s32*)0x1F800000;
+    to = (s32*)0x1F800010;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    to[0] = dest->vx;
+    to[1] = dest->vy;
+    to[2] = entity->PosZ >> 12;
+    hit = 0;
+    for (i = 0; i < 32; i++) {
+        line = &lines[i];
+        if (line->isActive != 1) {
+            continue;
+        }
+        line->isOnLine = 0;
+        sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            hit = 1;
+            if (line->touch == 0) {
+                line->requestTouchOnScript = 1;
+            }
+            line->touch = 1;
+            crossFrom =
+                (line->pos.x2 - line->pos.x1) * (from[1] - line->pos.y1) -
+                (from[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
+            crossTo = (line->pos.x2 - line->pos.x1) * (to[1] - line->pos.y1) -
+                      (to[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
+            if (!((crossFrom >= 0 && crossTo < 0) ||
+                  (crossTo >= 0 && crossFrom < 0) ||
+                  (crossFrom > 0 && crossTo <= 0) ||
+                  (crossTo > 0 && crossFrom <= 0))) {
+                line->across = 1;
+            }
+            if (nearest[0] != from[0] || nearest[1] != from[1]) {
+                line->proximityAngle = FieldEntityDirByVec(
+                    (VECTOR*)from, (VECTOR*)nearest, &sqrDist);
+                if ((u8)(line->proximityAngle - entity->MoveDir + 0x40) >=
+                    0x80) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            line->requestPushScript = 1;
+            line->isOnLine = 1;
+        } else {
+            if (line->touch == 1) {
+                line->requestTouchOffScript = 1;
+            }
+            line->touch = 0;
+        }
+    }
+    return hit;
+}
+#endif
 
 /* Walk the map's 32 trigger lines against one entity and raise the script
  * requests each one is due. Entering a line's radius arms its touch-on script
@@ -1417,7 +1649,73 @@ void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
+/* Header of the shared field-model texture block at *D_800DFCA0. */
+typedef struct {
+    /* 0x0 */ u32 magic;
+    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
+    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
+    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
+    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
+} FieldTexBlockHeader;
+
+/* One record of a TDB ("texture delta") chunk inside a BSX model file. */
+typedef struct {
+    /* 0x00 */ u32 opcode; // 0=memcpy, 1=page patch, 2=CLUT patch, 3=LoadImage
+    /* 0x04 */ u32 srcOff; // source RECT (0,3) / pixels (1,2), rel. to tdb
+    /* 0x08 */ u32 size;   // memcpy byte count (op 0)
+    /* 0x0C */ u32 dstOff; // dest rel. tdb (0) / page idx (1) / CLUT idx (2) /
+                           // RECT (3)
+} TdbRecord;               // size 0x14
+
+/* Apply a TDB ("texture delta") chunk from a BSX model file. Each record
+ * relocates a raw blob (op 0), splices one 0x200-byte page (op 1) or one
+ * 0x20-byte CLUT (op 2) into the shared model texture block at *D_800DFCA0, or
+ * uploads an embedded image straight to VRAM (op 3). The fixed-size copies are
+ * gcc's inlined memcpy expansion (dual lwl/lw form) — a scheduler/expansion
+ * coupling. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
+#else
+void FieldModelBsxTdbModify(u8* tdb) {
+    FieldTexBlockHeader* block;
+    TdbRecord* rec;
+    s32 count;
+    s32 i;
+
+    if (tdb == NULL) {
+        return;
+    }
+    count = *(s32*)tdb;
+    if (count <= 0) {
+        return;
+    }
+    rec = (TdbRecord*)(tdb + 8);
+    for (i = 0; i < count; i++, rec = (TdbRecord*)((u8*)rec + 0x14)) {
+        switch (rec->opcode) {
+        case 0:
+            memcpy(tdb + rec->dstOff, tdb + rec->srcOff, rec->size);
+            break;
+        case 1:
+            block = (FieldTexBlockHeader*)D_800DFCA0;
+            if (rec->dstOff < block->numPages) {
+                memcpy((u8*)block + block->pageOffset + (rec->dstOff << 9),
+                       tdb + rec->srcOff, 0x200);
+            }
+            break;
+        case 2:
+            block = (FieldTexBlockHeader*)D_800DFCA0;
+            if (rec->dstOff < block->numCluts) {
+                memcpy((u8*)block + block->clutOffset + (rec->dstOff << 5),
+                       tdb + rec->srcOff, 0x20);
+            }
+            break;
+        case 3:
+            LoadImage((RECT*)(tdb + rec->dstOff), (u_long*)(tdb + rec->srcOff));
+            break;
+        }
+    }
+}
+#endif
 
 extern s32 D_800E0204;
 
@@ -4692,9 +4990,89 @@ s32 OpcodeFuncAnimb(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+/* FMOVE (0xAD): move the current entity to a target while keeping its facing.
+ * If a move is in flight (scriptedMoveMode 1), poll it (return 1) until
+ * ActionState 2 marks it done, then clear the mode. Otherwise start the move.
+ * Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE (the
+ * g_FieldModels *0x84 base regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+#else
+s32 OpcodeFuncFmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveDirAdd = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(3, 6) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 2;
+        } else if (
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+        return 1;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    return 1;
+}
+#endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+/* CMOVE (0xA9): start (or continue) a scripted walk of the current entity to a
+ * target point. Unlike JUMP it never blocks -- it arms the walk mode and steps
+ * over its own 6 bytes every call; the field model update drives the walk
+ * per-frame. The g_FieldModels *0x84 base regalloc is the wall; codegen pinned
+ * via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+#else
+s32 OpcodeFuncCmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 2) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            PC_INC(6);
+            return 0;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    PC_INC(6);
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncFcfix(void) {
     if (g_DebugLevel & 3) {
@@ -4708,7 +5086,48 @@ s32 OpcodeFuncFcfix(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+/* JUMP (0xC0): make the current entity jump to a target over a number of
+ * frames. If a jump is already in flight, poll it (return 1) until ActionState
+ * 2 marks it done, then clear the move mode. Otherwise start a new jump. The
+ * scalar clear-stores go through the full g_FieldModels[...] indexed expression
+ * (the original rematerialises the address). Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+#else
+s32 OpcodeFuncJump(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("jump", 8);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(11);
+        return 0;
+    }
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode ==
+        SMODE_JUMP) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            return 1;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                SMODE_NONE;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+        SMODE_JUMP;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 3) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 5) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndI =
+        FieldEventReadMemoryS16(3, 7);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveSteps =
+        FieldEventReadMemoryS16(4, 9);
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLader);
 
@@ -4760,7 +5179,40 @@ void OpcodeFuncPdira(void) {
     FieldEventSetDirByActorId(actorId);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+/* Face the current entity towards another entity. Reads both models' fixed
+ * point positions, computes the direction with FieldEntityDirByVec, and snaps
+ * the current entity's Dir to it, cancelling any turn in progress. No-op when
+ * either entity has no model. The g_FieldModels *0x84 base regalloc is the
+ * wall; codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+#else
+void FieldEventSetDirByActorId(u8 actorId) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    u8 curModel;
+    u8 targetModel;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        return;
+    }
+    targetModel = g_EntityToModel[actorId];
+    if (targetModel == 0xFF) {
+        return;
+    }
+    from.vx = g_FieldModels[curModel].PosX >> 12;
+    from.vy = g_FieldModels[curModel].PosY >> 12;
+    from.vz = g_FieldModels[curModel].PosZ >> 12;
+    to.vx = g_FieldModels[targetModel].PosX >> 12;
+    to.vy = g_FieldModels[targetModel].PosY >> 12;
+    to.vz = g_FieldModels[targetModel].PosZ >> 12;
+    g_FieldModels[curModel].Dir = FieldEntityDirByVec(&from, &to, &sqrDist);
+    g_FieldModels[curModel].TurnType = 0;
+    g_FieldModels[curModel].TurnStep = 0;
+}
+#endif
 
 void OpcodeFuncTura(void) {
     if (g_DebugLevel & 3) {
@@ -7277,7 +7729,48 @@ s32 OpcodeFuncSplit(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventJoinSet);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+/* Drive one party member through a SPLIT: state 0 starts the move, state 1
+ * waits for the move then starts the turn, state 2 waits for the turn, state 3
+ * is done. Returns 1 while a step is still in progress. The g_FieldModels
+ * *0x84 base regalloc and the s16 arg-widening (<<0x10/>>0x10) are the wall;
+ * codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+#else
+s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("split p1=", entityId, 2);
+    }
+    if (entityId == 0xFF) {
+        return 1;
+    }
+    switch (g_EntitySplitJoinState[entityId]) {
+    case 0:
+        FieldEventSplitJoinSetMove(entityId, x, y, turnDir, a4);
+        g_EntitySplitJoinState[entityId] = 1;
+        return 0;
+    case 1:
+        if (FieldEventSplitJoinEndMove(entityId) == 0) {
+            return 0;
+        }
+        g_FieldModels[g_EntityToModel[entityId]].SolidOff = 0;
+        g_FieldModels[g_EntityToModel[entityId]].TalkOff = 0;
+        FieldEventSplitJoinSetTurn(
+            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir, a4 & 0xFF);
+        g_EntitySplitJoinState[entityId] = 2;
+        return 0;
+    case 2:
+        if (FieldEventSplitJoinEndTurn(entityId) == 0) {
+            return 0;
+        }
+        g_EntitySplitJoinState[entityId] = 3;
+        return 1;
+    case 3:
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetMove);
 
