@@ -109,6 +109,26 @@ extern u8 D_800E3B28[];
 extern u8 D_800E3FA8[];
 extern u8 D_800E4128[];
 extern u16 D_800E4200[];
+extern u8 D_800E4D90[];
+extern u8 D_800E4D94[];
+extern u8 D_800E4D98[];
+extern u8 D_800E4D9A[];
+extern u8 D_800E4D9C[];
+extern u8 D_800E4D9E[];
+extern u8 D_800E4DA4[];
+extern u8 D_800E4DA8[];
+extern u8 D_800E4DAC[];
+extern u8 D_800E4DAE[];
+extern u8 D_800E4DB0[];
+extern u8 D_800E4DB2[];
+extern u8 D_800E4DB4[];
+extern u8 D_800E4DD4[];
+extern u8 D_800E4DD8[];
+extern u8 D_800E4DDC[];
+extern u8 D_800E4DDE[];
+extern u8 D_800E4DE0[];
+extern u8 D_800E4DE2[];
+extern u8 D_800E4DE4[];
 extern u8 D_800DFDFC[];
 extern u8 D_80071C20;
 extern u8 g_EntityForSplitJoin;
@@ -440,7 +460,66 @@ const u32 D_800A0044[] = {0x00E80000, 0x00080140};
 const u32 D_800A004C[] = {0x01D00000, 0x00080140};
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMainLoop);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
+/* Parse a MIM (field background map image) header and upload its palettes and
+ * tile pages to VRAM. arg1 points at the loaded MIM; the header's size and
+ * dimensions seed a per-layer state block at D_800E4D90, then each palette
+ * (LoadImage) and texture page (LoadTPage) is uploaded with a DrawSync between
+ * steps. The $at-rematerialisation wall: the original rebuilds the state-block
+ * base through $at on every store where gcc CSEs it. Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
+#else
+void FieldLoadMimToVram(s32 arg0, u8* mim) {
+    RECT rect;
+    u8* layerData;
+    u32 size;
+    u32 layerOff;
+
+    size = *(u32*)mim;
+    *(u32*)&D_800E4D94[0] = size;
+    *(u16*)&D_800E4D98[0] = *(u16*)(mim + 4);
+    *(u16*)&D_800E4D9A[0] = *(u16*)(mim + 6);
+    *(u16*)&D_800E4D9C[0] = *(u16*)(mim + 8);
+    layerOff = (size >> 2) * 4 - 0xC;
+    *(u8**)&D_800E4D90[0] = mim + 0xC;
+    *(u16*)&D_800E4D9E[0] = *(u16*)(mim + 0xA);
+    layerData = mim + 0xC + layerOff;
+
+    /* First texture page block. */
+    *(u32*)&D_800E4DA8[0] = *(u32*)layerData;
+    *(u16*)&D_800E4DAC[0] = *(u16*)(layerData + 4);
+    *(u16*)&D_800E4DAE[0] = *(u16*)(layerData + 6);
+    *(u16*)&D_800E4DB0[0] = *(u16*)(layerData + 8) * 2;
+    *(u16*)&D_800E4DB2[0] = *(u16*)(layerData + 0xA);
+    *(u8**)&D_800E4DA4[0] = layerData + 0xC;
+
+    rect.x = 0;
+    rect.y = 0x1E0;
+    rect.w = 0x100;
+    rect.h = 0x10;
+    DrawSync(0);
+    LoadImage(&rect, *(u_long**)&D_800E4D90[0]);
+    DrawSync(0);
+    *(u16*)&D_800E4DB4[0] =
+        LoadTPage(*(u_long**)&D_800E4DA4[0], 1, 0, *(u16*)&D_800E4DB0[0],
+                  *(u16*)&D_800E4DB2[0]);
+
+    /* Second texture page block. */
+    *(u32*)&D_800E4DD8[0] = *(u32*)(layerData + 0xC);
+    *(u16*)&D_800E4DDC[0] = *(u16*)(layerData + 0x10);
+    *(u16*)&D_800E4DDE[0] = *(u16*)(layerData + 0x12);
+    *(u16*)&D_800E4DE0[0] = *(u16*)(layerData + 0x14) * 2;
+    *(u16*)&D_800E4DE2[0] = *(u16*)(layerData + 0x16);
+    *(u8**)&D_800E4DD4[0] = layerData + 0x18;
+
+    DrawSync(0);
+    *(u16*)&D_800E4DE4[0] =
+        LoadTPage(*(u_long**)&D_800E4DD4[0], 1, 0, *(u16*)&D_800E4DE0[0],
+                  *(u16*)&D_800E4DE2[0]);
+    DrawSync(0);
+}
+#endif
 
 /* Latch both pads: keep the raw state, the previous state, and the edges
  * (newly pressed / newly released) derived from the two. */
