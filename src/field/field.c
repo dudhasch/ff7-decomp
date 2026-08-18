@@ -4990,7 +4990,46 @@ s32 OpcodeFuncAnimb(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMove);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+/* FMOVE (0xAD): move the current entity to a target while keeping its facing.
+ * If a move is in flight (scriptedMoveMode 1), poll it (return 1) until
+ * ActionState 2 marks it done, then clear the mode. Otherwise start the move.
+ * Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE (the
+ * g_FieldModels *0x84 base regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+#else
+s32 OpcodeFuncFmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveDirAdd = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(3, 6) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 2;
+        } else if (
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+        return 1;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
 
