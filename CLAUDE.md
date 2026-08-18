@@ -254,6 +254,25 @@ a near-miss, in rough order of frequency:
   computed afterwards into a caller-saved temp. Same arithmetic, two
   instructions apart per statement — `(rand() & 3) + (col - 21) * 2` is what
   `func_801B009C` needs, twice.
+* **Fill a struct in field order, not in the order the stores come out.** The
+  scheduler moves stores; reading them back out of the `.s` gives you an order
+  no one wrote, and writing that order down reproduces a *different* schedule.
+  `EscapeCaptureScreen` sets two `RECT`s and the target's stores read x, w, h,
+  y — so the C said x, w, h, y and sat 16 rows out. The give-away was a load in
+  the wrong place: the target reads `DispY` *before* the w/h stores, using them
+  to cover its load-delay slot, and fills the earlier slot with the `move
+  a2,zero` that sets up `MoveImage`'s third argument. Written in the order a
+  person would — x, y, w, h — the read lands where the target has it, gcc sinks
+  the y stores past the w/h stores by itself, and the function matches. When a
+  diff is "all scheduling", check whether the source order is one the compiler
+  invented.
+* **Two allocator knobs that do nothing, so stop reaching for them.** Neither
+  the order of local declarations (all five permutations tried on
+  `func_801B009C`) nor `register` on any subset of them changes gcc 2.6.3's
+  allocation by a single instruction. And a hand-carried accumulator — `x = -42`
+  before the loop, `x += 2` in the body — does not buy you a spill slot: gcc
+  treats it as a basic induction variable, gives it a *register*, and spills
+  something else instead. There is no way to spell "keep this on the stack" in C.
 * **`(x & 7) << 5` narrows the loads, `(x & 7) * 32` does not.** With the
   shift, combine's `force_to_mode` pushes the 3-bit mask back through the
   `plus` and into the `mem`s, so two `s16` fields load as `lbu`/`lbu` (or
@@ -616,13 +635,12 @@ The batch shape that works:
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
 same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
-`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` is nearly so, with two functions parked
-under `#else /* NON_MATCHINGS */` — `func_801B0020` (16 rows) and
-`func_801B009C` (52 of 361 instructions), each with its diff and its rejected
-hypotheses written down. They are the cheapest work in the repo — a few
-kilobytes each, six or seven functions, no `.rodata` entanglement — and the ones
-near barrier in size are near-clones of it, so the matching C is largely a
-transcription with different field offsets.
+`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` has one function left, `func_801B009C`
+(52 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
+and ninety-six measured rejected phrasings written down. They are the cheapest
+work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
+entanglement — and the ones near barrier in size are near-clones of it, so the
+matching C is largely a transcription with different field offsets.
 
 The recipe, start to finish:
 
