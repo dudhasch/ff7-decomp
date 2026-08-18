@@ -89,84 +89,83 @@ static void EscapeCaptureScreen(void) {
 // the texture window it samples (the captured screen is split across two
 // texture pages, at u 0x300 and 0x280), the four corners it spans, and a
 // random velocity and spin.
+/* 22 of 361 instructions, and both remaining clusters are register-allocation
+ * tie-breaks rather than anything about the C. Two levers found this pass took
+ * the residue from 104 rows to 22, and both generalise:
+ *
+ *   1. gcc reduces a value to an induction variable with its own spill slot
+ *      only when it is a *user variable computed early and used late*. Written
+ *      inline -- in every spelling, listed below -- `(col - 21) * 2` is
+ *      computed and consumed inside one statement and stays an
+ *      `addiu`/`sll`/`addu` triple in the loop body. Hoisted to the top of the
+ *      loop it becomes a giv with a slot, which is what the target has:
+ *      `li t0,-42` at the row head and `+= 2` at the inner bottom. Same for
+ *      `(row - 16) * 2` hoisted to the top of the row loop. This is the
+ *      opposite of the usual advice -- here naming the temporary is what the
+ *      compiler wanted.
+ *
+ *   2. Which of the four `&EscapeGrid[...]` corner addresses is *evaluated*
+ *      first decides whether gcc strength-reduces the corner address at all.
+ *      With `&EscapeGrid[row][col]` first -- in every phrasing tried, including
+ *      a named `EscapeCell *`, `EscapeGrid[row] + col` and `[row + 0][col + 0]`
+ *      -- gcc builds a giv `&EscapeGrid + col * 12`, spills it and reloads it
+ *      once per tile, duplicating the `col * 12` giv already in s3 and costing
+ *      a sixth stack slot. With `&EscapeGrid[row][col + 1]` evaluated first the
+ *      giv never forms and all four corners come from s3, s5 and a
+ *      rematerialised base, as the target does. Evaluating it into a temporary
+ *      keeps the *store* order 0,1,2,3, which the target also has.
+ *
+ * What is left:
+ *
+ *   - 12 rows: the two row-level givs swap slots. The target has `row * 2 - 32`
+ *     at 40(sp) and `row * 8 + 8` at 48(sp); we have them the other way round,
+ *     so the two `li`s in the preheader, the `lbu` reload at the row head, the
+ *     `lw` in the Vel.vy term and the two increments at the row bottom all name
+ *     the other slot. gcc numbers reduced-giv pseudos in reverse of the order
+ * it scans them and assigns slots in pseudo order, so the target's `row * 2 -
+ * 32` is scanned *after* `row * 8 + 8` -- hoisted out of the inner loop by gcc
+ * rather than by hand. Every way of arranging that either drops `row * 8 + 8`
+ * back into a register (4 slots, 8 instructions short) or reorders three slots
+ * instead of two.
+ *
+ *   - 10 rows: the shared grid base is `EscapeGrid + 12` where the target has
+ *     `EscapeGrid`, so the corners are derived with -12/0/+480 rather than
+ *     0/+12/+492. gcc materialises whichever base the *first* evaluated corner
+ *     needs, and by (2) that corner has to be `[row][col + 1]`. The two
+ *     constraints conflict, so one of them has a mechanism not yet understood.
+ *
+ * Measured and rejected this pass, on top of the ninety-six phrasings the
+ * earlier note listed (rows/shape against the retail overlay; this body is
+ * 22/18):
+ *   - hoisting positions for the two products: both at the inner top 228/162,
+ *     vy at the inner top with vx inline 238/178, vy immediately before its use
+ *     228/162, either one hand-carried as an accumulator 32/22 to 44/26 -- an
+ *     accumulator is a biv, gets a low pseudo and lands at 24(sp).
+ *   - corner evaluation orders 2,0,1,3 and 3,0,1,2 rebuild the giv (206/144,
+ *     212/148); 1,2,0,3 avoids it but stores in the wrong order (30/26); a
+ *     walked `c++` pointer, `c - 1`/`c + 40`/`c + 41` off one temp, and
+ *     `(EscapeCell *)EscapeGrid + row * 41 + col` all collapse s5 into a single
+ *     flat giv and lose 5 to 12 instructions.
+ *   - `(row + 1) * 8` for the v coordinate 224/174; `row * 8` and/or
+ *     `row * 8 + 8` hoisted to the row top in every order 52/46 to 176/152.
+ *   - declaration order and position of the two locals, and reusing the
+ *     distance loop's x/y: no effect on the slot order (22/18), or they flatten
+ *     the corner addressing (90/84).
+ *
+ * The permuter is no help here: its score is dominated by an `inline int
+ * inline_fn(a, b)` rewrite whose out-of-line copy shifts the whole address
+ * range. Re-measure anything it produces against the overlay. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
-/* 52 of 361 instructions. One structural difference, and it is a cost decision
- * inside gcc's loop optimiser rather than anything about the C. Four values are
- * derived from `col` in the tile loop and gcc keeps four; the target's fourth
- * is `col * 2 - 42`, ours is a giv holding `&EscapeGrid[0][col]` that
- * duplicates the `col * 12` giv already in s3 and that we spill and reload for
- * Corner[0]. The target has no such giv -- it rematerialises the bare
- * `&EscapeGrid` constant and adds its col*12 and row*492 givs to it, exactly as
- * it already does for Corner[1..3] -- and spends the freed slot on `col * 2 -
- * 42` and `row * 2 - 32` rather than the `addiu`/`sll` pair we emit inline. Its
- * frame is 0x60 with five spilled values:
- *
- *     16(sp) n            24(sp) row * 8      48(sp) row * 8 + 8
- *     32(sp) col * 2 - 42 40(sp) row * 2 - 32
- *
- * ours is 0x58 with four. Everything else -- both earlier loops, the prim
- * setup, all four Corner stores, every register -- is identical, and the
- * function is exactly the right length.
- *
- * Why gcc will not make `col * 2 - 42` an induction variable, when it happily
- * makes one of `(col - 20) * 8` in the same loop (`li s7,-160` / `addiu
- * s7,s7,8`): giv benefit scales with uses, and the `* 8` value feeds a
- * four-deep assignment chain while the `* 2` value is used once. Whatever the
- * original wrote, it was not a single-use expression over `col`.
- *
- * 96 phrasings have been measured against the retail overlay, as rows (exact)
- * and shape (after normalising stack offsets and branch targets, so a
- * frame-size change does not cascade). Base is 104/46. None beat it:
- *
- *   - every spelling of the two products -- `col * 2 - 42`, `(col - 21) << 1`,
- *     `2 * (col - 21)`, `col + col - 42`, and the same with the constant split
- *     out or folded into the rand term. All compile to what is below (104/46)
- *     or to 164/152.
- *   - hoisting them into locals, the form that makes `col * 8 - 0xA0` a perfect
- *     giv in the distance loop above: inner-loop top 218/164, reusing x and y
- *     274/226, `row * 2 - 32` in the outer loop where it is genuinely invariant
- *     222/208.
- *   - carrying them by hand as accumulators (`x = -42` per row, `x += 2` per
- *     tile), which is what makes them bivs rather than givs and is the closest
- *     thing to asking for a spill slot in C: 272/210. gcc gives the biv a
- *     register and spills a sixth value instead, so the frame grows to 0x60
- *     with six slots rather than the target's five.
- *   - ten phrasings of the Corner block, to stop the redundant giv forming: a
- *     walked `EscapeCell *c` (264/206), one row pointer (332/290) or two
- *     (316/258) hoisted into the outer loop, flat `&EscapeGrid[0][row * 41 +
- *     col]` (324/272), corners derived from Corner[0] (206/202), reordering the
- *     four stores (212/156). Only `EscapeGrid[row] + col` for Corner[0] and
- *     `&EscapeGrid[row][col + 41]` for Corner[2] are neutral (104/46, 106/48);
- *     the block as written is what the target compiles.
- *   - moving the Corner block elsewhere in the loop body: 226 shape wherever it
- *     goes. Its position is load-bearing.
- *   - separate loop counters for the distance table (162/110), carrying
- *     `row * 8` in a local so the `+ 8` is an add rather than a second
- *     induction variable (270/224).
- *   - declaration order (all five permutations) and `register` on any subset of
- *     the locals: no effect at all. gcc 2.6.3's allocator ignores both here.
- *
- * What did help, and is in the code below: writing `rand()` as the *first*
- * operand of the two Vel sums. `(rand() & 3) + (col - 21) * 2` is two rows
- * better than the other order and the same again for vy -- 108/50 to 104/46 --
- * because the induction value is then computed after the call instead of having
- * to survive it.
- *
- * Permuter: base 2400, best 840 over 27k iterations at -j20, and that 840 is an
- * artefact. Its find is the usual `inline int inline_fn(a, b) { return a * b;
- * }` rewrite; `inline` without `static` emits an out-of-line copy of the
- * helper, which lands ahead of the function and shifts the whole address range.
- * Written as `static inline` so no copy is emitted, the same rewrite measures
- * 140/134 -- worse than doing nothing. The permuter's score does not track the
- * real distance for this function; re-measure anything it produces here. */
 void func_801B009C(void) {
     s32 row;
     s32 col;
     s32 n;
     s32 x;
     s32 y;
+    s32 vx;
+    s32 vy;
 
     for (row = 0; row < 10; row++) {
         D_801518E4[row].D_80151909 = (D_801518E4[row].D_80151909 & 0x7F) | 2;
@@ -183,7 +182,9 @@ void func_801B009C(void) {
     n = 0;
 
     for (row = 0; row < 21; row++) {
+        vy = (row - 16) * 2;
         for (col = 0; col < 40; col++) {
+            vx = (col - 21) * 2;
             EscapeTiles[n].Rot.vx = EscapeTiles[n].Rot.vy =
                 EscapeTiles[n].Rot.vz = 0;
             EscapeTiles[n].RotVel.vx = (rand() & 0x3FF) - 0x200;
@@ -192,8 +193,8 @@ void func_801B009C(void) {
 
             EscapeTiles[n].Pos.vx = EscapeTiles[n].Pos.vy =
                 EscapeTiles[n].Pos.vz = 0;
-            EscapeTiles[n].Vel.vx = (rand() & 3) + (col - 21) * 2;
-            EscapeTiles[n].Vel.vy = (rand() & 3) + (row - 16) * 2;
+            EscapeTiles[n].Vel.vx = vx + (rand() & 3);
+            EscapeTiles[n].Vel.vy = vy + (rand() & 3);
             EscapeTiles[n].Vel.vz = rand() | 0xFF80;
 
             SetPolyFT4(&EscapeTiles[n].prim[0]);
@@ -227,10 +228,13 @@ void func_801B009C(void) {
                 EscapeTiles[n].prim[0].v3 = EscapeTiles[n].prim[1].v3 =
                     row * 8 + 8;
 
-            EscapeTiles[n].Corner[0] = &EscapeGrid[row][col];
-            EscapeTiles[n].Corner[1] = &EscapeGrid[row][col + 1];
-            EscapeTiles[n].Corner[2] = &EscapeGrid[row + 1][col];
-            EscapeTiles[n].Corner[3] = &EscapeGrid[row + 1][col + 1];
+            {
+                EscapeCell* c1 = &EscapeGrid[row][col + 1];
+                EscapeTiles[n].Corner[0] = &EscapeGrid[row][col];
+                EscapeTiles[n].Corner[1] = c1;
+                EscapeTiles[n].Corner[2] = &EscapeGrid[row + 1][col];
+                EscapeTiles[n].Corner[3] = &EscapeGrid[row + 1][col + 1];
+            }
 
             if (n != 0) {
                 CatPrim(&EscapeTiles[n - 1].prim[0], &EscapeTiles[n].prim[0]);

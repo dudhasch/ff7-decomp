@@ -273,6 +273,34 @@ a near-miss, in rough order of frequency:
   before the loop, `x += 2` in the body — does not buy you a spill slot: gcc
   treats it as a basic induction variable, gives it a *register*, and spills
   something else instead. There is no way to spell "keep this on the stack" in C.
+* **A value the target keeps in a spill slot wants to be a named local,
+  computed early and used late.** gcc 2.6.3 only strength-reduces an expression
+  over a loop counter when the value has a live range to speak of. Written
+  inline — `Vel.vx = (rand() & 3) + (col - 21) * 2;` — the product is computed
+  and consumed inside one statement and stays an `addiu`/`sll`/`addu` triple in
+  the loop body, in every spelling. Hoisted to the top of the loop as
+  `vx = (col - 21) * 2;` it becomes an induction variable with its own stack
+  slot: `li t0,-42` in the preheader, `+= 2` at the loop bottom, `lw`/`addu` at
+  the use. That is a two-instruction-per-iteration difference, and it is what
+  `func_801B009C` in `src/magic/escape.c` needs for both `(col - 21) * 2` and
+  `(row - 16) * 2`. This is the opposite of the usual reflex: naming the
+  temporary is what the compiler wanted. It is also not the same thing as the
+  accumulator in the bullet above — an accumulator is a *biv*, gets a register,
+  and lands in a different slot.
+* **Which sibling address expression is evaluated first decides whether gcc
+  reduces any of them.** Four stores of `&EscapeGrid[row][col + d]` for
+  d = 0, 1, 41, 42: with the `d = 0` form evaluated first, gcc builds a giv
+  `&EscapeGrid + col * 12`, spills it and reloads it once per iteration —
+  duplicating the `col * 12` giv it already has and costing a whole extra stack
+  slot. With the `d = 1` form evaluated first no giv forms at all and every
+  corner is computed from the two multiples plus a rematerialised base, which
+  is what the target does. Nothing else moved it: a named `EscapeCell *`,
+  `EscapeGrid[row] + col`, `[row + 0][col + 0]`, a walked `c++` pointer and a
+  flat `EscapeGrid + row * 41 + col` were all measured, and the ones that avoid
+  the giv do it by collapsing the row and column multiples into one flat giv,
+  which costs more than it saves. Evaluate the sibling into a temporary if the
+  *store* order has to stay 0, 1, 2, 3 — the compiler keeps stores in source
+  order, so the temporary is the only way to have both.
 * **`(x & 7) << 5` narrows the loads, `(x & 7) * 32` does not.** With the
   shift, combine's `force_to_mode` pushes the 3-bit mask back through the
   `plus` and into the `mem`s, so two `s16` fields load as `lbu`/`lbu` (or
@@ -636,11 +664,11 @@ The batch shape that works:
 same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
 `ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` has one function left, `func_801B009C`
-(52 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
-and ninety-six measured rejected phrasings written down. They are the cheapest
-work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
-entanglement — and the ones near barrier in size are near-clones of it, so the
-matching C is largely a transcription with different field offsets.
+(22 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
+and a hundred and thirty measured rejected phrasings written down. They are the
+cheapest work in the repo — a few kilobytes each, six or seven functions, no
+`.rodata` entanglement — and the ones near barrier in size are near-clones of it,
+so the matching C is largely a transcription with different field offsets.
 
 The recipe, start to finish:
 
