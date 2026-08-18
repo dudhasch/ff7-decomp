@@ -5031,7 +5031,48 @@ s32 OpcodeFuncFmove(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+/* CMOVE (0xA9): start (or continue) a scripted walk of the current entity to a
+ * target point. Unlike JUMP it never blocks -- it arms the walk mode and steps
+ * over its own 6 bytes every call; the field model update drives the walk
+ * per-frame. The g_FieldModels *0x84 base regalloc is the wall; codegen pinned
+ * via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+#else
+s32 OpcodeFuncCmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 2) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            PC_INC(6);
+            return 0;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    PC_INC(6);
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncFcfix(void) {
     if (g_DebugLevel & 3) {
