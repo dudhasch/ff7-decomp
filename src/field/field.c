@@ -1972,7 +1972,104 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPktsBelowLvl);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+/* Per-KAWAI-slot colour fade record (16 slots, 0x3C each; only the first 0x14
+ * bytes are used by KawaiFadeModelColor). */
+typedef struct {
+    /* 0x00 */ s16 curR;
+    /* 0x02 */ s16 curG;
+    /* 0x04 */ s16 curB;
+    /* 0x06 */ s16 targetR;
+    /* 0x08 */ s16 targetG;
+    /* 0x0A */ s16 targetB;
+    /* 0x0C */ s16 deltaR;
+    /* 0x0E */ s16 deltaG;
+    /* 0x10 */ s16 deltaB;
+    /* 0x12 */ u8 unk12;
+    /* 0x13 */ u8 done;
+} KawaiColorFadeSlot;
+
+extern KawaiColorFadeSlot D_800DFE3C[16];
+extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
+
+/* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
+ * the slot from the descriptor; data[0]==1 exports the current colour to the
+ * scratch quad, pushes it to the packets, and advances each channel toward its
+ * target, clamping. Returns 1 while fading, 0 when done. The scratch-quad $at
+ * remat and the slot*0x3C strength reduction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+#else
+s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
+    KawaiColorFadeSlot* slot;
+    s32 done;
+
+    slot = &D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->curR = data[0x02] | (data[0x03] << 8);
+        slot->curG = data[0x04] | (data[0x05] << 8);
+        slot->curB = data[0x06] | (data[0x07] << 8);
+        slot->targetR = data[0x08] | (data[0x09] << 8);
+        slot->targetG = data[0x0A] | (data[0x0B] << 8);
+        slot->targetB = data[0x0C] | (data[0x0D] << 8);
+        slot->deltaR = data[0x0E] | (data[0x0F] << 8);
+        slot->deltaG = data[0x10] | (data[0x11] << 8);
+        slot->deltaB = data[0x12] | (data[0x13] << 8);
+        slot->unk12 = data[0x14];
+        slot->done = 0;
+        return 1;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->curR;
+        D_800DFE1C[1] = slot->curR >> 8;
+        D_800DFE1C[2] = slot->curG;
+        D_800DFE1C[3] = slot->curG >> 8;
+        D_800DFE1C[4] = slot->curB;
+        D_800DFE1C[5] = slot->curB >> 8;
+        D_800DFE1C[6] = slot->unk12;
+        KawaiSetColorToModelPkts(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->curR += slot->deltaR;
+        if (slot->deltaR >= 0) {
+            if (slot->curR >= slot->targetR) {
+                slot->curR = slot->targetR;
+                done |= 1;
+            }
+        } else if (slot->curR <= slot->targetR) {
+            slot->curR = slot->targetR;
+            done |= 1;
+        }
+        slot->curG += slot->deltaG;
+        if (slot->deltaG >= 0) {
+            if (slot->curG >= slot->targetG) {
+                slot->curG = slot->targetG;
+                done |= 2;
+            }
+        } else if (slot->curG <= slot->targetG) {
+            slot->curG = slot->targetG;
+            done |= 2;
+        }
+        slot->curB += slot->deltaB;
+        if (slot->deltaB >= 0) {
+            if (slot->curB >= slot->targetB) {
+                slot->curB = slot->targetB;
+                done |= 4;
+            }
+        } else if (slot->curB <= slot->targetB) {
+            slot->curB = slot->targetB;
+            done |= 4;
+        }
+        if (done == 7) {
+            slot->done++;
+        }
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
 
