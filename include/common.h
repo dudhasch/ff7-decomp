@@ -25,6 +25,38 @@ __asm__(".include \"macro.inc\"\n");
 #define INCLUDE_ASM(FOLDER, NAME)
 #endif
 
+/* Pin a function's codegen to its reference .s while keeping the C body in the
+ * translation unit as living documentation. Drop-in replacement for the
+ * INCLUDE_ASM line in a parked function:
+ *
+ *   #ifndef NON_MATCHINGS
+ *   MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
+ *   #else
+ *   void FieldDebugPageAddPos(s16 page, s16 x, s16 y) { ... }
+ *   #endif
+ *
+ * Unlike INCLUDE_ASM the symbol is the REAL function name (no
+ * __maspsx_include_asm_hack_ wrapper), so the function is a normal typed,
+ * callable C symbol whose bytes happen to be pinned to the reference .s. Use
+ * for functions whose C is semantically correct but whose gcc-2.6.3 schedule
+ * cannot reach the target (the $at-rematerialisation / s16-counter /
+ * conserved-pair walls). Expands to nothing under NON_MATCHINGS, where the
+ * #else C body compiles instead. */
+#ifdef USE_INCLUDE_ASM
+#define MASPSX_OVERRIDE(FOLDER, NAME)                                          \
+    void __maspsx_override_hack_##NAME() {                                     \
+        __asm__(".text # maspsx-keep \n"                                       \
+                "\t.align\t2 # maspsx-keep\n"                                  \
+                "\t.set noreorder # maspsx-keep\n"                             \
+                "\t.set noat # maspsx-keep\n"                                  \
+                ".include \"" FOLDER "/" #NAME ".s\" # maspsx-keep\n"          \
+                "\t.set reorder # maspsx-keep\n"                               \
+                "\t.set at # maspsx-keep\n");                                  \
+    }
+#else
+#define MASPSX_OVERRIDE(FOLDER, NAME)
+#endif
+
 typedef signed char s8;
 typedef unsigned char u8;
 typedef signed short s16;

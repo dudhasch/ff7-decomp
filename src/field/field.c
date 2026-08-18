@@ -9330,9 +9330,11 @@ void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
 }
 
 /* gcc hoists the array's %hi/%lo into a register because the same address is
- * read and written; the original rematerialises it through $at each time. */
+ * read and written; the original rematerialises it through $at each time.
+ * Codegen pinned via MASPSX_OVERRIDE: the #else body is the verified-correct
+ * C, its bytes come from the reference .s (the $at-rematerialisation wall). */
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
 #else
 void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
     D_8009D824 = 1;
@@ -9343,7 +9345,7 @@ void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
 
 /* Same $at rematerialisation residue as FieldDebugPageAddPos above. */
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugPageAddSize);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddSize);
 #else
 void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
     D_8009D824 = 1;
