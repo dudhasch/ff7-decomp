@@ -1413,7 +1413,95 @@ void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
 
+extern s32 D_800E0204;
+
+typedef struct {
+    /* 0x00 */ u8 unk0;
+    /* 0x01 */ u8 unk1;
+    /* 0x02 */ u16 count;
+    /* 0x04 */ FieldModelLoaderData models[0]; // variable length
+} FieldModelFileDesc;
+
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelStructInit);
+#else
+/* 65 rows, ALL pure regalloc/stack-frame: every field offset is correct
+ * (verified in diff). Target uses a minimal -0x10 frame with NO callee-saved
+ * regs (args kept in $t0/$t1); the named-struct body spills 6 saved regs for a
+ * -0x38 frame. Two-pass model-file-descriptor -> FieldModelData init. Needs
+ * permuter to find the lean local set. models[0] (not [1]) avoids 4-byte
+ * alignment padding of the +4 entry array. Added FieldModelData.unk8 for the
+ * sw zero,0x8($t0) init. */
+void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
+    s16 temp_a0_2;
+    u32 var_a3;
+    FieldModelLoaderData* temp_a0;
+    FieldModelEntry* temp_v1;
+    u8* var_a1;
+    FieldModelLoaderData* var_a2;
+    FieldModelLoaderData* var_v1;
+
+    var_a3 = 0;
+    arg1->modelCount = 0;
+    temp_a0 = &arg0->models[0];
+    if (arg0->count != 0) {
+        var_v1 = temp_a0;
+        do {
+            if (var_v1->npcFlag != 0) {
+                var_v1->modelEntryIndex = arg1->modelCount;
+                arg1->modelCount = arg1->modelCount + 1;
+            } else {
+                var_v1->modelEntryIndex = 0xFF;
+            }
+            var_a3 += 1;
+            var_v1 += 1;
+        } while (var_a3 < arg0->count);
+        var_a3 = 0;
+    }
+    arg1->unk2 = 0;
+    arg1->unk1 = 0;
+    arg1->modelEntries = (FieldModelEntry*)((u8*)arg1 + 0xC);
+    arg1->unk8 = 0;
+    var_a1 = (u8*)arg1 + ((arg1->modelCount * 0x24) + 0xC);
+    if (arg0->count != 0) {
+        var_a2 = temp_a0;
+        do {
+            if (var_a2->npcFlag != 0) {
+                if (((u32)(var_a2->globalModelId - 1) < 9) &&
+                    (var_a2->partCount < 3)) {
+                    var_a2->partCount = 3;
+                }
+                temp_v1 = &arg1->modelEntries[var_a2->modelEntryIndex];
+                temp_v1->flags = 1;
+                temp_v1->kawaiType = -1;
+                temp_v1->boneCount = var_a2->boneCount;
+                temp_v1->partCount = var_a2->partCount;
+                temp_v1->rotationZ = 0;
+                temp_v1->rotationY = 0;
+                temp_v1->rotationX = 0;
+                temp_v1->translationZ = 0;
+                temp_v1->translationY = 0;
+                temp_v1->translationX = 0;
+                temp_v1->animationCount = var_a2->partCount;
+                temp_v1->globalModelId = var_a2->globalModelId;
+                temp_v1->scale = 0x1000;
+                temp_v1->textureFaceId = var_a2->faceId;
+                temp_a0_2 = var_a2->boneCount * 4;
+                temp_v1->partsOffset = temp_a0_2;
+                temp_v1->modelData = var_a1;
+                temp_v1->partMatrices = 0;
+                temp_v1->animationOffset = temp_a0_2 + (var_a2->partCount << 5);
+                var_a1 += (var_a2->boneCount * 4) + (var_a2->partCount << 5) +
+                          (var_a2->animationCount * 0x10);
+            }
+            var_a3 += 1;
+            var_a2 += 1;
+        } while (var_a3 < arg0->count);
+    }
+    D_800E0204 = 0;
+    return var_a1;
+}
+#endif
 
 extern u_long* D_800DFCA0;
 u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);

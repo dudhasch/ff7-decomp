@@ -594,6 +594,7 @@ typedef struct {
     /* 0x01 */ u8 unk1;                       // (initialized to 0)
     /* 0x02 */ u16 unk2;                      // (initialized to 0)
     /* 0x04 */ FieldModelEntry* modelEntries; // per-model-file records
+    /* 0x08 */ s32 unk8;                      // (initialized to 0)
 } FieldModelData;
 
 typedef struct {
