@@ -5006,7 +5006,48 @@ s32 OpcodeFuncFcfix(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+/* JUMP (0xC0): make the current entity jump to a target over a number of
+ * frames. If a jump is already in flight, poll it (return 1) until ActionState
+ * 2 marks it done, then clear the move mode. Otherwise start a new jump. The
+ * scalar clear-stores go through the full g_FieldModels[...] indexed expression
+ * (the original rematerialises the address). Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+#else
+s32 OpcodeFuncJump(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("jump", 8);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(11);
+        return 0;
+    }
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode ==
+        SMODE_JUMP) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            return 1;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                SMODE_NONE;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+        SMODE_JUMP;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 3) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 5) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndI =
+        FieldEventReadMemoryS16(3, 7);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveSteps =
+        FieldEventReadMemoryS16(4, 9);
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLader);
 
