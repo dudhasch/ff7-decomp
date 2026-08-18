@@ -9481,7 +9481,26 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderPage);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderString);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
+/* Append a line to a debug page (no colour), wrapping back to the top row once
+ * the page's pixel height can no longer hold another 10-pixel row. Same
+ * $at-rematerialisation wall as AddColorStrNextDebugRow below: the original
+ * rebuilds `&D_800E0754 + page*378` through $at on each access where gcc CSEs
+ * it. Codegen pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
+#else
+s32 AddStrNextDebugRow(s16 page, const char* str) {
+    char* rows = D_800E0758 + page * 378;
+
+    FieldDebugStringCopy(&rows[D_800E0754[page * 189] * 14], str);
+    D_800E0754[page * 189]++;
+    if ((D_800E074E[page * 189] - 8) / 10 < D_800E0754[page * 189]) {
+        D_800E0754[page * 189] = 0;
+    }
+    D_8009D824 = 1;
+    return 1;
+}
+#endif
 
 /* Append a coloured line to a debug page, wrapping back to the top row once the
  * page's pixel height can no longer hold another 10-pixel row.
