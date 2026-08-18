@@ -1,0 +1,1 @@
+All Bosses (Warps), also known as All Bosses with Warps or PC All Bosses, is the category that uses the PC-exclusive [Wrong Warp](/index.php/Wrong_Warp "Wrong Warp") glitch to quickly defeat all of the [bosses](/index.php/Boss "Boss") in the game.

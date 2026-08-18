@@ -1,0 +1,11 @@
+Yuffie warping is a glitch only present in the PC version of the game. Similar to the [Wrong Warp](/index.php/Wrong_Warp "Wrong Warp"), it allows the player to be warped to incorrect locations when attempting to recruit Yuffie. This trick is used heavily in [All Bosses (Warps)](/index.php/All_Bosses_\(Warps\) "All Bosses \(Warps\)").
+
+## Execution
+
+To perform the Yuffie warp, the player must make a save file on the world map in or near a forest where you can encounter the Mystery Ninja enemy. Then they must load another save on a field that the player wishes to warp to, and enter a battle. In the battle, the player must intentionally trigger a game over. The player must then load their save in the forest, then find and defeat Mystery Ninja. Because the PC version of the game does not clear memory after a game over, it will erroneously reload the field previously died on instead of the field where the player can recruit Yuffie. If the player triggered the game over in a scripted fight, e.g. a boss battle, the player will be warped directly back into that fight.
+
+## Encountering Mystery Ninja
+
+There is a flag in the game that determines if the player can encounter Mystery Ninja, stored in memory at `DC0A61x01`. By default, this flag is off, and is first turned on after watching the Turks cutscene in [Mythril Mines](/index.php?title=Mythril_Mines&action=edit&redlink=1 "Mythril Mines \(page does not exist\)"). If the player has not recruited Yuffie, it will also be turned on in the [Cargo Ship](/index.php?title=Cargo_Ship&action=edit&redlink=1 "Cargo Ship \(page does not exist\)"), or at the end of the first [Cosmo Canyon](/index.php?title=Cosmo_Canyon&action=edit&redlink=1 "Cosmo Canyon \(page does not exist\)") sequence.
+
+The game will check if the player has recruited Yuffie either by checking if she is present in the global party, or by querying a separate flag at `DC0AABx01`. If the player desyncs these values through sequence breaking and/or using the [Debug Room](/index.php/Debug_Room "Debug Room"), it is possible to encounter Mystery Ninja even after recruiting Yuffie.

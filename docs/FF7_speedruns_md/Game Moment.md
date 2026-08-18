@@ -1,0 +1,3 @@
+Game Moment is the primary variable used in the game to determine which story events should be active. Incorrect Game Moment values can have detrimental effects on the game, as seen when doing sequence-breaking tricks like the [Wrong Warp](/index.php/Wrong_Warp "Wrong Warp").
+
+A comprehensive list of Game Moment values can be found [here](https://docs.google.com/spreadsheets/d/1kdMpPwFwTa6VFLb2ilOFLFWCcUroAZhEB3Uj2qgfIIk/edit).

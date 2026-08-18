@@ -1,0 +1,1 @@
+PC Any% is the speedrun category that abuses the PC-exclusive [Wrong Warp](/index.php/Wrong_Warp "Wrong Warp") glitch to warp to the end of the game in the fastest time.
