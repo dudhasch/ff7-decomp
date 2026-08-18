@@ -1,5 +1,18 @@
 # Next Functions — Ranked by Logic Simplicity
 
+> **This is the cross-tree survey, taken once.** For the file you are about to
+> work on, generate the live list instead — it is current, it screens out the
+> handwritten and `.rodata`-blocked functions, and it marks the parked
+> near-misses:
+>
+> ```shell
+> .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/worklist-field.md
+> ```
+>
+> Use this document for the question that survey answers and `worklist.py` does
+> not: *which file should the next batch be in at all* — in particular the Tier 0
+> analysis of `src/main/psxsdk.c` below.
+
 A static callgraph ranking of every remaining `INCLUDE_ASM` in the tree
 (1615 functions as of 2026-08-17). The ordering criterion is **logic
 simplicity**, not file size:

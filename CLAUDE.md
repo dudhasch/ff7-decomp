@@ -60,9 +60,104 @@ Rebuild the image from a minimal context (just `Dockerfile` + `requirements.txt`
 in a temp directory) — a build from the repository root uploads the ~750 MB disc
 image in `disks/` as build context for no reason.
 
+### On a Windows host
+
+Every build command goes through the **PowerShell tool** running the untracked
+`tools/docker-build.ps1`. None of the following is discoverable from a failure
+message, and all of it has been re-learned from scratch more than once:
+
+```powershell
+Set-Location C:\ff7-daten-kopie\ff7-decomp; .\tools\docker-build.ps1 'make build'
+```
+
+* **Prefix `Set-Location <repo>;` every single time.** The PowerShell tool's
+  working directory drifts between calls; a bare `.\tools\docker-build.ps1`
+  eventually runs from somewhere else and fails with a path error that reads
+  like a missing file.
+* **Do not invoke `docker-build.ps1` through the Bash tool.** It dies with
+  `execution of scripts is disabled on this system`. PowerShell tool only.
+* **`git` runs on the host, never inside the container.** In the container it
+  fails with `fatal: not a git repository: /ff7/C:/...` or, on a bind-mounted
+  path that does resolve, commits as `Author identity unknown`.
+* **PowerShell has no heredocs.** `git commit -m @'...'@` is a parse error
+  (`Missing file specification`). Write the message to a scratchpad file and
+  use `git commit -F <file>`.
+* **Each `docker-build.ps1` invocation is a fresh container**, so `/tmp` does
+  not survive between calls. Anything a later command needs must land under the
+  bind-mounted repo or a named volume.
+* **The Bash tool's `python` is the Windows interpreter**, not the container's.
+  It writes CRLF and cp1252 by default, which corrupts sources and makes files
+  churn in git. Scripted edits either run inside the container, or use the Edit
+  tool, or pass `encoding="utf-8", newline="\n"` explicitly.
+* **One Docker build volume per worktree.** `build/`, `config/sym_export_*.txt`
+  and `.ninja_*` are shared mutable state; two agents on one volume corrupt each
+  other. Point each worktree at its own (`ff7_build_<name>`) — see
+  *Working in parallel*.
+
 ## The decompilation loop
 
+### 0. The budget, before anything else
+
+Every function gets **three shaped attempts and one permuter run.** A shaped
+attempt is a deliberate change with a stated hypothesis ("the target keeps the
+value in a callee-saved register, so make it a local") — not a retry with the
+operand order flipped and no theory. When the budget is spent, **park the
+function and move to the next one**:
+
+```c
+#ifndef NON_MATCHINGS
+INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldButtonsUpdate);
+#else
+/* 2 rows: target keeps &D_8009D5A6 in a1, we get a0. Cached-address choice —
+ * see the addr-form recipe. Permuter plateaued at 10 over 40k candidates. */
+void FieldButtonsUpdate(void) { ... }
+#endif
+```
+
+The note is the deliverable, not the failure. A parked function with the diff
+rows and the rejected hypotheses written down is worth more to the next pass
+than a function nobody wrote anything about.
+
+**This rule exists because the history says so.** Across the sessions that
+built this file, 38% of all `checkfn` invocations went to sixteen functions that
+never landed; four of them — `FieldButtonsUpdate`, `func_801D080C`,
+`OpcodeFuncStpls`, `OpcodeFuncLdpls` — absorbed 290 attempts between them and
+were parked anyway. Throughput over the same period fell from 28 functions/hour
+to 5 without the approach ever changing. Attempt eleven is not closer than
+attempt four; it is the same guess with a different seed.
+
+Two exits from the budget, both of which must be *earned*, not assumed:
+
+* The diff shrank on this attempt. Shrinking rows means the hypothesis is
+  live — keep going, the budget resets.
+* The remaining rows are a documented idiom (see step 3's list). Then it is not
+  a search, it is a lookup: apply it and check.
+
 ### 1. Pick a function
+
+```shell
+.venv/bin/python3 tools/worklist.py src/field/field.c -o docs/worklist-field.md
+```
+
+This is the start of every batch. It intersects the four things that otherwise
+get re-derived by hand — and re-derived again after every compaction:
+
+* remaining `INCLUDE_ASM` in the `.c` (**not** what `mako.sh rank` prints, which
+  names every `.s` in the overlay including the ones already decompiled — a trap
+  that has cost real time more than once)
+* the handwritten screen: `.s` files marked `/* Handwritten function */` can
+  never become matching C, and are not remaining work
+* the `.rodata` verdict from `tools/rodata_owner.py` — BORROWS/LENDS functions
+  are tabled separately as groups, not as individual picks
+* a static cost proxy (instruction count, call count, indirect calls, division,
+  jump table) that orders the rest cheapest-first
+
+Functions already carrying a parked near-miss body are marked `P` and sort to
+the top: a written hypothesis is a head start, and finishing them is the
+cheapest work available.
+
+Then cross-check the pick with the trained model, which weighs different
+signals:
 
 ```shell
 ./mako.sh rank src/battle/battle.c
@@ -71,7 +166,12 @@ image in `disks/` as build context for no reason.
 
 The score is a difficulty model (0 = easy, 1 = hard) trained to predict one-shot
 decompilation success. **Always work in ascending score order.** Do not start at
-the top of the file; do not pick by name.
+the top of the file; do not pick by name. Pass a saved copy of this output to
+`worklist.py --rank` to get both judgements in one table.
+
+Work in **file order** within a batch where you can: a function whose compiled
+size changes shifts every later function's branch targets, so a downstream
+verdict is only trustworthy once everything before it matches.
 
 ### 2. Seed with m2c
 
@@ -290,6 +390,20 @@ compiled output matches. It is a search tool, not a substitute for
 understanding: only reach for it once the C is *semantically* correct and the
 remaining diff looks like compiler-specific register/ordering noise.
 
+**Feed it the parked queue, do not babysit it.** The permuter's input is the
+set of functions parked under `#else /* NON_MATCHINGS */` — each already has
+semantically correct C and a written hypothesis, which is exactly what the
+search needs. Run it on those, unattended, whenever cores are free; check back
+when a batch closes. What does *not* work is treating "keep a permuter running
+at all times" as a goal in itself: in the sessions that built this file that
+standing order produced 246 runs, 56 stop-and-restart cycles, and a stream of
+turns spent asking whether one was already going, for a handful of landed
+matches. The permuter is a background consumer of a queue, not a co-worker that
+needs scheduling.
+
+`tools/worklist.py` marks the parked functions with `P`; that column is the
+queue.
+
 This repo ships `config/permuter_settings.toml` (compiler type, build system,
 and macros such as `gDma.*`/`_SHIFTL` that the permuter should treat as opaque
 side effects rather than trying to permute); decomp-permuter auto-discovers it
@@ -422,6 +536,20 @@ permute.
 make build          # 13x OK — the commit gate
 ```
 
+**Once per batch, not once per function.** `checkfn.py` is the per-function
+signal and costs a few seconds; `make build` is the commit gate and costs
+minutes. Running it after every function is both slower and misleading — see
+the first rule below. The sessions that produced this file ran `make build` 441
+times for ~147 landed functions, three full builds each, half of them red for
+reasons that had nothing to do with the function under the cursor.
+
+The batch shape that works:
+
+1. `worklist.py` once — pick the batch (5–8 functions, file order).
+2. Per function: `rodata_owner.py` → write C → `checkfn.py` until MATCH or
+   budget spent → park with a note if spent.
+3. Once at the end: `make build` → `make format` → commit.
+
 ## Rules that prevent wasted work
 
 **Do not use `make build` as the inner-loop signal.** While a function is
@@ -453,6 +581,25 @@ committed. If a build changes it, commit the change; CI checks it with
 **Revert cleanly on failure.** `git checkout -- <file>` then re-run `make build`
 to confirm you are back to 13× `OK` before moving on. Never leave the tree in a
 state where the build is red.
+
+**Park, do not grind.** Three shaped attempts and one permuter run per function
+(step 0). A fourth attempt with no new hypothesis is not persistence, it is the
+same guess reseeded. Write the near-miss note and take the next function.
+
+**Write the finding down the first time.** Every gcc idiom, every environment
+trap, every "this looked like a match but wasn't" belongs in this file or in
+`docs/PERMUTER_MACROS.md` **in the same change that discovered it** — not at
+the end of the session, which does not arrive. The measure of whether this is
+working: across the sessions that built this file, the stale-object trap was
+re-derived 47 times, the permuter-scratch strip 38 times, and the PowerShell
+heredoc limitation 29 times, because each was discovered, used, and then lost
+with the context window. A fact that lives only in the conversation gets paid
+for once per compaction.
+
+**Regenerate the work list, do not remember it.** `worklist.py` at the start of
+every batch. Reconstructing "what is left" by grepping `INCLUDE_ASM` and
+eyeballing `mako.sh rank` output is a per-batch tax that also gets the
+handwritten and `.rodata`-blocked functions wrong.
 
 ## Definition of done
 
@@ -523,10 +670,12 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `config/symbols.*.txt` | Hand-maintained symbol names — edit via `mako.sh symbols` |
 | `config/permuter_settings.toml` | Auto-discovered by decomp-permuter (see step 4) |
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
+| `tools/worklist.py` | Per-file work list: what is left, blocked, handwritten, cheapest first |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
+| `docs/worklist-*.md` | Generated by `worklist.py` — regenerate per batch, never hand-edit |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
 
@@ -550,3 +699,22 @@ See [docs/BOARD.md](docs/BOARD.md).
 agents in the same working tree **will** corrupt each other's builds. For
 concurrent work use one `git worktree` per agent, symlinking `disks/` in rather
 than copying it (it is ~1.3 GB).
+
+**Set this up before the second agent starts, not after the tree breaks.** The
+failure mode is not a clear error: the other agent's half-finished renames make
+every overlay fail to link, which reads as "the repo is broken" and sends
+whoever hits it debugging the toolchain. If overlays start failing to link for
+no reason you can attribute to your own edits, check for a second session
+first.
+
+A worktree needs three things the `git worktree add` does not give it:
+
+* its **own Docker build volume** — `ff7_build_<name>`, since `build/` is the
+  shared state that corrupts
+* `asm/`, `bin/`, `disks/` and the generated `config/` files, none of which are
+  tracked; symlink `disks/`, and either symlink `asm/` or regenerate it
+* the tool submodules (`asm-differ`, `maspsx`, `builder`) — an empty `maspsx`
+  fails **silently**, producing objects that diff cleanly against nothing
+
+Cheapest path: keep one bootstrapped worktree around and reuse it rather than
+creating a fresh one per task.
