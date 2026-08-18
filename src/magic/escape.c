@@ -222,22 +222,6 @@ void func_801B009C(void) {
 // corners. Frames 30..59 cut the tiles loose: each becomes its own quad, spun
 // and thrown by the velocity it was given in func_801B009C. Frames 60..64 draw
 // nothing, then the effect ends.
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B063C);
-#else
-/* 8 of 497 instructions, all one root cause: the phase-1 temporary holding
- * `(x * wave) >> 12` shares a pseudo with `n`, the phase-2 loop counter, so gcc
- * gives it the callee-saved s7; the target keeps it in v1 and uses s7 for the
- * counter. That one choice also swaps `row` (s7 -> s6) and `frame * 500`
- * (s6 -> s8). Everything else matches.
- *
- * The temporary itself is needed and was found by the permuter: the target
- * interleaves the two multiplies (`mflo v1` then `mult s5,v0` before v1 is
- * used), which only happens when the x result is named. Without it the function
- * is 93 instructions off. Giving the temporary its own local does put it in v1
- * and fixes these 8 rows, but then phase 2 spills its counter instead and the
- * function is 271 instructions off; reusing `h` is worse again (88). Permuter:
- * base 185, no improvement in 3500 iterations. */
 void func_801B063C(void) {
     // Scratchpad: the tile's four corners, then their centre in the fifth
     // slot's vx/vy, then the matrix it is drawn with.
@@ -248,7 +232,6 @@ void func_801B063C(void) {
     s32 frame = effect->AnimationFrame;
     s32 row;
     s32 col;
-    s32 n;
     s32 x;
     s32 y;
     s32 wave;
@@ -266,21 +249,20 @@ void func_801B063C(void) {
                 wave = rsin(EscapeGrid[row][col].Dist * 100 - frame * 500);
                 wave = ((wave * EscapeWobble) >> 12) + 0x1000;
                 wave += EscapeWobble;
-                n = (x * wave) >> 12;
-                EscapeGrid[row][col].Pos.x = n + 0xA0;
+                EscapeGrid[row][col].Pos.x = ((x * wave) >> 12) + 0xA0;
                 EscapeGrid[row][col].Pos.y = ((y * wave) >> 12) + 0x78;
             }
         }
 
-        for (n = 0; n < 840; n++) {
-            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x0 =
-                EscapeTiles[n].Corner[0]->Pos;
-            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x1 =
-                EscapeTiles[n].Corner[1]->Pos;
-            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x2 =
-                EscapeTiles[n].Corner[2]->Pos;
-            *(EscapePoint*)&EscapeTiles[n].prim[EscapeBuf].x3 =
-                EscapeTiles[n].Corner[3]->Pos;
+        for (row = 0; row < 840; row++) {
+            *(EscapePoint*)&EscapeTiles[row].prim[EscapeBuf].x0 =
+                EscapeTiles[row].Corner[0]->Pos;
+            *(EscapePoint*)&EscapeTiles[row].prim[EscapeBuf].x1 =
+                EscapeTiles[row].Corner[1]->Pos;
+            *(EscapePoint*)&EscapeTiles[row].prim[EscapeBuf].x2 =
+                EscapeTiles[row].Corner[2]->Pos;
+            *(EscapePoint*)&EscapeTiles[row].prim[EscapeBuf].x3 =
+                EscapeTiles[row].Corner[3]->Pos;
         }
 
     } else {
@@ -289,18 +271,18 @@ void func_801B063C(void) {
         if (frame < 30) {
             h = ReadGeomScreen() * 4;
 
-            for (n = 0; n < 840; n++) {
-                corner[0].vx = EscapeTiles[n].Corner[0]->Pos.x - 0xA0;
-                corner[0].vy = EscapeTiles[n].Corner[0]->Pos.y - 0x78;
+            for (row = 0; row < 840; row++) {
+                corner[0].vx = EscapeTiles[row].Corner[0]->Pos.x - 0xA0;
+                corner[0].vy = EscapeTiles[row].Corner[0]->Pos.y - 0x78;
                 corner[0].vz = 0;
-                corner[1].vx = EscapeTiles[n].Corner[1]->Pos.x - 0xA0;
-                corner[1].vy = EscapeTiles[n].Corner[1]->Pos.y - 0x78;
+                corner[1].vx = EscapeTiles[row].Corner[1]->Pos.x - 0xA0;
+                corner[1].vy = EscapeTiles[row].Corner[1]->Pos.y - 0x78;
                 corner[1].vz = 0;
-                corner[2].vx = EscapeTiles[n].Corner[2]->Pos.x - 0xA0;
-                corner[2].vy = EscapeTiles[n].Corner[2]->Pos.y - 0x78;
+                corner[2].vx = EscapeTiles[row].Corner[2]->Pos.x - 0xA0;
+                corner[2].vy = EscapeTiles[row].Corner[2]->Pos.y - 0x78;
                 corner[2].vz = 0;
-                corner[3].vx = EscapeTiles[n].Corner[3]->Pos.x - 0xA0;
-                corner[3].vy = EscapeTiles[n].Corner[3]->Pos.y - 0x78;
+                corner[3].vx = EscapeTiles[row].Corner[3]->Pos.x - 0xA0;
+                corner[3].vy = EscapeTiles[row].Corner[3]->Pos.y - 0x78;
                 corner[3].vz = 0;
 
                 corner[4].vx = (corner[0].vx + corner[1].vx + corner[2].vx +
@@ -319,29 +301,29 @@ void func_801B063C(void) {
                 corner[3].vx -= corner[4].vx;
                 corner[3].vy -= corner[4].vy;
 
-                EscapeTiles[n].Pos.vx += EscapeTiles[n].Vel.vx;
-                EscapeTiles[n].Pos.vy += EscapeTiles[n].Vel.vy;
-                EscapeTiles[n].Pos.vz += EscapeTiles[n].Vel.vz;
-                EscapeTiles[n].Vel.vz -= EscapeTiles[n].Vel.vz >> 4;
-                EscapeTiles[n].Vel.vy += 4;
+                EscapeTiles[row].Pos.vx += EscapeTiles[row].Vel.vx;
+                EscapeTiles[row].Pos.vy += EscapeTiles[row].Vel.vy;
+                EscapeTiles[row].Pos.vz += EscapeTiles[row].Vel.vz;
+                EscapeTiles[row].Vel.vz -= EscapeTiles[row].Vel.vz >> 4;
+                EscapeTiles[row].Vel.vy += 4;
 
-                RotMatrixYXZ(&EscapeTiles[n].Rot, m);
+                RotMatrixYXZ(&EscapeTiles[row].Rot, m);
                 ScaleMatrix(m, &EscapeScale);
 
-                m->t[0] = corner[4].vx * 4 + EscapeTiles[n].Pos.vx;
-                m->t[1] = corner[4].vy * 4 + EscapeTiles[n].Pos.vy;
-                m->t[2] = h + EscapeTiles[n].Pos.vz;
+                m->t[0] = corner[4].vx * 4 + EscapeTiles[row].Pos.vx;
+                m->t[1] = corner[4].vy * 4 + EscapeTiles[row].Pos.vy;
+                m->t[2] = h + EscapeTiles[row].Pos.vz;
 
                 SetRotMatrix(m);
                 SetTransMatrix(m);
-                prim = &EscapeTiles[n].prim[EscapeBuf];
+                prim = &EscapeTiles[row].prim[EscapeBuf];
                 RotTransPers4(&corner[0], &corner[1], &corner[2], &corner[3],
                               (long*)&prim->x0, (long*)&prim->x1,
                               (long*)&prim->x2, (long*)&prim->x3, &p, &flag);
 
-                EscapeTiles[n].Rot.vx += EscapeTiles[n].RotVel.vx;
-                EscapeTiles[n].Rot.vy += EscapeTiles[n].RotVel.vy;
-                EscapeTiles[n].Rot.vz += EscapeTiles[n].RotVel.vz;
+                EscapeTiles[row].Rot.vx += EscapeTiles[row].RotVel.vx;
+                EscapeTiles[row].Rot.vy += EscapeTiles[row].RotVel.vy;
+                EscapeTiles[row].Rot.vz += EscapeTiles[row].RotVel.vz;
             }
 
         } else {
@@ -363,7 +345,6 @@ flip:
     EscapeBuf ^= 1;
     effect->AnimationFrame++;
 }
-#endif
 
 // Runs once the grid has finished flying apart: releases every battle model
 // and marks the effect done, which is what actually ends the battle.
