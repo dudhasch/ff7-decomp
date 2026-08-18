@@ -361,6 +361,14 @@ a provably flat region is the one case where the permuter cannot help, and it
 will happily burn a core-day proving it again. Spend the run on the finite
 joint space above, or leave the function alone.
 
+Size that joint space before running it, because it is usually small enough to
+enumerate with tools/variant_eval.py instead -- exact scores, no import/strip/
+retarget dance, and the result is a proof rather than a sample. On the function
+this was written from it came to 48 points, which took under three minutes and
+returned no improvement: the sink site and both back-edge fillers turned out
+completely inert, leaving the field order as the only live axis and every move
+along it a loss.
+
 Two things to check before you conclude a pair is conserved rather than
 reachable. Confirm the rows are *reorderings* -- asm-differ marks a moved
 instruction with `<` against the row it left, so the pair shows up as one CHG

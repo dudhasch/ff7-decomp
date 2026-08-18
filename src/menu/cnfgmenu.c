@@ -411,6 +411,13 @@ void func_801D069C(void) {
 // everything it cannot fold scores 5, 6, 64, 89 or 149. The neighbourhood is
 // flat, not unsearched. Do not run the permuter on this function again --
 // see `permuter_macros.py recipe conserved-pair`, which is written from it.
+// That recipe's own joint space has since been enumerated exhaustively here:
+// 2 sink sites x 2 positions for `dy += 12` x 2 for `rowY += 12` x 3! field
+// orders = 48 points, all scored, minimum 4. The sink site, `dy` and `rowY`
+// are all three completely inert -- every one of the 24 pairs scores
+// identically -- and the field order, the one live axis, only ever costs
+// (ywh 4, hwy/wyh/yhw 6, hyw/why 7). Conservation survived back-edge bait, so
+// the pair really is one degree of freedom. This space is closed.
 //
 //   * 2 rows after case 2's loop: the target emits `sh zero,0x20(sp)`
 //     (rect.x = 0) as the first instruction of the block, ahead of the call's
