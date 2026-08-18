@@ -152,9 +152,16 @@ static void EscapeCaptureScreen(void) {
  *     distance loop's x/y: no effect on the slot order (22/18), or they flatten
  *     the corner addressing (90/84).
  *
- * The permuter is no help here: its score is dominated by an `inline int
- * inline_fn(a, b)` rewrite whose out-of-line copy shifts the whole address
- * range. Re-measure anything it produces against the overlay. */
+ * The permuter needs three corrections before its score means anything here,
+ * all now in CLAUDE.md: `--stack-diffs` (off by default, so the twelve stack
+ * rows above are invisible and the search optimises only the corner residue),
+ * `D_80151909` rewritten in the scratch's target.s to the `D_801518E4 + 0x25`
+ * form this C relocates against (otherwise a perfect candidate still scores 6
+ * and `--stop-on-zero` never fires), and `-g -gcoff` dropped from the scratch's
+ * compile.sh. Uncorrected it reported 85 against a base of 250 for a candidate
+ * that measures 28/24 -- worse than this body -- by trading two insertions for
+ * one reordering. Corrected, the base is 256, of which 6 is the stack residue
+ * and 250 the corner one. Re-measure every output against the overlay. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else

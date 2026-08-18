@@ -597,6 +597,57 @@ split into the separate objects the original had, the plain inline expression is
 what the target compiles and the named temporary costs eight rows. Re-derive a
 find after any change to the layout it was measured against.
 
+**Pass `--stack-diffs`, or the search optimises a different function than the
+one you are matching.** The scorer's penalties are
+
+| insertion | deletion | reordering | regalloc | branch | stack |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 100 | 60 | 5 | 1 | 1 |
+
+and the last column is only counted when `--stack-diffs` is given, which is
+**off by default**: without it `src/objdump.py` normalises every `N(sp)` away
+before the diff. A residue that is mostly stack-slot *naming* — two spilled
+values holding each other's slot, so every `sw`/`lw`/`lbu` that touches them
+reads the other offset — is therefore invisible, and the hill-climb spends its
+whole budget on the rest. That is how `func_801B009C` produced a candidate the
+permuter scored at 85 against a base of 250 which measured *worse* against the
+retail overlay: it had traded two insertions (200 points) for one reordering
+(60), while the twelve stack rows it left untouched were worth nothing either
+way. Re-measure every output against the overlay, and pass `--stack-diffs`
+whenever the diff has stack rows in it.
+
+`perm_pad_var_decl` — "inserts an unused variable to adjust stack offsets" — is
+the pass aimed at exactly that residue, and its default weight is 0.5. Raise it
+in the scratch's `settings.toml` when stack layout is what you are hunting;
+`perm_temp_for_expr` is the one that introduces a named local, which is the
+lever behind the giv-versus-inline idiom above.
+
+**A symbol the C reaches through a struct makes score 0 unreachable.** The
+scorer compares relocation *symbols*, not addresses. `src/magic/escape.c`
+writes `D_801518E4[row].D_80151909`, which relocates against
+`D_801518E4 + 0x25`; the target `.s` names the byte directly as `D_80151909`.
+Same address, same bytes, permanent penalty — so `--stop-on-zero` can never
+fire even on a perfect candidate. `permuter_macros.py align` does not catch it,
+because base.c *does* contain the string `D_80151909` — as a field name. Fix it
+in the scratch, never in `asm/`: rewrite the two `%hi`/`%lo` operands in
+`nonmatchings/<fn>/target.s` to the form the C produces and reassemble with the
+`tools/permuter-bin` shim.
+
+```shell
+sed -i -e 's/%hi(D_80151909)/%hi(D_801518E4 + 0x25)/' \
+       -e 's/%lo(D_80151909)/%lo(D_801518E4 + 0x25)/' nonmatchings/<fn>/target.s
+mips-linux-gnu-as -march=vr4300 -mabi=32 nonmatchings/<fn>/target.s \
+    -o nonmatchings/<fn>/target.o
+```
+
+**Drop `-g -gcoff` from the scratch's `compile.sh`.** The project build passes
+both, so `import.py` copies them into the scratch, and cc1 then emits an `LMn`
+line label every few instructions — 162 of them for `func_801B009C`. objdump
+prints each as its own line *and* renders branch targets as `<LM4>` instead of
+`<fn+0x38>`, so the candidate object is 650 lines against the target's 488.
+Removing both flags is codegen-identical (verified instruction-for-instruction)
+and takes that noise out of the comparison.
+
 #### Toolchain overrides
 
 decomp-permuter defaults to an N64 toolchain in three places, none of which
