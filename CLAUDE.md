@@ -236,6 +236,13 @@ a near-miss, in rough order of frequency:
   When the value *stored* is itself the loop counter, the reduction goes the
   other way — gcc walks a pointer for the address and you have to write that
   pointer by hand (`OpcodeFuncMhmmx`'s first store loop).
+* **`(x & 7) << 5` narrows the loads, `(x & 7) * 32` does not.** With the
+  shift, combine's `force_to_mode` pushes the 3-bit mask back through the
+  `plus` and into the `mem`s, so two `s16` fields load as `lbu`/`lbu` (or
+  `lhu` if an `s16` temp holds the sum). Written as a multiply, the mask never
+  reaches the loads and they stay `lh`/`lh` — which is what the target does in
+  `TearsRenderDrop`'s texture-page index. The two forms are the same
+  arithmetic; only the operator spelling decides the load width.
 * **`x % n` on an `s16` sign-extends the result** — gcc 2.6.3 does the modulo
   in `HImode` and adds a `sll`/`sra` pair to widen it back. Write it as
   `value - quotient * n` with an `s32` quotient. Hoist both the quotient and
@@ -553,9 +560,9 @@ The batch shape that works:
 ## Adding a MAGIC spell overlay
 
 `disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
-same slot at `0x801B0000`. Three are in the build: `BARRIER.BIN` (`src/magic/
-barrier.c`), `MABARIA.BIN` (`src/magic/mabaria.c`) and `REFREC.BIN`
-(`src/magic/refrec.c`) — the latter two each landed in one pass. They are the cheapest
+same slot at `0x801B0000`. Six are in the build: `BARRIER.BIN`, `MABARIA.BIN`,
+`REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and `ALMIGHTY.BIN`, all under
+`src/magic/`. They are the cheapest
 work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
 entanglement — and the ones near barrier in size are near-clones of it, so the
 matching C is largely a transcription with different field offsets.
@@ -593,6 +600,17 @@ The recipe, start to finish:
    `.bss` symbols, which nothing defines yet. That failure is the expected
    halfway point.
 
+   **Then run `make build` again — not `ninja` — before reading any diff.**
+   `tools/ninja/gen.py` reads the `//!` compiler line out of the `.c` at
+   *build.ninja generation* time, and returns the defaults when the file does
+   not exist yet. On the run that creates it, the overlay is therefore wired up
+   as `cc1-psx-272` + aspsx 2.34, and `ninja <target>` alone never regenerates
+   `build.ninja`, so it stays that way for every later iteration. Nothing in
+   the output says so — you just diff against code from the wrong compiler and
+   chase register-allocation ghosts. `ninja -t commands build/us/src/magic/
+   <name>.c.o | tail -1` prints which `cc1` is really being used; check it the
+   moment a diff looks structurally wrong.
+
 5. **Write the whole file as C in one pass, using `barrier.c` as the
    template.** Do not try to land the `INCLUDE_ASM` build first: the `.s` files
    reference the `.bss`/`.data` symbols by their splat names, and the C
@@ -608,7 +626,17 @@ The recipe, start to finish:
 
 Naming: keep the entry point `MAGIC_<Spell>` and prefix the statics, since all
 these overlays share the `0x801B0000` address space and `config/
-sym_ovl_export.us.txt` collects them into one namespace.
+sym_ovl_export.us.txt` collects them into one namespace. The entry point is not
+always at offset 0 — `GATTAI.BIN` puts its per-frame tick there and the
+`MAGIC_*` entry at `0x801B007C`.
+
+**A `static` in `src/battle/` that a MAGIC overlay calls has to lose the
+`static`.** The overlays link against `config/sym_export_battle.us.txt`, which
+is generated from `battle.elf`'s *global* symbols, so a callee the repo made
+file-local is simply undefined at link time. Dropping `static` changes nothing
+about the emitted code — only the symbol's binding — and `battle.exe` stays
+green; `func_800BBA40`, `func_800C55B8` and `func_800D56A8` were opened up this
+way. Add the declaration to `src/battle/battle.h`, not to the overlay.
 
 ## Rules that prevent wasted work
 
