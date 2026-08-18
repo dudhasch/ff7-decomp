@@ -104,6 +104,11 @@ extern s16 D_800E0756[];
 extern char D_800E0758[];
 extern u8 D_800E08A8[];
 extern u8 D_800E08C0[];
+extern u8 D_800E1028[];
+extern u8 D_800E3B28[];
+extern u8 D_800E3FA8[];
+extern u8 D_800E4128[];
+extern u16 D_800E4200[];
 extern u8 D_800DFDFC[];
 extern u8 D_80071C20;
 extern u8 g_EntityForSplitJoin;
@@ -9450,7 +9455,88 @@ void SystemMessageSetCharName(s16 battleCharId, s16 stringId) {
 // Begin of field_debug.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugInitBuffers);
+/* Initialise the debug renderer's GPU buffers: blank the per-page ordering
+ * table flags, then build both framebuffers' primitive arrays (sprites, tiles,
+ * lines) with their packet codes and semi-transparency bits, the CLUT table,
+ * and the two draw-mode blocks. The $at-rematerialisation wall: the original
+ * rebuilds each buffer base through $at on every store where gcc CSEs it into
+ * a register. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugInitBuffers);
+#else
+void FieldDebugInitBuffers(void) {
+    s32 i;
+    u8* p0;
+    u8* p1;
+    s32 tpage;
+
+    for (i = 0x762; i >= 0; i -= 0x17A) {
+        D_800E08C0[i] = 1;
+    }
+    D_8009D824 = 1;
+    g_FieldDebugRb = 0;
+    g_FieldDebugCurPage = 0;
+    g_FieldDebugTransp = 0;
+
+    p0 = (u8*)&D_800E1028[0];
+    p1 = p0 + 0x1580;
+    for (i = 0; i < 0x158; i++) {
+        setlen(p0, 3);
+        setcode(p0, 0x74);
+        setlen(p1, 3);
+        setcode(p1, 0x74);
+        setSemiTrans(p0, 1);
+        setSemiTrans(p1, 1);
+        p0 += 0x10;
+        p1 += 0x10;
+    }
+
+    for (i = 0; i < 8; i++) {
+        D_800E4200[i] = ((0x1E7 - i) << 6) | 0x10;
+    }
+
+    p0 = (u8*)&D_800E3FA8[0];
+    p1 = p0 + 0xC0;
+    for (i = 0; i < 0xC; i++) {
+        setlen(p0, 3);
+        setcode(p0, 0x60);
+        setlen(p1, 3);
+        setcode(p1, 0x60);
+        setSemiTrans(p0, 1);
+        setSemiTrans(p1, 1);
+        p0 += 0x10;
+        p1 += 0x10;
+    }
+
+    p0 = (u8*)&D_800E3B28[0];
+    p1 = p0 + 0x240;
+    for (i = 0; i < 0x18; i++) {
+        setlen(p0, 5);
+        setcode(p0, 0x48);
+        *(u32*)(p0 + 0x14) = 0x55555555;
+        setlen(p1, 5);
+        setcode(p1, 0x48);
+        *(u32*)(p1 + 0x14) = 0x55555555;
+        p0 += 0x18;
+        p1 += 0x18;
+    }
+
+    if (GetGraphType() == 1 || GetGraphType() == 2) {
+        tpage = 0x2F;
+    } else {
+        tpage = 0x1F;
+    }
+    p0 = (u8*)&D_800E4128[0];
+    p1 = p0 + 0x48;
+    for (i = 0; i < 6; i++) {
+        SetDrawMode((DR_MODE*)p0, 0, 0, tpage, NULL);
+        SetDrawMode((DR_MODE*)p1, 0, 0, tpage, NULL);
+        p0 += 0xC;
+        p1 += 0xC;
+    }
+}
+#endif
 
 static void InitFieldDebugPages(void) {
     FieldDebugPageInit(5, 0x6C, 0, 0x6C, 0x52);
