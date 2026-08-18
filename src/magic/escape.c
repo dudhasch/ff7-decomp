@@ -60,47 +60,29 @@ EscapeCell EscapeGrid[22][41];
 EscapeTile EscapeTiles[840];
 POLY_F4 EscapeBackPrims[2];
 
-// All three are assembled from asm/ in the matching build; declared so calling
-// them and taking their address works. Without a declaration gcc substitutes 0
-// for the identifier and emits `move a0,zero` with no diagnostic the build
-// surfaces.
-void func_801B0020(void);
+// func_801B009C is assembled from asm/ in the matching build; it is declared so
+// that calling it and taking its address works. Without a declaration gcc
+// substitutes 0 for the identifier and emits `move a0,zero` with no diagnostic
+// the build surfaces.
 void func_801B009C(void);
-void func_801B063C(void);
 static void EscapeMainSetup(void);
 
 void MAGIC_Escape(void) { EscapeMainSetup(); }
 
 // Copies the drawing area into the two texture pages the grid samples from.
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B0020);
-#else
-/* 16 rows, all scheduling: the target emits the two x stores before the w/h
- * pairs and fills the load-delay slot after `lhu DispX` with `move a2,zero`
- * (a MoveImage argument), where we fill it with the `li 0xA0` for the widths
- * and sink the x stores below them. Register allocation follows from that --
- * the target keeps g_cDb in v1 and overwrites it with DispY, we keep it in a2.
- * Every instruction is otherwise identical and the function is the right
- * length. Tried, in order: separate field reads (4 loads instead of 2); s32
- * locals for x and y (turns lhu into lh); adjacent reads without locals (still
- * 2 loads of DispX); both chain directions of `a.w = b.w = 0xA0` (the
- * left-to-right one is correct and is kept below); the embedded-assignment
- * form `right.x = (left.x = ...) + 0xA0`; and one `RECT half[2]` instead of
- * two RECTs. None moves the x stores up. */
 static void EscapeCaptureScreen(void) {
     RECT left;
     RECT right;
 
     left.x = g_cDb->DispX;
     right.x = left.x + 0xA0;
+    left.y = right.y = g_cDb->DispY;
     left.w = right.w = 0xA0;
     left.h = right.h = 0xA8;
-    left.y = right.y = g_cDb->DispY;
     MoveImage(&left, 0x300, 0);
     MoveImage(&right, 0x280, 0x100);
     DrawSync(0);
 }
-#endif
 
 // Lays out the 21x40 grid: first the radial distance table the ripple is
 // driven from, then one tile per cell -- two prims chained into a single list,
@@ -111,46 +93,66 @@ static void EscapeCaptureScreen(void) {
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
 /* 52 of 361 instructions. One structural difference, and it is a cost decision
- * inside gcc's loop optimiser rather than anything about the C. The target
- * carries five values in the tile loop's stack frame (0x60):
+ * inside gcc's loop optimiser rather than anything about the C. Four values are
+ * derived from `col` in the tile loop and gcc keeps four; the target's fourth
+ * is `col * 2 - 42`, ours is a giv holding `&EscapeGrid[0][col]` that
+ * duplicates the `col * 12` giv already in s3 and that we spill and reload for
+ * Corner[0]. The target has no such giv -- it rematerialises the bare
+ * `&EscapeGrid` constant and adds its col*12 and row*492 givs to it, exactly as
+ * it already does for Corner[1..3] -- and spends the freed slot on `col * 2 -
+ * 42` and `row * 2 - 32` rather than the `addiu`/`sll` pair we emit inline. Its
+ * frame is 0x60 with five spilled values:
  *
  *     16(sp) n            24(sp) row * 8      48(sp) row * 8 + 8
  *     32(sp) col * 2 - 42 40(sp) row * 2 - 32
  *
- * We carry four (frame 0x58) -- n, row * 8, row * 8 + 8, and, in place of the
- * two arithmetic ones, a giv holding `&EscapeGrid[0][col]` that we spill and
- * reload for Corner[0]. The target has no such giv: it rematerialises the bare
- * `&EscapeGrid` constant and adds its col*12 and row*492 givs to it, and
- * recomputes nothing, spending the freed slots on `col * 2 - 42` and
- * `row * 2 - 32` instead of the `addiu`/`sll` pair we emit inline. Everything
- * else -- both earlier loops, the prim setup, all four Corner stores, every
- * register -- is identical, and the function is exactly the right length.
+ * ours is 0x58 with four. Everything else -- both earlier loops, the prim
+ * setup, all four Corner stores, every register -- is identical, and the
+ * function is exactly the right length.
  *
- * Tried and rejected, each measured as an instruction-sequence diff against the
- * retail overlay (rows = exact, shape = after normalising stack offsets and
- * branch targets, so a frame-size change does not cascade; base is 104/46):
+ * Why gcc will not make `col * 2 - 42` an induction variable, when it happily
+ * makes one of `(col - 20) * 8` in the same loop (`li s7,-160` / `addiu
+ * s7,s7,8`): giv benefit scales with uses, and the `* 8` value feeds a
+ * four-deep assignment chain while the `* 2` value is used once. Whatever the
+ * original wrote, it was not a single-use expression over `col`.
  *
- *   - every spelling of the two products: `col * 2 - 42`, `(col - 21) << 1`,
- *     `2 * (col - 21)`, `col + col - 42`. All compile identically to what is
- *     below (104/46) or, with the constant split out, to 164/152.
- *   - hoisting them into locals, which is the form that makes `col * 8 - 0xA0`
- *     a perfect giv in the distance loop above: at the top of the inner loop
- *     218/164, reusing x and y 274/226, and `row * 2 - 32` in the outer loop
- *     (where it is genuinely invariant) 222/208. A user variable wins a
- *     register outright; the target wants a spill slot, which no C phrasing
- *     asks for.
- *   - seven phrasings of the Corner block, to stop the address giv forming:
- *     a `EscapeCell *c` walked by +1/+41/+42 (264/206), a row pointer
- *     (288/246), flat `&EscapeGrid[0][row * 41 + col]` (324/272), `+` instead
- *     of `&[]` (266/208), and reordering the four stores (212/156). All worse:
+ * 96 phrasings have been measured against the retail overlay, as rows (exact)
+ * and shape (after normalising stack offsets and branch targets, so a
+ * frame-size change does not cascade). Base is 104/46. None beat it:
+ *
+ *   - every spelling of the two products -- `col * 2 - 42`, `(col - 21) << 1`,
+ *     `2 * (col - 21)`, `col + col - 42`, and the same with the constant split
+ *     out or folded into the rand term. All compile to what is below (104/46)
+ *     or to 164/152.
+ *   - hoisting them into locals, the form that makes `col * 8 - 0xA0` a perfect
+ *     giv in the distance loop above: inner-loop top 218/164, reusing x and y
+ *     274/226, `row * 2 - 32` in the outer loop where it is genuinely invariant
+ *     222/208.
+ *   - carrying them by hand as accumulators (`x = -42` per row, `x += 2` per
+ *     tile), which is what makes them bivs rather than givs and is the closest
+ *     thing to asking for a spill slot in C: 272/210. gcc gives the biv a
+ *     register and spills a sixth value instead, so the frame grows to 0x60
+ *     with six slots rather than the target's five.
+ *   - ten phrasings of the Corner block, to stop the redundant giv forming: a
+ *     walked `EscapeCell *c` (264/206), one row pointer (332/290) or two
+ *     (316/258) hoisted into the outer loop, flat `&EscapeGrid[0][row * 41 +
+ *     col]` (324/272), corners derived from Corner[0] (206/202), reordering the
+ *     four stores (212/156). Only `EscapeGrid[row] + col` for Corner[0] and
+ *     `&EscapeGrid[row][col + 41]` for Corner[2] are neutral (104/46, 106/48);
  *     the block as written is what the target compiles.
- *   - separate loop counters for the distance table (162/110).
+ *   - moving the Corner block elsewhere in the loop body: 226 shape wherever it
+ *     goes. Its position is load-bearing.
+ *   - separate loop counters for the distance table (162/110), carrying
+ *     `row * 8` in a local so the `+ 8` is an add rather than a second
+ *     induction variable (270/224).
+ *   - declaration order (all five permutations) and `register` on any subset of
+ *     the locals: no effect at all. gcc 2.6.3's allocator ignores both here.
  *
  * What did help, and is in the code below: writing `rand()` as the *first*
  * operand of the two Vel sums. `(rand() & 3) + (col - 21) * 2` is two rows
- * better than `(col - 21) * 2 + (rand() & 3)` and the same again for vy --
- * 108/50 to 104/46 -- because the induction value is then computed after the
- * call instead of having to survive it.
+ * better than the other order and the same again for vy -- 108/50 to 104/46 --
+ * because the induction value is then computed after the call instead of having
+ * to survive it.
  *
  * Permuter: base 2400, best 840 over 27k iterations at -j20, and that 840 is an
  * artefact. Its find is the usual `inline int inline_fn(a, b) { return a * b;
@@ -395,7 +397,7 @@ static void EscapeFinish(void) {
 
 static void EscapeMainSetup(void) {
     func_801B009C();
-    func_801B0020();
+    EscapeCaptureScreen();
     func_800BBEAC(func_801B063C);
     func_800BBEAC(EscapeFinish);
     func_800D55F4(0x20, 0x40, 0x5D);

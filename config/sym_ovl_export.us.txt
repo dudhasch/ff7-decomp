@@ -2298,7 +2298,6 @@ AlmightyShardCount = 0x801b05a8;
 AlmightyPrimBuffer = 0x801b05ac;
 AlmightyBufferPtr = 0x801d05ac;
 MAGIC_Escape = 0x801b0000;
-func_801B0020 = 0x801b0020;
 func_801B009C = 0x801b009c;
 func_801B063C = 0x801b063c;
 EscapeBuf = 0x801b0eb8;
