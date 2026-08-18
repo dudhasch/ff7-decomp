@@ -1,4 +1,4 @@
-(content fetched from https://raw.githubusercontent.com/ff7-mods/ff7-flat-wiki/master/docs/FF7/Accessory_data.md)
+(content fetched from https://raw.githubusercontent.com/ff7-mods/ff7-flat-wiki/master/docs/reference/ff7-wiki/Accessory_data.md)
 
 ## KERNEL.BIN - Section 8: Accessory data
 

@@ -1,6 +1,6 @@
 Imported FF7 documentation from ff7-flat-wiki (https://github.com/ff7-mods/ff7-flat-wiki)
 
-This directory contains a copy of the `docs/FF7` content from the ff7-flat-wiki project.
+This directory contains a copy of the `docs/reference/ff7-wiki` content from the ff7-flat-wiki project.
 
 Notes:
 - Files were imported in "add-only" mode: existing files were not overwritten.

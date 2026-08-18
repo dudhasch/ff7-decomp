@@ -2,7 +2,7 @@
 """Generate the ordered work list for one source file.
 
     .venv/bin/python3 tools/worklist.py src/field/field.c
-    .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/worklist-field.md
+    .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/decomp/worklist-field.md
 
 Answers, in one pass, the four questions that otherwise get re-derived by hand
 at the start of every batch -- and re-derived again after every compaction:

@@ -6,14 +6,15 @@ Usage:
   python tools/ff7speedruns_crawl_convert.py --depth 4 --max-pages 1000
 
 Outputs:
-  - docs/FF7_speedruns_html/<title>.html  (parsed HTML from API)
-  - docs/FF7_speedruns_md/<title>.md     (cleaned Markdown)
+  - docs/reference/speedruns/html/<title>.html  (parsed HTML from API)
+  - docs/reference/speedruns/<subdir>/<title>.md (cleaned Markdown, categorized)
 
 Requires: requests, beautifulsoup4, html2text
 """
 import os
 import time
 import argparse
+import re
 from collections import deque
 import requests
 from bs4 import BeautifulSoup
@@ -27,10 +28,35 @@ BAD_CLASSES = [
     'mw-editsection', 'infobox', 'navbox', 'sidebar', 'stub', 'hatnote'
 ]
 
-OUT_HTML = os.path.join(os.getcwd(), 'docs', 'FF7_speedruns_html')
-OUT_MD = os.path.join(os.getcwd(), 'docs', 'FF7_speedruns_md')
+OUT_BASE = os.path.join(os.getcwd(), 'docs', 'reference', 'speedruns')
+OUT_HTML = os.path.join(OUT_BASE, 'html')
 os.makedirs(OUT_HTML, exist_ok=True)
-os.makedirs(OUT_MD, exist_ok=True)
+
+# Category rules: first matching regex wins, checked against the page title.
+CATEGORY_RULES = [
+    ('pc', re.compile(r'^PC ', re.I)),
+    ('bosses', re.compile(
+        r'(buster|aps|bottomswell|carry armor|demons gate|diamond weapon|dyne'
+        r'|guard scorpion|jenova|materia keeper|motor ball|palmer|red dragon'
+        r'|sephiroth|schizo|turks)', re.I)),
+    ('mechanics', re.compile(
+        r'(rng|random number|encounter|ground types|softlock|chocobo racing'
+        r'|director|directory)', re.I)),
+    ('categories', re.compile(
+        r'(any%|100%|bosses \(|major skips|warps\)|boosters)', re.I)),
+]
+DEFAULT_CATEGORY = 'techniques'
+NO_CATEGORY = ('Main_Page',)
+
+
+def categorize(title):
+    if title in NO_CATEGORY:
+        return ''
+    for subdir, rule in CATEGORY_RULES:
+        if rule.search(title):
+            return subdir
+    return DEFAULT_CATEGORY
+
 
 session = requests.Session()
 session.headers.update({'User-Agent': USER_AGENT})
@@ -121,6 +147,7 @@ def crawl_and_convert(start_titles, depth, max_pages, sleep):
     for t in start_titles:
         q.append((t, 0))
     saved = 0
+    saved_pages = []
     while q and saved < max_pages:
         title, d = q.popleft()
         if title in seen:
@@ -136,11 +163,15 @@ def crawl_and_convert(start_titles, depth, max_pages, sleep):
         fn_html = sanitize_title(title) + '.html'
         path_html = os.path.join(OUT_HTML, fn_html)
         save_file(path_html, cleaned)
-        # convert to markdown
+        # convert to markdown, into the title's category subdir
         md = html_to_markdown(cleaned)
+        subdir = categorize(title)
+        out_dir = os.path.join(OUT_BASE, subdir) if subdir else OUT_BASE
+        os.makedirs(out_dir, exist_ok=True)
         fn_md = sanitize_title(title) + '.md'
-        path_md = os.path.join(OUT_MD, fn_md)
+        path_md = os.path.join(out_dir, fn_md)
         save_file(path_md, md)
+        saved_pages.append((title, subdir))
         print('Saved', path_html, 'and', path_md)
         saved += 1
         if d < depth:
@@ -153,7 +184,26 @@ def crawl_and_convert(start_titles, depth, max_pages, sleep):
                 if l not in seen:
                     q.append((l, d+1))
         time.sleep(sleep)
+    write_index(saved_pages)
     print('Done. saved=', saved)
+
+
+def write_index(pages):
+    """Regenerate docs/reference/speedruns/README.md from a crawl result."""
+    groups = {}
+    for title, subdir in sorted(pages):
+        groups.setdefault(subdir, []).append(title)
+    lines = ['# FF7 speedrun notes', '']
+    for subdir in sorted(groups, key=lambda s: (s == '', s)):
+        heading = subdir if subdir else 'General'
+        lines.append('## ' + heading)
+        lines.append('')
+        for title in groups[subdir]:
+            fn = sanitize_title(title) + '.md'
+            target = os.path.join(subdir, fn) if subdir else fn
+            lines.append('- [%s](%s)' % (title, target.replace(os.sep, '/')))
+        lines.append('')
+    save_file(os.path.join(OUT_BASE, 'README.md'), '\n'.join(lines))
 
 
 if __name__ == '__main__':

@@ -6,7 +6,7 @@
 > near-misses:
 >
 > ```shell
-> .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/worklist-field.md
+> .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/decomp/worklist-field.md
 > ```
 >
 > Use this document for the question that survey answers and `worklist.py` does
