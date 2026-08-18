@@ -363,7 +363,10 @@ typedef struct {
 } BattleModel; // size:0xB9C
 
 typedef struct {
-    /* 0x0000 */ u_long* unk0[0x1C];
+    /* 0x0000 */ u_long* unk0[0x17];
+    /* 0x005C */ s16 DispX; // framebuffer origin of the drawing area, read by
+    /* 0x005E */ s16 DispY; // MAGIC/ESCAPE.BIN when it grabs the screen
+    /* 0x0060 */ u_long* unk60[4];
     /* 0x0070 */ u_long* unk70[0x1000];
     /* 0x4070 */ u_long* unk4070[2];
     /* 0x4078 */ u_long* unk4078[2];

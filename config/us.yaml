@@ -272,3 +272,17 @@ overlays:
       - [0, c, almighty]
       - [0x574, .data, almighty]
       - [0x5A8, .bss, almighty]
+  - name: escape
+    disk_path: disks/us/MAGIC/ESCAPE.BIN
+    sha1: 816a4482bc577d60526a848dae84d1c820464d4c
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x1CE78
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-escape.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, escape]
+      - [0xEB8, .data, escape]
+      - [0xED4, .bss, escape]

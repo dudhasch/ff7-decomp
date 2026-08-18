@@ -452,5 +452,6 @@ with open("build.ninja", "w") as f:
         "gattai",
         "tears",
         "almighty",
+        "escape",
     ]:
         add_splat_config(os.path.join(work_dir, f"{ovl}.yaml"))
