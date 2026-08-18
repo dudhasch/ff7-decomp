@@ -3787,7 +3787,31 @@ s32 OpcodeFuncPmjmp2(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMgame);
+s32 OpcodeFuncMgame(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mgame", 8);
+    }
+    switch (g_FieldState->eventCmd) {
+    case EVTCMD_NONE:
+        g_FieldState->eventCmd = EVTCMD_LOAD_MINIGAME;
+        g_FieldState->movieCommandState = MOVCMD_IDLE;
+        GET_PARAM_S16(g_FieldState->eventCmdParam, 1);
+        GET_PARAM_S16(g_FieldState->pcPosX, 3);
+        GET_PARAM_S16(g_FieldState->pcPosY, 5);
+        GET_PARAM_S16(g_FieldState->pcWalkMeshId, 7);
+        *(s16*)&g_FieldState->pcDirection = GET_PARAM_U8(9);
+        *(u8*)((u8*)g_FieldState + 0xF2) = GET_PARAM_U8(10);
+        return 1;
+    case EVTCMD_LOAD_MINIGAME:
+        if (g_FieldState->movieCommandState == MOVCMD_DONE) {
+            PC_INC(11);
+            g_FieldState->eventCmd = EVTCMD_NONE;
+            return 0;
+        }
+        return 1;
+    }
+    return 1;
+}
 
 s32 OpcodeFuncBatle(void) {
     if (g_DebugLevel & 3) {
@@ -6815,9 +6839,136 @@ s32 OpcodeFuncVwoft(void) {
 // Begin of field_opcode_party_manage.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJoin);
+s32 FieldEventJoinSet(u8, u8); // extern
 
+#ifndef NON_MATCHINGS
+INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJoin);
+#else
+/* 25 rows: gcc hoists the 0xFF constant into a saved reg ($s1) for the two
+ * memory_bank_2[10]/[11] compares and reuses it across both FieldEventJoinSet
+ * calls; target reloads `li v0,0xff` per compare and keeps the stack frame at
+ * -0x18 (no $s1 save). GET_PARAM_U8(1) shared by both calls is the hoist
+ * trigger. g_FieldModels idiom (not g_FieldEntity) was the key fix that cut
+ * 66->25 rows. Polarity flip and block-scope arg temp both plateau at 25. */
+s32 OpcodeFuncJoin(void) {
+    s32 joinOk;
+    s32 splitOk;
+    s16 i;
+    u8 modelId;
+    u8 charId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("join", 1);
+    }
+    g_EntityForSplitJoin = g_CurrentEntity;
+    joinOk = 1;
+    if (Savemap.memory_bank_2[10] != 0xFF) {
+        joinOk = FieldEventJoinSet(
+            g_CharIdToEntity[Savemap.memory_bank_2[10]], GET_PARAM_U8(1));
+    }
+    if (Savemap.memory_bank_2[11] != 0xFF) {
+        splitOk = FieldEventJoinSet(
+            g_CharIdToEntity[Savemap.memory_bank_2[11]], GET_PARAM_U8(1));
+    } else {
+        splitOk = 1;
+    }
+    if (joinOk && splitOk) {
+        for (i = 0; i < 3; i++) {
+            charId = Savemap.memory_bank_2[9 + i];
+            if (charId != 0xFF) {
+                g_EntitySplitJoinState[g_CharIdToEntity[charId]] = 0;
+                if (i == 0) {
+                    modelId = g_CharIdToEntity[charId];
+                    if (modelId != 0xFF) {
+                        g_FieldModels[g_EntityToModel[modelId]].SolidOff = 0;
+                    }
+                }
+            }
+        }
+        g_FieldState->characterLock = g_CharacterLock;
+        g_EntityForSplitJoin = 0xFF;
+        PC_INC(2);
+        return 0;
+    }
+    g_FieldState->characterLock = 1;
+    if (Savemap.memory_bank_2[9] != 0xFF) {
+        modelId = g_CharIdToEntity[Savemap.memory_bank_2[9]];
+        if (modelId != 0xFF) {
+            g_EntitySplitJoinState[modelId] = 1;
+            g_FieldModels[g_EntityToModel[modelId]].scriptedMoveMode = 0;
+            g_FieldModels[g_EntityToModel[modelId]].ActionState = 0;
+            g_FieldModels[g_EntityToModel[modelId]].SolidOff = 1;
+        }
+    }
+    return 1;
+}
+#endif
+
+s32 FieldEventSplitSet(u8, s16, s16, s32, s32); // extern
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSplit);
+#else
+/* 25 rows: same $s1 0xFF-constant hoist as OpcodeFuncJoin (twin function).
+ * if==0xFF polarity matches target; the != form regressed to 39. g_FieldModels
+ * idiom applied. Solve Join and the recipe transfers here. */
+s32 OpcodeFuncSplit(void) {
+    s32 splitOkA;
+    s32 splitOkB;
+    s16 i;
+    u8 modelId;
+    u8 charId;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("split", 8);
+    }
+    g_EntityForSplitJoin = g_CurrentEntity;
+    if (Savemap.memory_bank_2[10] == 0xFF) {
+        splitOkA = 1;
+    } else {
+        splitOkA = FieldEventSplitSet(
+            g_CharIdToEntity[Savemap.memory_bank_2[10]],
+            FieldEventReadMemoryS16(1, 4), FieldEventReadMemoryS16(2, 6),
+            FieldEventReadMemoryU8(3, 8) & 0xFF, GET_PARAM_U8(14));
+    }
+    if (Savemap.memory_bank_2[11] == 0xFF) {
+        splitOkB = 1;
+    } else {
+        splitOkB = FieldEventSplitSet(
+            g_CharIdToEntity[Savemap.memory_bank_2[11]],
+            FieldEventReadMemoryS16(4, 9), FieldEventReadMemoryS16(5, 11),
+            FieldEventReadMemoryU8(6, 13) & 0xFF, GET_PARAM_U8(14));
+    }
+    if (splitOkA && splitOkB) {
+        for (i = 0; i < 3; i++) {
+            charId = Savemap.memory_bank_2[9 + i];
+            if (charId != 0xFF) {
+                g_EntitySplitJoinState[g_CharIdToEntity[charId]] = 0;
+                if (i == 0) {
+                    modelId = g_CharIdToEntity[charId];
+                    if (modelId != 0xFF) {
+                        g_FieldModels[g_EntityToModel[modelId]].SolidOff = 0;
+                    }
+                }
+            }
+        }
+        g_FieldState->characterLock = g_CharacterLock;
+        g_EntityForSplitJoin = 0xFF;
+        PC_INC(15);
+        return 0;
+    }
+    g_FieldState->characterLock = 1;
+    if (Savemap.memory_bank_2[9] != 0xFF) {
+        modelId = g_CharIdToEntity[Savemap.memory_bank_2[9]];
+        if (modelId != 0xFF) {
+            g_EntitySplitJoinState[modelId] = 1;
+            g_FieldModels[g_EntityToModel[modelId]].scriptedMoveMode = 0;
+            g_FieldModels[g_EntityToModel[modelId]].ActionState = 0;
+            g_FieldModels[g_EntityToModel[modelId]].SolidOff = 1;
+        }
+    }
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventJoinSet);
 
