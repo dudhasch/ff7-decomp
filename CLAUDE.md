@@ -550,6 +550,65 @@ The batch shape that works:
    budget spent → park with a note if spent.
 3. Once at the end: `make build` → `make format` → commit.
 
+## Adding a MAGIC spell overlay
+
+`disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
+same slot at `0x801B0000`. Two are in the build: `BARRIER.BIN` (`src/magic/
+barrier.c`) and `MABARIA.BIN` (`src/magic/mabaria.c`). They are the cheapest
+work in the repo — a few kilobytes each, six or seven functions, no `.rodata`
+entanglement — and the ones near barrier in size are near-clones of it, so the
+matching C is largely a transcription with different field offsets.
+
+The recipe, start to finish:
+
+1. **Find the code/data boundary.** There is no header; the file is raw code
+   from `0x801B0000`.
+
+   ```shell
+   mipsel-linux-gnu-objdump -D -b binary -m mips:3000 -EL \
+       --adjust-vma=0x801B0000 disks/us/MAGIC/MABARIA.BIN
+   ```
+
+   The last `jr $ra` plus its delay slot ends the text; everything after is
+   data, and `.bss` starts at the file size. Every `jr $ra`/delay-slot boundary
+   in between is also a function start, which predicts splat's split exactly.
+
+2. **Size `.bss` from the `lui`/`addiu` pairs.** Grep the disassembly for
+   `lui $x, 0x801b` and resolve the following `%lo`. References past the file
+   size are `.bss`; the highest one plus its size is `bss_size`. Watch for the
+   variable that sits *after* a 128 KB primitive buffer — it disassembles as
+   `0x801D....`, which is just `0x801B0000 + 0x20...`, and forgetting it makes
+   `bss_size` short by four.
+
+3. **Add the overlay** to `config/us.yaml` (mirror the `barrier` block: `sha1`
+   of the `.BIN`, `base_path: magic`, `vram_start: 0x801B0000`, and the three
+   `c` / `.data` / `.bss` subsegments), add its name to the `MAGIC` group of the
+   list in `tools/ninja/gen.py`, and create `config/symbols.magic-<name>.us.txt`
+   — the path is read even when there is nothing to name, and `make format`
+   rejects a file that holds only comments, so give it at least one real entry.
+
+4. **Let `make build` run splat once.** It writes `src/magic/<name>.c` full of
+   `INCLUDE_ASM` stubs and the `nonmatchings/*.s`, then fails to link on the
+   `.bss` symbols, which nothing defines yet. That failure is the expected
+   halfway point.
+
+5. **Write the whole file as C in one pass, using `barrier.c` as the
+   template.** Do not try to land the `INCLUDE_ASM` build first: the `.s` files
+   reference the `.bss`/`.data` symbols by their splat names, and the C
+   definitions are `static`, so the intermediate state cannot link without
+   renaming everything twice. The `.data` block is transcribed as
+   `static s32 <name>_a1[] = {...}` from `od -A n -t x4 -v -j <off> -N <len>`,
+   and the descriptor struct at its tail is a `Unk801B0C98`.
+
+6. **The verdict is the overlay's SHA-1**, not `checkfn.py`. Once the file is
+   plain C there are no `.s` files left for `checkfn` to compare against — it
+   reports `no target asm`. `build/us/<name>.exe: OK` in the `make build` tail
+   means every instruction *and* every data byte matched.
+
+Naming: keep the entry point `MAGIC_<Spell>` and prefix the statics, since all
+these overlays share the `0x801B0000` address space and `config/
+sym_ovl_export.us.txt` collects them into one namespace.
+
 ## Rules that prevent wasted work
 
 **Do not use `make build` as the inner-loop signal.** While a function is
@@ -718,3 +777,24 @@ A worktree needs three things the `git worktree add` does not give it:
 
 Cheapest path: keep one bootstrapped worktree around and reuse it rather than
 creating a fresh one per task.
+
+**`asm/` cannot be regenerated from scratch any more — copy it.** splat only
+writes `nonmatchings/<fn>.s` for functions the `.c` still references through
+`INCLUDE_ASM`; it knows nothing about `MASPSX_OVERRIDE`, whose expansion
+`.include`s the same `.s` at assembly time. So on a tree with an empty `asm/`,
+splat emits 83 of `src/field/field.c`'s 260 files and the build dies with a
+wall of
+
+```
+{standard input}:43480: Error: can't open asm/us/field/nonmatchings/field/FieldDebugInitBuffers.s for reading
+```
+
+naming exactly the functions that were converted to `MASPSX_OVERRIDE`. Nothing
+points at splat, and re-running `make build` does not help. `cp -r <bootstrapped
+tree>/asm/. asm/` fixes it; the tree is 24 MB and the files are a pure function
+of the binaries plus `config/us.yaml`, so any bootstrapped worktree will do.
+
+Only the disk files named by a `disk_path:` in `config/us.yaml` are needed, not
+all of `disks/` — that is ~1.4 MB, cheap enough to copy rather than symlink
+(and a Windows symlink into another tree would not resolve inside the build
+container anyway).

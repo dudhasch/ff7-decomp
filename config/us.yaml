@@ -205,3 +205,17 @@ overlays:
       - [0, c, barrier]
       - [0xB68, .data, barrier]
       - [0xCC0, .bss, barrier]
+  - name: mabaria
+    disk_path: disks/us/MAGIC/MABARIA.BIN
+    sha1: 9169442d3e1702b7ad4425d95367f52334f84d60
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x2000C
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-mabaria.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, mabaria]
+      - [0x5B4, .data, mabaria]
+      - [0xCA0, .bss, mabaria]
