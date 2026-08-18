@@ -1,0 +1,1 @@
+MAGIC_Tears = 0x801B0000; // MAGIC/TEARS.BIN entry point

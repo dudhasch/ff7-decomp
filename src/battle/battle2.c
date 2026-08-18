@@ -1230,7 +1230,7 @@ void func_800D55F4(void* arg0, ...) {
 
 // Project a point through the current view matrix and convert its clamped
 // on-screen X (0..319) into a 0..127 stereo pan value.
-static s32 func_800D56A8(SVECTOR* sv) {
+s32 func_800D56A8(SVECTOR* sv) {
     s16 sxy[2];
     s32 p;
     s32 flag;

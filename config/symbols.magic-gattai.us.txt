@@ -1,0 +1,1 @@
+MAGIC_Gattai = 0x801B007C; // MAGIC/GATTAI.BIN entry point

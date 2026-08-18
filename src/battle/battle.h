@@ -488,9 +488,18 @@ extern u16 D_8016376A;
 // battle.c
 int func_800BBEAC(void (*func)(void));
 
+// battle1.c -- called from the MAGIC overlays
+void func_800BBA40(s32 arg0); // queue sound command 0x20
+s32 func_800BC04C(void (*cb)(void));
+void func_800C55B8(void);
+
 // battle2.c
 void* func_800D29D4(Unk801B0C98*, u_long**, int, void*);
+void func_800D4368(SVECTOR* pos, s16 scale, s32 arg2);
+void* func_800D6260(void*, u_long**, int, void*);
 void func_800D3994(s32 arg0, s32 arg1, void* arg2);
 void func_800D5444(int, int, int, void (*func)(int));
+s32 func_800D54BC(s32 arg0);
 void func_800D55F4(void* arg0, ...);
+s32 func_800D56A8(SVECTOR* sv);
 int func_800D574C(int);
