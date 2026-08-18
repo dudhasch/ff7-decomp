@@ -114,8 +114,23 @@ overlays:
     migrate_rodata_to_functions: true
     vram_start: 0x800A0000
     segments:
-      - [0x0, .rodata, field]
+      # field.c is split five ways on jump-table alignment phase, not on module
+      # boundaries. A unit's .rodata base mod 8 decides where an `.align 3`
+      # ahead of a jump table puts the table -- both gcc's, via
+      # tools/psx_jtbl_align.py, and the one splat writes into asm/ for a
+      # still-INCLUDE_ASM function, which nothing rewrites. Every table is
+      # therefore pinned to a unit whose base is congruent to it mod 8. The
+      # bases alternate 0/4/0/4/0 deliberately; do not merge these back.
+      - [0x0, .rodata, field]     # base 0 mod 8: jtbl_800A0008
+      - [0x54, .rodata, field2]   # base 4 mod 8: four tables, all 4 mod 8
+      - [0xE0, .rodata, field3]   # base 0 mod 8: jtbl_800A00E0
+      - [0x104, .rodata, field4]  # base 4 mod 8: 20 tables, all 4 mod 8
+      - [0xF10, .rodata, field5]  # base 0 mod 8: jtbl_800A12E8 + 2 gcc tables
       - [0x1368, c, field]
+      - [0x4430, c, field2]
+      - [0xDD70, c, field3]
+      - [0xFE1C, c, field4]
+      - [0x32794, c, field5]
       - [0x3A5B8, data]
   - name: bginmenu
     disk_path: disks/us/MENU/BGINMENU.MNU

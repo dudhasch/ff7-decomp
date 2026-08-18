@@ -15,6 +15,13 @@ nw: ninja_syntax.Writer = None
 objs: list[str] = []
 # unit name -> its .rodata offset within the overlay, filled per splat config
 rodata_phase: dict[str, int] = {}
+# `.align 3` ahead of a jump table is correct exactly when the table's address
+# is congruent to its unit's .rodata base mod 8. The rule below infers that
+# from the base alone, which assumes the retail table sits at an address 0 mod
+# 8 -- true for battle1/battle3/18B8/savemenu, and false for the 4-mod-8 halves
+# of the field split, whose tables are themselves 4 mod 8. Those need the
+# `.align 3` left alone; name them here. See config/us.yaml.
+JTBL_PHASE_OVERRIDE: dict[str, int] = {"field2": 0, "field4": 0}
 work_dir = "build/us"
 if len(sys.argv) > 1:
     work_dir = sys.argv[1]
@@ -194,8 +201,11 @@ def add_c(cfg: any, file_name: str):
     # Overlays are loaded on an 8-byte boundary, so a unit's .rodata offset
     # within its overlay decides whether the section base is 8-byte aligned --
     # and that is what a jump table's `.align 3` ends up being measured from.
-    if rodata_phase.get(file_name, 0) % 8:
-        variables["jtbl_flags"] = "--phase 4"
+    phase = JTBL_PHASE_OVERRIDE.get(file_name)
+    if phase is None:
+        phase = 4 if rodata_phase.get(file_name, 0) % 8 else 0
+    if phase:
+        variables["jtbl_flags"] = f"--phase {phase}"
     nw.build(
         rule=f"{platform(cfg)}-cc",
         outputs=[out_path],
