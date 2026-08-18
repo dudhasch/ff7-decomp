@@ -1341,7 +1341,39 @@ void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
 /////////////////////////////////////////////////
 
 const u32 D_800A00DC[] = {0x00000000};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+
+/* Top-level field model loader: build the FieldModelData from the loaded model
+ * header, stream the field's model set off the CD, load the global and local
+ * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
+ * state. Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+#else
+void FieldModelLoadAndInit(void) {
+    FieldModelData* data;
+    s32 i;
+
+    D_800DFCA0 = (u_long*)0x80128000;
+    data = g_FieldModelData;
+    FieldModelStructInit((FieldModelFileDesc*)D_8007E770, data);
+    DS_read(g_FieldLzsInfo[g_CurrentFieldIndex * 6],
+            g_FieldLzsInfo[g_CurrentFieldIndex * 6 + 1], (u32*)0x80128000,
+            NULL);
+    while (SystemCdromReadChain() != 0) {
+    }
+    D_80075E10 = (u32)FieldModelLoadGlobalModels(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10, 1);
+    ((s32*)0x1F800000)[0] = (s32)D_800DF08C;
+    ((s32*)0x1F800000)[1] = (s32)D_800DF0D4;
+    D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10);
+    for (i = 0; i < g_FieldModelData->modelCount; i++) {
+        KawaiLoadEyesMouthTexToVram(
+            &g_FieldModelData->modelEntries[i], (u8*)0x1F800000);
+    }
+    KawaiClearData();
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", HandleKawaiDataInModel);
 
@@ -1808,6 +1840,8 @@ void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
 #endif
 
 extern u_long* D_800DFCA0;
+extern u32 D_800DF08C;
+extern u32 D_800DF0D4;
 u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);
 
 /* Loads every global (BCX) model in the header, then optionally kicks off the
