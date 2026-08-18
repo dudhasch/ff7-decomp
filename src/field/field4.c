@@ -5845,7 +5845,70 @@ s32 OpcodeFuncNfade(void) {
     return 0;
 }
 
+/* PARKED: 9 rows, all in one switch arm. The jump table and all four loads
+ * match; what is left is cross-jumping. The original keeps the case 1/5/7/9
+ * arm as its own block (lhu / nop / beqz / li 1 / j); gcc merges it into the
+ * case 2/6/8/10 arm because both end in the same `return 1'. Not an alignment
+ * problem -- this function's table is correctly placed since the split.
+ *
+ * Rejected, all 22 rows: switching on a plain (s16) cast of the member, on an
+ * s32 temp, and on an s16 temp. All three let gcc fold the lhu + sll + sra
+ * into a single lh. Only the volatile u16 read below reproduces the load form,
+ * and it is what took the diff from 22 rows to 9.
+ *
+ * Next step is the permuter, not another hand-shaped attempt. */
+/* FADEW: block the script until the fade started by FADE/NFADE has finished.
+ * What counts as finished depends on the fade's direction, so the switch is on
+ * fadeType and the eleven arms collapse to three tests: a fade to black is done
+ * when fadeAdjust has run down to 0, a fade from black when it has run up to
+ * 0xFF, and the NFADE forms when it has reached fadeSpeed. Types 0 and 4 are
+ * not fades and fall straight through.
+ *
+ * Every read of the three fields goes through a volatile u16. The original
+ * loads each one zero-extended and then sign-extends it in registers
+ * (lhu / sll / sra); reading the s16 members directly lets gcc fold the two
+ * into a single lh, which is a byte shorter everywhere it appears. volatile is
+ * the one thing that keeps the load in the form the member's own type implies.
+ * The `!= 0` arm takes no cast because the original does not sign-extend
+ * there -- a zero test does not need it. */
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+#else
+s32 OpcodeFuncFadew(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fadew", 0);
+    }
+    switch ((s16) * (volatile u16*)&g_FieldState->fadeType) {
+    case 1:
+    case 5:
+    case 7:
+    case 9:
+        if (*(volatile u16*)&g_FieldState->fadeAdjust != 0) {
+            return 1;
+        }
+        break;
+    case 2:
+    case 6:
+    case 8:
+    case 10:
+        if ((s16) * (volatile u16*)&g_FieldState->fadeAdjust < 0xFF) {
+            return 1;
+        }
+        break;
+    case 0:
+    case 4:
+        break;
+    default:
+        if ((s16) * (volatile u16*)&g_FieldState->fadeAdjust !=
+            (s16) * (volatile u16*)&g_FieldState->fadeSpeed) {
+            return 1;
+        }
+        break;
+    }
+    PC_INC(1);
+    return 0;
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_intersect.c
