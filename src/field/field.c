@@ -941,7 +941,47 @@ s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
 
 s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+extern u8 D_800DEF88[];
+
+/* Direction (0-255) from one point to another, plus the squared distance.
+ * Computes the fixed-point slope of the dominant axis, looks up the angle in
+ * the arctan table D_800DEF88, and corrects for the quadrant. The two hardware
+ * divisions and the quadrant branch ladder are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+#else
+u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
+    s32 dx;
+    s32 dy;
+    s32 dist;
+    s32 slope;
+    s32 slopeX;
+    s32 slopeY;
+    u8 angle;
+
+    dx = to->vx - from->vx;
+    dy = to->vy - from->vy;
+    *sqrDist = dx * dx + dy * dy;
+    dist = SquareRoot0(*sqrDist);
+    slopeX = (dx << 12) / dist >> 5;
+    slopeY = (dy << 12) / dist >> 5;
+    if (slopeX * slopeX < slopeY * slopeY) {
+        if (slopeY > 0) {
+            angle = D_800DEF88[slopeX * 2] + 0x40;
+        } else {
+            angle = -0x40 - D_800DEF88[-slopeX * 2];
+        }
+    } else {
+        if (slopeX > 0) {
+            angle = D_800DEF88[slopeY * 2] - 0x40;
+        } else {
+            angle = -0x80 - D_800DEF88[-slopeY * 2];
+        }
+    }
+    return angle & 0xFF;
+}
+#endif
 
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist);
 
