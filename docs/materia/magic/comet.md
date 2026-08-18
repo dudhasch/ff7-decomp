@@ -10,7 +10,7 @@ Non-elemental damage that cannot be reflected, so it works against enemies and b
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 3 |
@@ -38,10 +38,10 @@ Non-elemental damage that cannot be reflected, so it works against enemies and b
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Comet** | 70 | 80 | Major non-elemental damage. Cannot be reflected. | *Non-elemental attack* |
-| **Comet2** | 110 | 30 | Moderate non-elemental damage to random enemy target. Four attacks. Cannot be reflected. | *Non-elemental attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Comet**](../../spells/magic/comet.md) | 70 | 80 | Major non-elemental damage. Cannot be reflected. |
+| [**Comet2**](../../spells/magic/comet2.md) | 110 | 30 | Moderate non-elemental damage to random enemy target. Four attacks. Cannot be reflected. |
 
 ## How to obtain
 
@@ -49,4 +49,4 @@ Non-elemental damage that cannot be reflected, so it works against enemies and b
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

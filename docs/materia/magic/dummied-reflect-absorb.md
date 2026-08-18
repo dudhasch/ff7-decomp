@@ -29,12 +29,6 @@ An unused Materia granting no spell at level 1 and Wall at level 2. The name sug
 | 2 | Wall | 30,000 |
 | 3 | MASTER | 60,000 |
 
-## Spells
-
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Wall** | 58 | 0 | Grants Barrier and MBarrier. | *Creates [Barrier/MBarrier] simultaneously* |
-
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

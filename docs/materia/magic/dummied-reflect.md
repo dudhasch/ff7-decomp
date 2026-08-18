@@ -30,13 +30,6 @@ An unused split of the Barrier line into a standalone Reflect/Wall Materia. Its 
 | 3 | N/A | 360,000 |
 | 4 | MASTER | 420,000 |
 
-## Spells
-
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Reflect** | 30 | 0 | Grants Reflect. Cannot be reflected. | *Can reflect magic spells back up to 4 times* |
-| **Wall** | 58 | 0 | Grants Barrier and MBarrier. | *Creates [Barrier/MBarrier] simultaneously* |
-
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

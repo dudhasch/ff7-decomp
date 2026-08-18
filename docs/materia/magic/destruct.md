@@ -10,7 +10,7 @@ Buff removal and instant death. DeBarrier strips Barrier/MBarrier/Reflect/Shield
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Death |
 | **Max level** | 4 |
@@ -39,11 +39,11 @@ Buff removal and instant death. DeBarrier strips Barrier/MBarrier/Reflect/Shield
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **DeBarrier** | 12 | 0 | Remove Barrier, MBarrier, Reflect, and Shield statuses. Cannot be reflected. | *Destroys function of any barriers* |
-| **DeSpell** | 20 | 0 | Remove Haste, Slow, Stop, Regen, Barrier, MBarrier, Reflect, Shield, Death Force, and Resist statuses. Cannot be reflected. | *Makes magic ineffective* |
-| **Death** | 30 | 0 | 44% chance of inflicting Death. | *Causes sudden death* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**DeBarrier**](../../spells/magic/debarrier.md) | 12 | 0 | Remove Barrier, MBarrier, Reflect, and Shield statuses. Cannot be reflected. |
+| [**DeSpell**](../../spells/magic/despell.md) | 20 | 0 | Remove Haste, Slow, Stop, Regen, Barrier, MBarrier, Reflect, Shield, Death Force, and Resist statuses. Cannot be reflected. |
+| [**Death**](../../spells/magic/death.md) | 30 | 0 | 44% chance of inflicting Death. |
 
 ## How to obtain
 
@@ -52,4 +52,4 @@ Buff removal and instant death. DeBarrier strips Barrier/MBarrier/Reflect/Shield
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

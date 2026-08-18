@@ -10,7 +10,7 @@ The basic lightning-elemental attack line. Shares MP costs and spell power with 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Lightning |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ The basic lightning-elemental attack line. Shares MP costs and spell power with 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Bolt** | 4 | 8 | Low lightning-elemental damage. | *Lightning element attack* |
-| **Bolt2** | 22 | 20 | Moderate lightning-elemental damage. | *Lightning element attack* |
-| **Bolt3** | 52 | 64 | High lightning-elemental damage. | *Lightning element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Bolt**](../../spells/magic/bolt.md) | 4 | 8 | Low lightning-elemental damage. |
+| [**Bolt2**](../../spells/magic/bolt2.md) | 22 | 20 | Moderate lightning-elemental damage. |
+| [**Bolt3**](../../spells/magic/bolt3.md) | 52 | 64 | High lightning-elemental damage. |
 
 ## How to obtain
 
@@ -50,4 +50,4 @@ The basic lightning-elemental attack line. Shares MP costs and spell power with 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

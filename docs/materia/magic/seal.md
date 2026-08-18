@@ -10,7 +10,7 @@ Disabling magic. Sleepel puts a target to sleep (broken by any damage); Silence 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Sleep, Silence |
 | **Max level** | 3 |
@@ -36,10 +36,10 @@ Disabling magic. Sleepel puts a target to sleep (broken by any damage); Silence 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Sleepel** | 8 | 0 | 72% chance of inflicting Sleep on target. | *Puts opponent to Sleep* |
-| **Silence** | 24 | 0 | 60% chance of inflicting Silence on target. | *Constrains magic* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Sleepel**](../../spells/magic/sleepel.md) | 8 | 0 | 72% chance of inflicting Sleep on target. |
+| [**Silence**](../../spells/magic/silence.md) | 24 | 0 | 60% chance of inflicting Silence on target. |
 
 ## How to obtain
 
@@ -47,4 +47,4 @@ Disabling magic. Sleepel puts a target to sleep (broken by any damage); Silence 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

@@ -10,7 +10,7 @@ Mental status magic. Confu makes a target attack randomly; Berserk forces physic
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Confusion, Berserk |
 | **Max level** | 3 |
@@ -36,10 +36,10 @@ Mental status magic. Confu makes a target attack randomly; Berserk forces physic
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Confu** | 18 | 0 | 60% chance of inflicting Confuse on target. | *Confuses opponent* |
-| **Berserk** | 18 | 0 | Inflicts Berserk on target. 80% probability on enemies, 100% on allies. | *Causes opponent to go berserk* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Confu**](../../spells/magic/confu.md) | 18 | 0 | 60% chance of inflicting Confuse on target. |
+| [**Berserk**](../../spells/magic/berserk.md) | 18 | 0 | Inflicts Berserk on target. 80% probability on enemies, 100% on allies. |
 
 ## How to obtain
 
@@ -47,4 +47,4 @@ Mental status magic. Confu makes a target attack randomly; Berserk forces physic
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

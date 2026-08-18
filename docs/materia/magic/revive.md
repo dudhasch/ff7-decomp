@@ -10,7 +10,7 @@ Resurrection. Life revives a KO'd ally with minimal HP; Life2 revives with full 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 3 |
@@ -38,10 +38,10 @@ Resurrection. Life revives a KO'd ally with minimal HP; Life2 revives with full 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Life** | 34 | 8/32 | Revive a party member with minimal health. | *Restores life* |
-| **Life2** | 100 | 32/32 | Revive a party member with full health. | *Restores life and all HP* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Life**](../../spells/magic/life.md) | 34 | 8/32 | Revive a party member with minimal health. |
+| [**Life2**](../../spells/magic/life2.md) | 100 | 32/32 | Revive a party member with full health. |
 
 ## How to obtain
 
@@ -49,4 +49,4 @@ Resurrection. Life revives a KO'd ally with minimal HP; Life2 revives with full 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

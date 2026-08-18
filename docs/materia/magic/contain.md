@@ -10,7 +10,7 @@ Late-game elemental magic, one tier above the basic lines: Freeze (ice + Stop), 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Confusion, Stop, Petrify |
 | **Max level** | 5 |
@@ -40,12 +40,12 @@ Late-game elemental magic, one tier above the basic lines: Freeze (ice + Stop), 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Freeze** | 82 | 95 | High ice-elemental damage. 68% chance of inflicting Stop. | *Very strong Ice magic. Sometimes causes [Stop]* |
-| **Break** | 86 | 100 | High earth-elemental damage. 32% chance of inflicting Petrify. | *Very strong Earth magic. Sometimes causes [Petrify]* |
-| **Tornado** | 90 | 105 | High wind-elemental damage. 32% chance of inflicting Confusion. | *Wind elemental attack. Sometimes causes [Confu]* |
-| **Flare** | 100 | 115 | Heavy fire-elemental damage. | *Fire element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Freeze**](../../spells/magic/freeze.md) | 82 | 95 | High ice-elemental damage. 68% chance of inflicting Stop. |
+| [**Break**](../../spells/magic/break.md) | 86 | 100 | High earth-elemental damage. 32% chance of inflicting Petrify. |
+| [**Tornado**](../../spells/magic/tornado.md) | 90 | 105 | High wind-elemental damage. 32% chance of inflicting Confusion. |
+| [**Flare**](../../spells/magic/flare.md) | 100 | 115 | Heavy fire-elemental damage. |
 
 ## How to obtain
 
@@ -53,4 +53,4 @@ Late-game elemental magic, one tier above the basic lines: Freeze (ice + Stop), 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

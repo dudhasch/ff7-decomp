@@ -10,7 +10,7 @@ Status recovery. Poisona clears Poison only; Esuna clears nearly every common ne
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ Status recovery. Poisona clears Poison only; Esuna clears nearly every common ne
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Poisona** | 3 | 0 | Cures Poison. | *Heals Poison* |
-| **Esuna** | 15 | 0 | Cures Sleep, Poison, Sadness, Fury, Confusion, Silence, Frog, Small, Slow-numb, Petrify, Berserk, Paralyzed, and Darkness. | *Cures unusual status* |
-| **Resist** | 120 | 0 | Inflicts Resist status. | *Makes you resistant to transformation* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Poisona**](../../spells/magic/poisona.md) | 3 | 0 | Cures Poison. |
+| [**Esuna**](../../spells/magic/esuna.md) | 15 | 0 | Cures Sleep, Poison, Sadness, Fury, Confusion, Silence, Frog, Small, Slow-numb, Petrify, Berserk, Paralyzed, and Darkness. |
+| [**Resist**](../../spells/magic/resist.md) | 120 | 0 | Inflicts Resist status. |
 
 ## How to obtain
 
@@ -49,4 +49,4 @@ Status recovery. Poisona clears Poison only; Esuna clears nearly every common ne
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

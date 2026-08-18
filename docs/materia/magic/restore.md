@@ -10,7 +10,7 @@ The party's main healing Materia and one of only two five-level Magic Materia (w
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 5 |
@@ -38,12 +38,12 @@ The party's main healing Materia and one of only two five-level Magic Materia (w
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Cure** | 5 | 5 | Heal a small amount of HP. | *Restores HP* |
-| **Cure2** | 24 | 35 | Heal a moderate amount of HP. | *Restores HP* |
-| **Regen** | 30 | 0 | Inflicts Regen. | *Gradually restores HP* |
-| **Cure3** | 64 | 130 | Heal a large amount of HP. | *Restores HP* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Cure**](../../spells/magic/cure.md) | 5 | 5 | Heal a small amount of HP. |
+| [**Cure2**](../../spells/magic/cure2.md) | 24 | 35 | Heal a moderate amount of HP. |
+| [**Regen**](../../spells/magic/regen.md) | 30 | 0 | Inflicts Regen. |
+| [**Cure3**](../../spells/magic/cure3.md) | 64 | 130 | Heal a large amount of HP. |
 
 ## How to obtain
 
@@ -52,4 +52,4 @@ The party's main healing Materia and one of only two five-level Magic Materia (w
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

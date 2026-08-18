@@ -10,7 +10,7 @@ The basic fire-elemental attack line. Linked to an Elemental Materia in weapon s
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Fire |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ The basic fire-elemental attack line. Linked to an Elemental Materia in weapon s
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Fire** | 4 | 8 | Low fire-elemental damage. | *Fire element attack* |
-| **Fire2** | 22 | 20 | Moderate fire-elemental damage. | *Fire element attack* |
-| **Fire3** | 52 | 64 | High fire-elemental damage. | *Fire element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Fire**](../../spells/magic/fire.md) | 4 | 8 | Low fire-elemental damage. |
+| [**Fire2**](../../spells/magic/fire2.md) | 22 | 20 | Moderate fire-elemental damage. |
+| [**Fire3**](../../spells/magic/fire3.md) | 52 | 64 | High fire-elemental damage. |
 
 ## How to obtain
 
@@ -50,4 +50,4 @@ The basic fire-elemental attack line. Linked to an Elemental Materia in weapon s
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

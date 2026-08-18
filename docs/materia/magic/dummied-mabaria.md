@@ -25,14 +25,6 @@ An unused Materia that grants MBarrier at every level - the level-ups add nothin
 | 2 | MBarrier | 5,000 |
 | 3 | MBarrier | 20,000 |
 
-## Spells
-
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **MBarrier** | 24 | 0 | Grants MBarrier. | *Creates a Barrier resistant to magical attacks* |
-| **MBarrier** | 24 | 0 | Grants MBarrier. | *Creates a Barrier resistant to magical attacks* |
-| **MBarrier** | 24 | 0 | Grants MBarrier. | *Creates a Barrier resistant to magical attacks* |
-
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

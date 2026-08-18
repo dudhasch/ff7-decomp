@@ -10,7 +10,7 @@ Poison-elemental damage with a high chance of also inflicting the Poison status 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Poison |
 | **Status** | Poison |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ Poison-elemental damage with a high chance of also inflicting the Poison status 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Bio** | 8 | 10 | Low poison-elemental damage. 48% chance of inflicting Poison. | *Poison element attack* |
-| **Bio2** | 36 | 21 | Moderate poison-elemental damage. 48% chance of inflicting Poison. | *Poison element attack* |
-| **Bio3** | 80 | 68 | High poison-elemental damage. 72% chance of inflicting Poison. | *Poison element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Bio**](../../spells/magic/bio.md) | 8 | 10 | Low poison-elemental damage. 48% chance of inflicting Poison. |
+| [**Bio2**](../../spells/magic/bio2.md) | 36 | 21 | Moderate poison-elemental damage. 48% chance of inflicting Poison. |
+| [**Bio3**](../../spells/magic/bio3.md) | 80 | 68 | High poison-elemental damage. 72% chance of inflicting Poison. |
 
 ## How to obtain
 
@@ -50,4 +50,4 @@ Poison-elemental damage with a high chance of also inflicting the Poison status 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

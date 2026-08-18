@@ -10,7 +10,7 @@ Inflicts or cures the Small and Frog transformations. Both spells hit allies wit
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Frog, Small |
 | **Max level** | 3 |
@@ -36,10 +36,10 @@ Inflicts or cures the Small and Frog transformations. Both spells hit allies wit
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Mini** | 10 | 0 | Inflicts or cures Small on target. 72% probability on enemies, 100% on allies. | *Induces or cures a [Small] state* |
-| **Toad** | 14 | 0 | Inflicts or cures Frog on target. 72% probability on enemies, 100% on allies. | *Induces or cures a [Frog] state* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Mini**](../../spells/magic/mini.md) | 10 | 0 | Inflicts or cures Small on target. 72% probability on enemies, 100% on allies. |
+| [**Toad**](../../spells/magic/toad.md) | 14 | 0 | Inflicts or cures Frog on target. 72% probability on enemies, 100% on allies. |
 
 ## How to obtain
 
@@ -49,4 +49,4 @@ Inflicts or cures the Small and Frog transformations. Both spells hit allies wit
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

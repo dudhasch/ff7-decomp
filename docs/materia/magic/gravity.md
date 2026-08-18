@@ -10,7 +10,7 @@ Fractional damage: Demi removes 25% of the target's *current* HP, Demi2 50% and 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Gravity |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ Fractional damage: Demi removes 25% of the target's *current* HP, Demi2 50% and 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Demi** | 14 | 8/32 | Gravity-elemental damage equal to 25% of target's current HP. Cannot be reflected. | *Gravity-based attack. HP at 3/4* |
-| **Demi2** | 33 | 16/32 | Gravity-elemental damage equal to 50% of target's current HP. Cannot be reflected. | *Gravity-based attack. HP at 1/2* |
-| **Demi3** | 48 | 24/32 | Gravity-elemental damage equal to 75% of target's current HP. Cannot be reflected. | *Gravity-based attack. HP at 1/4* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Demi**](../../spells/magic/demi.md) | 14 | 8/32 | Gravity-elemental damage equal to 25% of target's current HP. Cannot be reflected. |
+| [**Demi2**](../../spells/magic/demi2.md) | 33 | 16/32 | Gravity-elemental damage equal to 50% of target's current HP. Cannot be reflected. |
+| [**Demi3**](../../spells/magic/demi3.md) | 48 | 24/32 | Gravity-elemental damage equal to 75% of target's current HP. Cannot be reflected. |
 
 ## How to obtain
 
@@ -50,4 +50,4 @@ Fractional damage: Demi removes 25% of the target's *current* HP, Demi2 50% and 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

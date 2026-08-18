@@ -10,7 +10,7 @@ Grants no spell at level 1. At level 2 it learns Shield, a 180 MP buff that make
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 3 |
@@ -38,9 +38,9 @@ Grants no spell at level 1. At level 2 it learns Shield, a 180 MP buff that make
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Shield** | 180 | 0 | Grants Shield status. Cannot be reflected. | *Extreme magic defense* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Shield**](../../spells/magic/shield.md) | 180 | 0 | Grants Shield status. Cannot be reflected. |
 
 ## How to obtain
 
@@ -48,4 +48,4 @@ Grants no spell at level 1. At level 2 it learns Shield, a 180 MP buff that make
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

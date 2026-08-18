@@ -10,7 +10,7 @@ Grants no spell at level 1. At level 2 it learns FullCure, which restores a targ
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 3 |
@@ -38,9 +38,9 @@ Grants no spell at level 1. At level 2 it learns FullCure, which restores a targ
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **FullCure** | 99 | 32/32 | Fully restores target's HP. Cannot be reflected. | *Restores entire HP* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**FullCure**](../../spells/magic/fullcure.md) | 99 | 32/32 | Fully restores target's HP. Cannot be reflected. |
 
 ## How to obtain
 
@@ -48,4 +48,4 @@ Grants no spell at level 1. At level 2 it learns FullCure, which restores a targ
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

@@ -1,9 +1,6 @@
-# Magic Materia
+# Magic Materia (green)
 
-Reference notes on every Magic Materia in Final Fantasy VII (PS1, USA), scraped from the
-[Final Fantasy Wiki](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)).
-One file per Materia, with its in-game description, stat changes, level/AP table, the
-spells it grants (MP cost, spell power, effect) and where to find it.
+Grants the **Magic** command. Every spell costs MP. Magic Materia trade raw physical stats for magical ones: they lower Max HP and Strength while raising Max MP and Magic.
 
 | Materia | Element | Status | Spells | AP to master |
 | --- | --- | --- | --- | --- |
@@ -30,7 +27,7 @@ spells it grants (MP cost, spell power, effect) and where to find it.
 | [Ultima](ultima.md) | Hidden | None | Ultima | 100,000 |
 | [Master Magic](master-magic.md) | Hidden | None | (all magic) | - |
 
-## Dummied Materia
+## Dummied
 
 | Materia | Spells |
 | --- | --- |
@@ -38,6 +35,8 @@ spells it grants (MP cost, spell power, effect) and where to find it.
 | [リフレク (Rifureku) - "Reflect"](dummied-reflect.md) | Reflect, Wall |
 | [リフアブ (Rifuabu) - "Reflect Absorb"](dummied-reflect-absorb.md) | Wall |
 
+See also: [every magic spell](../../spells/magic/), [all Materia](../README.md)
+
 ---
 
-Content adapted from the Final Fantasy Wiki, available under CC-BY-SA.
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

@@ -10,7 +10,7 @@ Defensive buffs, and with Restore one of only two five-level Magic Materia. Barr
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 5 |
@@ -40,12 +40,12 @@ Defensive buffs, and with Restore one of only two five-level Magic Materia. Barr
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Barrier** | 16 | 0 | Grants Barrier. | *Creates a Barrier resistant to physical attacks* |
-| **MBarrier** | 24 | 0 | Grants MBarrier. | *Creates a Barrier resistant to magical attacks* |
-| **Reflect** | 30 | 0 | Grants Reflect. Cannot be reflected. | *Can reflect magic spells back up to 4 times* |
-| **Wall** | 58 | 0 | Grants Barrier and MBarrier. | *Creates [Barrier/MBarrier] simultaneously* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Barrier**](../../spells/magic/barrier.md) | 16 | 0 | Grants Barrier. |
+| [**MBarrier**](../../spells/magic/mbarrier.md) | 24 | 0 | Grants MBarrier. |
+| [**Reflect**](../../spells/magic/reflect.md) | 30 | 0 | Grants Reflect. Cannot be reflected. |
+| [**Wall**](../../spells/magic/wall.md) | 58 | 0 | Grants Barrier and MBarrier. |
 
 ## How to obtain
 
@@ -53,4 +53,4 @@ Defensive buffs, and with Restore one of only two five-level Magic Materia. Barr
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

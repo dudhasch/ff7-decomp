@@ -10,7 +10,7 @@ The basic ice-elemental attack line, mirroring Fire in cost, power and MP. Usefu
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Ice |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ The basic ice-elemental attack line, mirroring Fire in cost, power and MP. Usefu
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Ice** | 4 | 8 | Low ice-elemental damage. | *Ice element attack* |
-| **Ice2** | 22 | 20 | Moderate ice-elemental damage. | *Ice element attack* |
-| **Ice3** | 52 | 64 | High ice-elemental damage. | *Ice element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Ice**](../../spells/magic/ice.md) | 4 | 8 | Low ice-elemental damage. |
+| [**Ice2**](../../spells/magic/ice2.md) | 22 | 20 | Moderate ice-elemental damage. |
+| [**Ice3**](../../spells/magic/ice3.md) | 52 | 64 | High ice-elemental damage. |
 
 ## How to obtain
 
@@ -50,4 +50,4 @@ The basic ice-elemental attack line, mirroring Fire in cost, power and MP. Usefu
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

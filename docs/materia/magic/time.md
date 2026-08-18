@@ -10,7 +10,7 @@ ATB manipulation. Haste speeds an ally's gauge, Slow halves an enemy's, and Stop
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | Slow, Stop |
 | **Max level** | 4 |
@@ -39,11 +39,11 @@ ATB manipulation. Haste speeds an ally's gauge, Slow halves an enemy's, and Stop
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Haste** | 18 | 0 | Grants Haste to target. | *Increases speed* |
-| **Slow** | 20 | 0 | Inflicts Slow on target. Only enemy immunity can prevent it. | *Decreases speed* |
-| **Stop** | 34 | 0 | 60% chance of inflicting Stop on target. | *Stops all movement* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Haste**](../../spells/magic/haste.md) | 18 | 0 | Grants Haste to target. |
+| [**Slow**](../../spells/magic/slow.md) | 20 | 0 | Inflicts Slow on target. Only enemy immunity can prevent it. |
+| [**Stop**](../../spells/magic/stop.md) | 34 | 0 | 60% chance of inflicting Stop on target. |
 
 ## How to obtain
 
@@ -51,4 +51,4 @@ ATB manipulation. Haste speeds an ally's gauge, Slow halves an enemy's, and Stop
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

@@ -10,7 +10,7 @@ Battle-removal magic. Escape ends the fight immediately with no EXP, AP or Gil. 
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Hidden |
 | **Status** | None |
 | **Max level** | 3 |
@@ -36,10 +36,10 @@ Battle-removal magic. Escape ends the fight immediately with no EXP, AP or Gil. 
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Escape** | 16 | 0 | Instantly end battle without reward. Cannot be reflected. | *Lets you escape from battle* |
-| **Remove** | 99 | 0 | Remove an enemy from battle and flag as Dead. No Gil will be received from this enemy. Cannot be reflected. | *Eliminates opponent from battle* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Escape**](../../spells/magic/escape.md) | 16 | 0 | Instantly end battle without reward. Cannot be reflected. |
+| [**Remove**](../../spells/magic/remove.md) | 99 | 0 | Remove an enemy from battle and flag as Dead. No Gil will be received from this enemy. Cannot be reflected. |
 
 ## How to obtain
 
@@ -47,4 +47,4 @@ Battle-removal magic. Escape ends the fight immediately with no EXP, AP or Gil. 
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).

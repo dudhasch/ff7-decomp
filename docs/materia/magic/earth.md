@@ -10,7 +10,7 @@ Earth-elemental attack line. Slightly stronger and slightly more expensive per c
 
 | | |
 | --- | --- |
-| **Category** | Magic Materia (green) |
+| **Category** | [Magic Materia](README.md) (green) |
 | **Element** | Earth |
 | **Status** | None |
 | **Max level** | 4 |
@@ -37,11 +37,11 @@ Earth-elemental attack line. Slightly stronger and slightly more expensive per c
 
 ## Spells
 
-| Spell | MP | Power | Effect | In-game text |
-| --- | ---: | ---: | --- | --- |
-| **Quake** | 6 | 11 | Low earth-elemental damage. | *Earth element attack* |
-| **Quake2** | 28 | 24 | Moderate earth-elemental damage. | *Earth element attack* |
-| **Quake3** | 68 | 70 | High earth-elemental damage. | *Earth element attack* |
+| Spell | MP | Power | Effect |
+| --- | ---: | ---: | --- |
+| [**Quake**](../../spells/magic/quake.md) | 6 | 11 | Low earth-elemental damage. |
+| [**Quake2**](../../spells/magic/quake2.md) | 28 | 24 | Moderate earth-elemental damage. |
+| [**Quake3**](../../spells/magic/quake3.md) | 68 | 70 | High earth-elemental damage. |
 
 ## How to obtain
 
@@ -49,4 +49,4 @@ Earth-elemental attack line. Slightly stronger and slightly more expensive per c
 
 ---
 
-Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)) and [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)), Final Fantasy Wiki (CC-BY-SA).
+Source: [Magic Materia (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_Materia_(Final_Fantasy_VII)), [Magic (Final Fantasy VII)](https://finalfantasy.fandom.com/wiki/Magic_(Final_Fantasy_VII)) - Final Fantasy Wiki (CC-BY-SA).
