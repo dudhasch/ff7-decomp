@@ -1,0 +1,10 @@
+# The toolchain is Linux-side (container) and the tree is 136-files LF against
+# a handful of CRLF accidents authored on the Windows host. Normalise on commit
+# so a Windows-side edit of a doc or source file cannot produce a whole-file
+# diff, and so `make format`'s clang-format output never fights the checkout.
+* text=auto eol=lf
+
+# Generated assembly and the expected/ SHA baselines: byte-exact inputs, never
+# hand-edited, and nothing should rewrite them on checkout.
+asm/**    -text
+expected/** -text
