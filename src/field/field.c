@@ -796,7 +796,91 @@ s32 FieldBGGetEntityScreenPos(long* screenPos) {
     return FieldCalcWorldToScreenPos(&pos, screenPos);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
+extern s16 D_80071E38;
+extern s16 D_80071E3C;
+extern s16 D_80075CF8;
+extern s16 D_80075E14;
+extern s16 D_80075E18;
+extern s16 D_80075E1C;
+extern s16 D_80075E20;
+extern u8 D_8009AC11;
+extern u8 D_8009AC13;
+extern s16 D_8009C558;
+
+/* Per-frame background scroll: on the field's scroll state machine, drive the
+ * background X/Y toward the entity's clamped screen position (linear or
+ * ease-in-out depending on the mode). The seed is semantically close; the
+ * residual is the oversized stack frame (dead locals the original declared)
+ * plus regalloc. Codegen pinned via MASPSX_OVERRIDE pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
+#else
+void FieldBGScrollUpdate(void) {
+    s32 sp10;
+    s16 var_a1;
+    s16 var_v0_2;
+    s32 var_v0;
+
+#define unksp12 (((s16*)&sp10)[1])
+    if (D_8009AC13 == 1) {
+        switch (D_8009AC11) {
+        case 1:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = -(s16)(u16)sp10;
+            D_80071E3C = -(s16)unksp12;
+            return;
+        case 2:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32) - (s16)sp10,
+                                             (s32)D_8009C558, (s32)D_80075CF8);
+            var_a1 = -unksp12;
+        block_5:
+            var_v0 = FieldCalcLinearStep(
+                (s32)D_80075E1C, (s32)var_a1, (s32)D_8009C558, (s32)D_80075CF8);
+        block_6:
+            D_80071E3C = (s16)var_v0;
+            if (D_8009C558 != D_80075CF8) {
+                var_v0_2 = D_80075CF8 + 1;
+            block_13:
+                D_80075CF8 = var_v0_2;
+            } else {
+            block_11:
+                D_8009AC13 = 2;
+                return;
+            }
+            break;
+        case 3:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32) - (s16)sp10,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            var_v0 = FieldCalcEaseInOut((s32)D_80075E1C, (s32)-unksp12,
+                                        (s32)D_8009C558, (s32)D_80075CF8);
+            goto block_6;
+        case 5:
+            var_a1 = D_80075E20;
+            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32)D_80075E18,
+                                             (s32)D_8009C558, (s32)D_80075CF8);
+            goto block_5;
+        case 6:
+            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32)D_80075E18,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            D_80071E3C = FieldCalcEaseInOut((s32)D_80075E1C, (s32)D_80075E20,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            if (D_8009C558 == D_80075CF8) {
+                goto block_11;
+            }
+            var_v0_2 = D_80075CF8 + 1;
+            goto block_13;
+        }
+    } else {
+    default:
+    }
+#undef unksp12
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 
