@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 76 |
-| handwritten — can never match | 20 |
-| blocked on a `.rodata` group | 6 |
-| **actionable** | **50** |
+| remaining `INCLUDE_ASM` | 4 |
+| handwritten — can never match | 0 |
+| blocked on a `.rodata` group | 0 |
+| **actionable** | **4** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -20,69 +20,13 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `OpcodeFuncFadew` | 73 | 1 |  |  | yes |  |  |  |
-| 2 | `OpcodeFuncFmove` | 157 | 2 |  |  |  |  |  |  |
-| 3 | `OpcodeFuncCmove` | 173 | 2 |  |  |  |  |  |  |
-| 4 | `KawaiFadeModelColor` | 190 | 1 |  |  |  |  |  |  |
-| 5 | `FieldEntityCheckTalk` | 191 | 1 |  |  |  |  |  |  |
-| 6 | `FieldModelLoadAndInit` | 125 | 7 |  |  |  |  |  |  |
-| 7 | `FieldEntityTriggerCheck` | 163 | 4 |  |  |  |  |  |  |
-| 8 | `FieldEntityDirByVec` | 134 | 1 |  | 2 |  |  |  |  |
-| 9 | `OpcodeFuncFade` | 126 | 2 |  |  | yes |  |  |  |
-| 10 | `KawaiSetModelTransparency` | 245 | 0 |  |  |  |  |  |  |
-| 11 | `KawaiSetCustomLighting` | 234 | 1 |  |  |  |  |  |  |
-| 12 | `KawaiColorFadeBelowLvl` | 237 | 1 |  |  |  |  |  |  |
-| 13 | `OpcodeFuncTurn` | 225 | 2 |  |  |  |  |  |  |
-| 14 | `FieldMoveToEntityUpdate` | 252 | 0 |  |  |  |  |  |  |
-| 15 | `FieldEntityInitPos` | 234 | 2 |  |  |  |  |  |  |
-| 16 | `FieldEventRunInit` | 152 | 4 | yes |  |  |  |  |  |
-| 17 | `OpcodeFuncOfstd` | 243 | 2 |  |  |  |  |  |  |
-| 18 | `FieldDebugRenderString` | 191 | 0 |  |  | yes |  |  |  |
-| 19 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
-| 20 | `FieldBGScrollUpdate` | 160 | 4 |  |  | yes |  |  |  |
-| 21 | `FieldArrowsAddToRender` | 221 | 6 |  |  |  |  |  |  |
-| 22 | `KawaiSetVertexColorFromLighting` | 293 | 0 |  |  |  |  |  |  |
-| 23 | `OpcodeFuncMove` | 272 | 2 |  |  |  |  |  |  |
-| 24 | `FieldCalcPointOnLine` | 137 | 0 |  | 4 |  |  |  |  |
-| 25 | `FieldUpdateAnimationState` | 234 | 0 |  |  | yes |  |  |  |
-| 26 | `FieldEntityWalkmechCross` | 291 | 2 |  |  |  |  |  |  |
-| 27 | `OpcodeFuncCanmEx` | 223 | 1 |  | 2 |  |  |  |  |
-| 28 | `OpcodeFuncTurnr` | 305 | 2 |  |  |  |  |  |  |
-| 29 | `DrawFieldExitArrow` | 330 | 0 |  |  |  |  |  |  |
-| 30 | `FieldEventJoinSet` | 264 | 6 |  |  |  |  |  |  |
-| 31 | `FieldEntityTurnToEntity` | 345 | 1 |  |  |  |  |  |  |
-| 32 | `OpcodeFuncCanim` | 246 | 1 |  | 3 |  |  |  |  |
-| 33 | `FieldBattleCheck` | 295 | 4 |  | 1 |  |  |  |  |
-| 34 | `FieldModelLoadBcx` | 307 | 2 |  |  | yes |  |  |  |
-| 35 | `FieldBackgroundInitPackets` | 395 | 5 |  |  |  |  |  |  |
-| 36 | `OpcodeFuncLader` | 403 | 2 |  | 1 |  |  |  |  |
-| 37 | `FieldInitDefaultValues` | 484 | 0 |  |  |  |  |  |  |
-| 38 | `FieldEventSplitJoinSetMove` | 429 | 2 |  | 1 |  |  |  |  |
-| 39 | `HandleKawaiDataInModel` | 482 | 5 |  |  |  |  |  |  |
-| 40 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
-
-_10 more actionable functions below the cut._
+| 1 | `FieldBackgroundInitPackets` | 395 | 5 |  |  |  |  |  |  |
+| 2 | `AddBackgroundToRender` | 658 | 0 |  |  |  |  |  |  |
+| 3 | `FieldMainLoop` | 658 | 33 |  |  |  |  |  |  |
+| 4 | `FieldMain` | 786 | 21 |  |  | yes |  |  |  |
 
 A `yes` in `jt` is a warning, not a verdict: the function may still be
 stuck on jump-table `.rodata` alignment until this unit is split on its
 original translation-unit boundaries. Read CLAUDE.md "Jump table
 alignment" before spending a budget on one.
-
-## Blocked — decompile the whole `.rodata` group or skip
-
-| function | i | verdict | why |
-| --- | --- | --- | --- |
-| `OpcodeFuncRtpal2` | 112 | BORROWS | D_800A0C70 owned by OpcodeFuncRtpal |
-| `OpcodeFuncRtpal` | 114 | LENDS | D_800A0C70 needed by OpcodeFuncRtpal2 |
-| `OpcodeFuncMppal2` | 132 | LENDS | D_800A0C80 needed by OpcodeFuncMppal |
-| `OpcodeFuncMppal` | 135 | BORROWS | D_800A0C80 owned by OpcodeFuncMppal2 |
-| `OpcodeFuncAdpal` | 155 | LENDS | D_800A0C78 needed by OpcodeFuncAdpal2 |
-| `OpcodeFuncAdpal2` | 157 | BORROWS | D_800A0C78 owned by OpcodeFuncAdpal |
-
-## Handwritten — never attempt
-
-These `.s` files carry `/* Handwritten function */`. No C compiles to
-them. They are not part of the remaining work.
-
-`FieldModelAddToRender`, `FieldModelAnimCalcMtrxs`, `FieldModelPrepareRender`, `FieldModelScaleAnimTranslat`, `FieldModelScaleModel`, `FieldModelScalePartVrtxs`, `KawaiAnimatedPointLight`, `KawaiApplyBoneTransform`, `KawaiDirectionalColorGradient`, `KawaiExecute`, `KawaiGradientColor`, `KawaiLightingApplyToModel`, `KawaiRenderClippedPart`, `KawaiSetColorToPartPkts`, `KawaiSetColorToPartPktsBelowLvl`, `KawaiSetColorToPktsBelowLvl`, `KawaiSetCustomLightToModelPkts`, `KawaiSetLightingToModelPkts`, `KawaiSetLightingToPartPkts`, `KawaiSetSplashToPktsBelowLvl`
 

@@ -5,11 +5,11 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 50 |
+| remaining `INCLUDE_ASM` | 25 |
 | handwritten — can never match | 14 |
 | blocked on a `.rodata` group | 6 |
-| **actionable** | **30** |
-| …of which already parked near-miss | 1 |
+| **actionable** | **5** |
+| …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
 `div` hardware divisions, `jt` jump table, `rank` = `mako.sh rank` score
@@ -20,36 +20,11 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `OpcodeFuncFadew` | 73 | 1 |  |  | yes |  |  | P |
-| 2 | `OpcodeFuncFmove` | 157 | 2 |  |  |  |  |  |  |
-| 3 | `FieldEventSetDirByActorId` | 170 | 1 |  |  |  |  |  |  |
-| 4 | `OpcodeFuncJump` | 167 | 2 |  |  |  |  |  |  |
-| 5 | `FieldEventSplitSet` | 133 | 5 |  |  |  |  |  |  |
-| 6 | `OpcodeFuncCmove` | 173 | 2 |  |  |  |  |  |  |
-| 7 | `KawaiFadeModelColor` | 190 | 1 |  |  |  |  |  |  |
-| 8 | `OpcodeFuncFade` | 126 | 2 |  |  | yes |  |  |  |
-| 9 | `KawaiSetModelTransparency` | 245 | 0 |  |  |  |  |  |  |
-| 10 | `KawaiSetCustomLighting` | 234 | 1 |  |  |  |  |  |  |
-| 11 | `KawaiColorFadeBelowLvl` | 237 | 1 |  |  |  |  |  |  |
-| 12 | `OpcodeFuncTurn` | 225 | 2 |  |  |  |  |  |  |
-| 13 | `FieldMoveToEntityUpdate` | 252 | 0 |  |  |  |  |  |  |
-| 14 | `FieldEventRunInit` | 152 | 4 | yes |  |  |  |  |  |
-| 15 | `OpcodeFuncOfstd` | 243 | 2 |  |  |  |  |  |  |
-| 16 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
-| 17 | `KawaiSetVertexColorFromLighting` | 293 | 0 |  |  |  |  |  |  |
-| 18 | `OpcodeFuncMove` | 272 | 2 |  |  |  |  |  |  |
-| 19 | `FieldUpdateAnimationState` | 234 | 0 |  |  | yes |  |  |  |
-| 20 | `OpcodeFuncCanmEx` | 223 | 1 |  | 2 |  |  |  |  |
-| 21 | `OpcodeFuncTurnr` | 305 | 2 |  |  |  |  |  |  |
-| 22 | `DrawFieldExitArrow` | 330 | 0 |  |  |  |  |  |  |
-| 23 | `FieldEventJoinSet` | 264 | 6 |  |  |  |  |  |  |
-| 24 | `FieldEntityTurnToEntity` | 345 | 1 |  |  |  |  |  |  |
-| 25 | `OpcodeFuncCanim` | 246 | 1 |  | 3 |  |  |  |  |
-| 26 | `OpcodeFuncLader` | 403 | 2 |  | 1 |  |  |  |  |
-| 27 | `FieldInitDefaultValues` | 484 | 0 |  |  |  |  |  |  |
-| 28 | `FieldEventSplitJoinSetMove` | 429 | 2 |  | 1 |  |  |  |  |
-| 29 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
-| 30 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
+| 1 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
+| 2 | `OpcodeFuncLader` | 403 | 2 |  | 1 |  |  |  |  |
+| 3 | `FieldEventSplitJoinSetMove` | 429 | 2 |  | 1 |  |  |  |  |
+| 4 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
+| 5 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
 
 A `yes` in `jt` is a warning, not a verdict: the function may still be
 stuck on jump-table `.rodata` alignment until this unit is split on its
