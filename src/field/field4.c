@@ -4756,7 +4756,89 @@ s32 OpcodeFuncJump(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLader);
+/*
+ * Field-script opcode LADER: send a model up or down a ladder or climb path.
+ *
+ * The direction operand picks the climb mode (4 = one pair of animations,
+ * 5 = the other) and which end of it the model starts from. The three
+ * coordinate operands are the destination in 1/16th units, and a fourth
+ * names the walk mesh triangle it lands on. While a climb is already running
+ * the opcode blocks on the model's action state, then clears it and steps
+ * past its 15 bytes.
+ */
+s32 OpcodeFuncLader(void) {
+    s32 mode;
+    u8 modelIdx;
+    FieldModelEntry* entry;
+    u8* anims;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("lader", 8);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(0xF);
+        return 0;
+    }
+    mode = g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode;
+    if (mode < 6) {
+        if (mode >= 4) {
+            switch (
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState) {
+            case 1:
+                return 1;
+            case 2:
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]]
+                    .scriptedMoveMode = 0;
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+                PC_INC(0xF);
+                return 0;
+            }
+        }
+    }
+    switch (GET_PARAM_U8(0xB)) {
+    case 0:
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 4;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+        break;
+    case 1:
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 4;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 1;
+        break;
+    case 2:
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 5;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+        break;
+    case 3:
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 5;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 1;
+        break;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        FieldEventReadMemoryS16(1, 3) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        FieldEventReadMemoryS16(2, 5) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndZ =
+        FieldEventReadMemoryS16(3, 7) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndI =
+        FieldEventReadMemoryS16(4, 9);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].activeAnimId =
+        GET_PARAM_U8(0xC);
+    modelIdx = g_EntityToModel[g_CurrentEntity];
+    g_FieldModels[modelIdx].animSpeed =
+        D_8009D828[modelIdx] / GET_PARAM_U8(0xE);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+    modelIdx = g_EntityToModel[g_CurrentEntity];
+    entry =
+        &g_FieldModelData
+             ->modelEntries[g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+    anims = entry->modelData + entry->animationOffset;
+    g_FieldModels[modelIdx].animLastFrame =
+        *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+    D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir = GET_PARAM_U8(0xD);
+    return 1;
+}
 
 void OpcodeFuncPmova(void) {
     u8 partyId;
