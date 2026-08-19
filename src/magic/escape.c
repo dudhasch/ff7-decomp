@@ -165,7 +165,7 @@ static void EscapeCaptureScreen(void) {
  *
  * The slot tie-break has since been searched exhaustively rather than randomly,
  * with the `giv-hoist`, `addr-eval-order` and `cse-split` recipes this body
- * produced (docs/PERMUTER_MACROS.md): 8100 candidates over the hoist site of
+ * produced (docs/decomp/PERMUTER_MACROS.md): 8100 candidates over the hoist site of
  * each of `vy`, `vx`, `m` and `c0`, five m/n split patterns for each of the two
  * v-coordinate statements, and every declaration order. It ran to completion
  * and found nothing below the score of this body -- several distinct points tie
