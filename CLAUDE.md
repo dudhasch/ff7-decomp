@@ -482,6 +482,46 @@ a near-miss, in rough order of frequency:
   cross-jumping merged the two `jal`s into one, leaving only the two argument
   setups. The tell is a pair of blocks that each load the same `a0` and a
   different `a1` before a shared call.
+* **A loop-invariant constant is hoisted only if its defining insn is on the
+  loop's always-executed path.** gcc 2.6.3's `move_movables` will not lift a
+  constant whose only uses sit inside a conditional arm, so
+  `if (x == 0) { p[0] = 2; p[1] = 2; }` keeps its `li v0,2` in the loop (usually
+  in a branch delay slot, so it costs nothing visible) while a constant whose
+  first use is the loop's unconditional test — `if (q[i].flag == 1)` — is lifted
+  into a callee-saved register. When the target hoists one the C does not, the
+  frame grows by one saved register and *every* s-register is renumbered: 55
+  rows of pure renaming from one missing `li`. Assigning the constant to a local
+  at the top of the loop body is what makes it hoistable
+  (`blinkClosed = 2;`, then `p[0] = blinkClosed;`). Neither the count of uses nor
+  which arm holds it matters — both were measured. `HandleKawaiDataInModel` in
+  `src/field/field2.c` needs this, and is parked 2 rows out because
+  `move_movables` emits the hoists in insn order: a loop-top assignment is
+  always lifted *before* a constant the compiler found later in the body, and
+  making the other constant a local too fixes the order but hands the allocator
+  a different register.
+* **A chained assignment stores right to left.** `m[0][0] = m[1][1] =
+  m[2][2] = 0x1000;` is `m[0][0] = (m[1][1] = (m[2][2] = 0x1000))`, so the
+  stores come out `m[2][2]`, `m[1][1]`, `m[0][0]` — descending. A target that
+  fills a struct in descending address order, in groups, is three chained
+  statements, not twelve separate ones; twelve give ascending order and a
+  loop-hoisted constant besides. This is what the identity matrix in
+  `HandleKawaiDataInModel` needs.
+* **A whole-struct copy schedules; an element-wise copy through pointers does
+  not.** `*(MATRIX*)dst = *src;` is a block move gcc knows cannot overlap, so it
+  interleaves the loads and stores across three registers. Eight
+  `dst[k] = src[k];` through two `s32*` may alias, so gcc emits `lw`/`nop`/`sw`
+  through one register per word. A run of load-nop-store pairs in the target
+  means element-wise C, not a struct assignment.
+* **A local aggregate initializer is a `.rodata` blob copy, not stores.**
+  `MATRIX mtx = {{{0x1000,0,0},...}};` makes cc1-psx-26 emit the constant into
+  `.rodata` and copy it in with `lw`/`sw` pairs — which also shifts every later
+  `.rodata` offset in the unit. Write the fields.
+* **A local declared in an inner block takes a later stack slot.** Slots go in
+  declaration order, and a block-scope declaration is "declared" where the block
+  is: moving `MATRIX mtx;` from the function's locals into the `if` that uses it
+  moved it from `0x18` to `0x20`, behind the `long` declared after it at
+  function scope. Use it when a diff is nothing but `N(sp)` offsets in one
+  branch.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
