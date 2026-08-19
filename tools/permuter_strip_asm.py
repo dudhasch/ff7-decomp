@@ -39,6 +39,10 @@ import sys
 
 B64_RE = re.compile(r"#pragma _permuter b64literal (\S+)\s*$")
 MARKER = "__maspsx_include_asm_hack_"
+# The MASPSX_OVERRIDE lever emits the same shape under a different name; those
+# bodies are .include'd reference .s and bloat the scratch exactly like the
+# include-asm hack, so strip them too.
+MARKER2 = "__maspsx_override_hack_"
 
 
 def strip(path):
@@ -50,7 +54,7 @@ def strip(path):
                 blob = base64.b64decode(m.group(1)).decode("utf-8", "replace")
             except Exception:
                 blob = ""
-            if MARKER in blob:
+            if MARKER in blob or MARKER2 in blob:
                 dropped += 1
                 continue
         kept.append(line)

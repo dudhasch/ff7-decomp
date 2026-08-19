@@ -1,0 +1,1 @@
+Any%, also known as Slots, is the fastest full-game speedrun category on the PSX version of the game.

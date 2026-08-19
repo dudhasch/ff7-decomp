@@ -1,0 +1,1 @@
+All Bosses (No Slots), also known as PSX All Bosses, is the category that defeats all bosses without using PC-exclusive warping glitches.

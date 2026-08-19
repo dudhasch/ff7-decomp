@@ -234,7 +234,7 @@ void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
 void func_80025800(s32 partyId, s32 amount);
 void func_80025988(s32 partyId, s32 amount);
 void FieldEventSetDirByActorId(u8 actorId);
-void FieldMoveToEntityUpdate(u8 actorId);
+s32 FieldMoveToEntityUpdate(s32 actorId);
 void FieldEntityTurnToEntity(u8 actorId);
 void func_80020058(s16 partyId);
 void func_8001786C(s16 partyId);
@@ -871,13 +871,117 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
     *(u16*)&D_8009ABF4.pcDirection = gateway->destDirection;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+/* Per-frame talk scan: on the rising edge of the OK button, score every entity
+ * by how directly the player faces it (and how near), then request the talk
+ * script of the best candidate. Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE (the walking quality-array pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+#else
+void FieldEntityCheckTalk(void) {
+    VECTOR from;
+    VECTOR to;
+    s16 quality[16];
+    s32 sqrDist;
+    s16 best;
+    u16 bestId;
+    u8 dirTo;
+    s32 i;
+
+    if (!(g_FieldPad2State & 0x20) || (g_FieldPad2PrevState & 0x20)) {
+        return;
+    }
+    from.vx = g_FieldEntity[g_PlayerModelId].PosX >> 12;
+    from.vy = g_FieldEntity[g_PlayerModelId].PosY >> 12;
+    from.vz = g_FieldEntity[g_PlayerModelId].PosZ >> 12;
+    for (i = 0; i < D_8009AC1C; i++) {
+        quality[i] = 0x100;
+        if (i == g_PlayerModelId) {
+            continue;
+        }
+        if (g_FieldEntity[i].TalkOff != 0) {
+            continue;
+        }
+        to.vx = g_FieldEntity[i].PosX >> 12;
+        to.vy = g_FieldEntity[i].PosY >> 12;
+        to.vz = g_FieldEntity[i].PosZ >> 12;
+        if (from.vx == to.vx && from.vy == to.vy) {
+            continue;
+        }
+        if ((u32)(from.vz - to.vz + 0xFF) >= 0x1FF) {
+            continue;
+        }
+        dirTo = FieldEntityDirByVec(&from, &to, &sqrDist);
+        if ((u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo) >= 0x81) {
+            quality[i] =
+                0x100 - (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        } else {
+            quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        }
+        if (sqrDist >= g_FieldEntity[i].TalkRange +
+                           g_FieldEntity[g_PlayerModelId].SolidRange) {
+            quality[i] = 0x100;
+        }
+    }
+    best = 0x40;
+    bestId = g_PlayerModelId;
+    for (i = 0; i < D_8009AC1C; i++) {
+        if (quality[i] < best) {
+            best = quality[i];
+            bestId = i;
+        }
+    }
+    if (bestId != g_PlayerModelId && best != 0x40) {
+        g_FieldEntity[bestId].requestTalkScript = 1;
+    }
+}
+#endif
 
 s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
 
 s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+extern u8 D_800DEF88[];
+
+/* Direction (0-255) from one point to another, plus the squared distance.
+ * Computes the fixed-point slope of the dominant axis, looks up the angle in
+ * the arctan table D_800DEF88, and corrects for the quadrant. The two hardware
+ * divisions and the quadrant branch ladder are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+#else
+u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
+    s32 dx;
+    s32 dy;
+    s32 dist;
+    s32 slope;
+    s32 slopeX;
+    s32 slopeY;
+    u8 angle;
+
+    dx = to->vx - from->vx;
+    dy = to->vy - from->vy;
+    *sqrDist = dx * dx + dy * dy;
+    dist = SquareRoot0(*sqrDist);
+    slopeX = (dx << 12) / dist >> 5;
+    slopeY = (dy << 12) / dist >> 5;
+    if (slopeX * slopeX < slopeY * slopeY) {
+        if (slopeY > 0) {
+            angle = D_800DEF88[slopeX * 2] + 0x40;
+        } else {
+            angle = -0x40 - D_800DEF88[-slopeX * 2];
+        }
+    } else {
+        if (slopeX > 0) {
+            angle = D_800DEF88[slopeY * 2] - 0x40;
+        } else {
+            angle = -0x80 - D_800DEF88[-slopeY * 2];
+        }
+    }
+    return angle & 0xFF;
+}
+#endif
 
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist);
 
@@ -1246,13 +1350,13 @@ void FieldEntityGatewayCheck(
 }
 
 /* One entry of the map's background-trigger block. Even `type`s arm the
- * trigger, odd ones disarm it. */
+ * trigger, odd ones disarm it. The pos is reused as the trigger's line. */
 typedef struct {
-    /* 0x00 */ u8 unk00[0xC];
+    /* 0x00 */ LinePos pos;
     /* 0x0C */ u8 entityId;
     /* 0x0D */ u8 unk0D;
     /* 0x0E */ u8 type;
-    /* 0x0F */ u8 unk0F;
+    /* 0x0F */ u8 unk0F; // sound-effect index into D_800A00BC
 } FieldBgTrigger;
 
 /* Arms (even type) or disarms (odd type) one background trigger, and reports
@@ -1303,7 +1407,81 @@ s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
 #endif
 
 const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+
+void func_8001117C(u16 arg0); // AKAO SFX player
+
+/* Walk the 12 background triggers against one entity and arm/disarm each it
+ * crosses or comes near. In-proximity arms directly when the entity stands on
+ * the line, else needs the entity facing it within +/-64; crossing types 4/5
+ * arm/disarm on the back-side sign test. Each state change plays the trigger's
+ * sound effect. Verified C kept as the #else; codegen pinned via
+ * MASPSX_OVERRIDE (the dual walking-pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+#else
+void FieldEntityTriggerCheck(
+    FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
+    s16 seIds[4];
+    s32* from;
+    s32* nearest;
+    FieldBgTrigger* trigger;
+    s32 sqrDist;
+    s32 cross;
+    u8 dir;
+    s32 i;
+
+    memcpy(seIds, (void*)D_800A00BC, 8);
+    from = (s32*)0x1F800000;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    for (i = 0; i < 12; i++) {
+        trigger = &triggers[i];
+        if (trigger->entityId == 0xFF) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine((FieldLine*)trigger, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            if (from[0] == nearest[0] && from[1] == nearest[1]) {
+                if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                    func_8001117C(seIds[trigger->unk0F]);
+                }
+                continue;
+            }
+            dir =
+                FieldEntityDirByVec((VECTOR*)from, (VECTOR*)nearest, &sqrDist);
+            if ((u8)(dir - entity->MoveDir + 0x40) >= 0x80) {
+                continue;
+            }
+            if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+            continue;
+        }
+        if (trigger->type >= 4) {
+            cross = (trigger->pos.x2 - trigger->pos.x1) *
+                        (from[1] - trigger->pos.y1) -
+                    (from[0] - trigger->pos.x1) *
+                        (trigger->pos.y2 - trigger->pos.y1);
+            if (cross > 0) {
+                continue;
+            }
+        }
+        if (trigger->type == 2 || trigger->type == 4) {
+            if (FieldEntityBgTriggerActivate(trigger, 1) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+        if (trigger->type == 3 || trigger->type == 5) {
+            if (FieldEntityBgTriggerActivate(trigger, 0) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+    }
+}
+#endif
 
 /* FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
  * the C matches, but gcc precedes the switch's jump table with `.align 3` and
@@ -1341,7 +1519,39 @@ void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
 /////////////////////////////////////////////////
 
 const u32 D_800A00DC[] = {0x00000000};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+
+/* Top-level field model loader: build the FieldModelData from the loaded model
+ * header, stream the field's model set off the CD, load the global and local
+ * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
+ * state. Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+#else
+void FieldModelLoadAndInit(void) {
+    FieldModelData* data;
+    s32 i;
+
+    D_800DFCA0 = (u_long*)0x80128000;
+    data = g_FieldModelData;
+    FieldModelStructInit((FieldModelFileDesc*)D_8007E770, data);
+    DS_read(g_FieldLzsInfo[g_CurrentFieldIndex * 6],
+            g_FieldLzsInfo[g_CurrentFieldIndex * 6 + 1], (u32*)0x80128000,
+            NULL);
+    while (SystemCdromReadChain() != 0) {
+    }
+    D_80075E10 = (u32)FieldModelLoadGlobalModels(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10, 1);
+    ((s32*)0x1F800000)[0] = (s32)D_800DF08C;
+    ((s32*)0x1F800000)[1] = (s32)D_800DF0D4;
+    D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10);
+    for (i = 0; i < g_FieldModelData->modelCount; i++) {
+        KawaiLoadEyesMouthTexToVram(
+            &g_FieldModelData->modelEntries[i], (u8*)0x1F800000);
+    }
+    KawaiClearData();
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", HandleKawaiDataInModel);
 
@@ -1808,6 +2018,8 @@ void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
 #endif
 
 extern u_long* D_800DFCA0;
+extern u32 D_800DF08C;
+extern u32 D_800DF0D4;
 u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);
 
 /* Loads every global (BCX) model in the header, then optionally kicks off the
@@ -1865,6 +2077,7 @@ void KawaiClearData(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiExecute);
 
+void KawaiSetCustomLightToModelPkts(FieldModelEntry* model, u8* data);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
@@ -1966,17 +2179,453 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToPolyColor);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+/* Set the semi-transparency/shade bits of every packet of every part of one
+ * model. Walks each part's double-buffered packet area (the two ordering-table
+ * copies) and toggles the ABE and shade bits of each primitive's tag byte. The
+ * 8 unrolled primitive-type blocks (strides 34/28/28/20/14/18/1C/24) and the
+ * dual walking-pointer tag/base induction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+#else
+s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    u8* part;
+    u8* base;
+    u8* tag;
+    u32 partCount;
+    u32 enable;
+    u32 i;
+    u32 ot;
+    u32 j;
+    u32 n;
 
+    parts = model->modelData + model->partsOffset;
+    partCount = model->partCount;
+    enable = data[0];
+    if (partCount == 0) {
+        return 1;
+    }
+    part = parts;
+    for (i = 0; i < partCount; i++, part += 0x20) {
+        for (ot = 0; ot < 2; ot++) {
+            base = *(u8**)(part + 0x1C);
+            if (ot != 0) {
+                base += *(u16*)(part + 0x16);
+            }
+            n = part[4];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x34, base += 0x34) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[5];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[6];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[7];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x20, base += 0x20) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[8];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x14, base += 0x14) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[9];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x18, base += 0x18) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[10];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x1C, base += 0x1C) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[11];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x24, base += 0x24) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+        }
+    }
+    return 1;
+}
+#endif
+
+void KawaiSetColorToPktsBelowLvl(FieldModelEntry* model, u8* data);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPktsBelowLvl);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+/* Per-KAWAI-slot colour fade record (16 slots, 0x3C each; only the first 0x14
+ * bytes are used by KawaiFadeModelColor). */
+typedef struct {
+    /* 0x00 */ s16 curR;
+    /* 0x02 */ s16 curG;
+    /* 0x04 */ s16 curB;
+    /* 0x06 */ s16 targetR;
+    /* 0x08 */ s16 targetG;
+    /* 0x0A */ s16 targetB;
+    /* 0x0C */ s16 deltaR;
+    /* 0x0E */ s16 deltaG;
+    /* 0x10 */ s16 deltaB;
+    /* 0x12 */ u8 unk12;
+    /* 0x13 */ u8 done;
+} KawaiColorFadeSlot;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+extern KawaiColorFadeSlot D_800DFE3C[16];
+extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+/* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
+ * the slot from the descriptor; data[0]==1 exports the current colour to the
+ * scratch quad, pushes it to the packets, and advances each channel toward its
+ * target, clamping. Returns 1 while fading, 0 when done. The scratch-quad $at
+ * remat and the slot*0x3C strength reduction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+#else
+s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
+    KawaiColorFadeSlot* slot;
+    s32 done;
+
+    slot = &D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->curR = data[0x02] | (data[0x03] << 8);
+        slot->curG = data[0x04] | (data[0x05] << 8);
+        slot->curB = data[0x06] | (data[0x07] << 8);
+        slot->targetR = data[0x08] | (data[0x09] << 8);
+        slot->targetG = data[0x0A] | (data[0x0B] << 8);
+        slot->targetB = data[0x0C] | (data[0x0D] << 8);
+        slot->deltaR = data[0x0E] | (data[0x0F] << 8);
+        slot->deltaG = data[0x10] | (data[0x11] << 8);
+        slot->deltaB = data[0x12] | (data[0x13] << 8);
+        slot->unk12 = data[0x14];
+        slot->done = 0;
+        return 1;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->curR;
+        D_800DFE1C[1] = slot->curR >> 8;
+        D_800DFE1C[2] = slot->curG;
+        D_800DFE1C[3] = slot->curG >> 8;
+        D_800DFE1C[4] = slot->curB;
+        D_800DFE1C[5] = slot->curB >> 8;
+        D_800DFE1C[6] = slot->unk12;
+        KawaiSetColorToModelPkts(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->curR += slot->deltaR;
+        if (slot->deltaR >= 0) {
+            if (slot->curR >= slot->targetR) {
+                slot->curR = slot->targetR;
+                done |= 1;
+            }
+        } else if (slot->curR <= slot->targetR) {
+            slot->curR = slot->targetR;
+            done |= 1;
+        }
+        slot->curG += slot->deltaG;
+        if (slot->deltaG >= 0) {
+            if (slot->curG >= slot->targetG) {
+                slot->curG = slot->targetG;
+                done |= 2;
+            }
+        } else if (slot->curG <= slot->targetG) {
+            slot->curG = slot->targetG;
+            done |= 2;
+        }
+        slot->curB += slot->deltaB;
+        if (slot->deltaB >= 0) {
+            if (slot->curB >= slot->targetB) {
+                slot->curB = slot->targetB;
+                done |= 4;
+            }
+        } else if (slot->curB <= slot->targetB) {
+            slot->curB = slot->targetB;
+            done |= 4;
+        }
+        if (done == 7) {
+            slot->done++;
+        }
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+/* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
+ * copies the 0x1E-byte descriptor into the slot: 11 GTE params (colour matrix
+ * data[0..2], light matrix data[3..0xA]) then eight LE u16 light/vertex colour
+ * pairs. data[0]==1 expands the slot into the D_800DFE1C scratch buffer (the
+ * pairs byte-wise, lo then hi) and calls the handwritten GTE driver. The slot
+ * reuses the KawaiFadeModelColor table's 0x3C stride but a flat lighting-blob
+ * layout. The apply arm re-materialises each scratch byte store through $at
+ * (the scratch-quad $at remat wall, same as KawaiFadeModelColor); codegen
+ * pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+#else
+s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
+    u8* slot;
+    u16 pair;
+
+    slot = (u8*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot[0x00] = data[0x02];
+        slot[0x01] = data[0x03];
+        slot[0x02] = data[0x04];
+        slot[0x03] = data[0x05];
+        slot[0x04] = data[0x06];
+        slot[0x05] = data[0x07];
+        slot[0x06] = data[0x08];
+        slot[0x07] = data[0x09];
+        slot[0x08] = data[0x0A];
+        slot[0x09] = data[0x0B];
+        slot[0x0A] = data[0x0C];
+        *(u16*)(slot + 0x0C) = data[0x0E] | (data[0x0F] << 8);
+        *(u16*)(slot + 0x0E) = data[0x10] | (data[0x11] << 8);
+        *(u16*)(slot + 0x10) = data[0x12] | (data[0x13] << 8);
+        *(u16*)(slot + 0x12) = data[0x14] | (data[0x15] << 8);
+        *(u16*)(slot + 0x14) = data[0x16] | (data[0x17] << 8);
+        *(u16*)(slot + 0x16) = data[0x18] | (data[0x19] << 8);
+        *(u16*)(slot + 0x18) = data[0x1A] | (data[0x1B] << 8);
+        *(u16*)(slot + 0x1C) = data[0x1E] | (data[0x1F] << 8);
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot[0];
+        D_800DFE1C[1] = slot[1];
+        D_800DFE1C[2] = slot[2];
+        D_800DFE1C[3] = slot[3];
+        D_800DFE1C[4] = slot[4];
+        D_800DFE1C[5] = slot[5];
+        D_800DFE1C[6] = slot[6];
+        D_800DFE1C[7] = slot[7];
+        D_800DFE1C[8] = slot[8];
+        D_800DFE1C[9] = slot[9];
+        D_800DFE1C[0x0A] = slot[0x0A];
+        pair = *(u16*)(slot + 0x0C);
+        D_800DFE1C[0x0B] = pair;
+        D_800DFE1C[0x0C] = pair >> 8;
+        pair = *(u16*)(slot + 0x0E);
+        D_800DFE1C[0x0D] = pair;
+        D_800DFE1C[0x0E] = pair >> 8;
+        pair = *(u16*)(slot + 0x10);
+        D_800DFE1C[0x0F] = pair;
+        D_800DFE1C[0x10] = pair >> 8;
+        pair = *(u16*)(slot + 0x12);
+        D_800DFE1C[0x11] = pair;
+        D_800DFE1C[0x12] = pair >> 8;
+        pair = *(u16*)(slot + 0x14);
+        D_800DFE1C[0x13] = pair;
+        D_800DFE1C[0x14] = pair >> 8;
+        pair = *(u16*)(slot + 0x16);
+        D_800DFE1C[0x15] = pair;
+        D_800DFE1C[0x16] = pair >> 8;
+        pair = *(u16*)(slot + 0x18);
+        D_800DFE1C[0x17] = pair;
+        D_800DFE1C[0x18] = pair >> 8;
+        D_800DFE1C[0x1B] = slot[0x1C];
+        KawaiSetCustomLightToModelPkts(model, D_800DFE1C);
+        return 0;
+    }
+    return 0;
+}
+#endif
+
+/* Fade a model's vertex colour over time below a light level (KAWAI
+ * sub-command). Four channels (cur@0/2/4/6, target@8/A/C/E, delta@10/12/14/16,
+ * unk18@0x18, done@0x19 in the 0x3C-stride slot table). data[0]==0 inits the
+ * slot from twelve LE u16 descriptor words; data[0]==1 exports the four cur
+ * channels + unk18 to the D_800DFE1C scratch buffer, pushes them to the
+ * below-level packets, then advances each channel toward its target with the
+ * sign-aware clamp and bumps done once all four reach 0xF. Returns 1 while
+ * fading, 0 when done. The scratch-quad $at remat in the apply arm is the wall
+ * (same as KawaiFadeModelColor); codegen pinned via MASPSX_OVERRIDE, #else is
+ * the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+#else
+typedef struct {
+    /* 0x00 */ u16 cur0;
+    /* 0x02 */ u16 cur1;
+    /* 0x04 */ u16 cur2;
+    /* 0x06 */ u16 cur3;
+    /* 0x08 */ s16 target0;
+    /* 0x0A */ s16 target1;
+    /* 0x0C */ s16 target2;
+    /* 0x0E */ s16 target3;
+    /* 0x10 */ s16 delta0;
+    /* 0x12 */ s16 delta1;
+    /* 0x14 */ s16 delta2;
+    /* 0x16 */ s16 delta3;
+    /* 0x18 */ u8 unk18;
+    /* 0x19 */ u8 done;
+} KawaiFadeBelowLvlSlot;
+
+s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
+    KawaiFadeBelowLvlSlot* slot;
+    s32 done;
+
+    slot = (KawaiFadeBelowLvlSlot*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->cur0 = data[0x02] | (data[0x03] << 8);
+        slot->cur1 = data[0x04] | (data[0x05] << 8);
+        slot->cur2 = data[0x06] | (data[0x07] << 8);
+        slot->cur3 = data[0x08] | (data[0x09] << 8);
+        slot->target0 = data[0x0A] | (data[0x0B] << 8);
+        slot->target1 = data[0x0C] | (data[0x0D] << 8);
+        slot->target2 = data[0x0E] | (data[0x0F] << 8);
+        slot->target3 = data[0x10] | (data[0x11] << 8);
+        slot->delta0 = data[0x12] | (data[0x13] << 8);
+        slot->delta1 = data[0x14] | (data[0x15] << 8);
+        slot->delta2 = data[0x16] | (data[0x17] << 8);
+        slot->delta3 = data[0x18] | (data[0x19] << 8);
+        slot->done = 0;
+        slot->unk18 = data[0x1A];
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->cur0;
+        D_800DFE1C[1] = slot->cur0 >> 8;
+        D_800DFE1C[2] = slot->cur1;
+        D_800DFE1C[3] = slot->cur1 >> 8;
+        D_800DFE1C[4] = slot->cur2;
+        D_800DFE1C[5] = slot->cur2 >> 8;
+        D_800DFE1C[6] = slot->cur3;
+        D_800DFE1C[7] = slot->cur3 >> 8;
+        D_800DFE1C[8] = slot->unk18;
+        KawaiSetColorToPktsBelowLvl(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->cur0 += slot->delta0;
+        if (slot->delta0 >= 0) {
+            if ((s16)slot->cur0 < slot->target0) {
+                goto cur0done;
+            }
+        } else if (slot->target0 < (s16)slot->cur0) {
+            goto cur0done;
+        }
+        slot->cur0 = slot->target0;
+        done |= 1;
+    cur0done:
+        slot->cur1 += slot->delta1;
+        if (slot->delta1 >= 0) {
+            if ((s16)slot->cur1 < slot->target1) {
+                goto cur1done;
+            }
+        } else if (slot->target1 < (s16)slot->cur1) {
+            goto cur1done;
+        }
+        slot->cur1 = slot->target1;
+        done |= 2;
+    cur1done:
+        slot->cur2 += slot->delta2;
+        if (slot->delta2 >= 0) {
+            if ((s16)slot->cur2 < slot->target2) {
+                goto cur2done;
+            }
+        } else if (slot->target2 < (s16)slot->cur2) {
+            goto cur2done;
+        }
+        slot->cur2 = slot->target2;
+        done |= 4;
+    cur2done:
+        slot->cur3 += slot->delta3;
+        if (slot->delta3 >= 0) {
+            if ((s16)slot->cur3 < slot->target3) {
+                goto cur3done;
+            }
+        } else if (slot->target3 < (s16)slot->cur3) {
+            goto cur3done;
+        }
+        slot->cur3 = slot->target3;
+        done |= 8;
+    cur3done:
+        if (done == 0xF) {
+            slot->done++;
+        }
+        return 0;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToModelPkts);
 
@@ -2155,7 +2804,71 @@ void FieldEventUpdate(s32 arg0) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventRunInit);
+/* Walks every entity's first script and runs its initialisation opcodes
+ * (everything up to the terminating 0). The script-offset table sits past the
+ * entity-name table and the extras table in the script header. Semantically
+ * correct; codegen pinned via MASPSX_OVERRIDE: gcc 2.6.3 fixes the address
+ * arithmetic order (the <<6/<<3/<<1 sequence) and re-materialises the script
+ * pointer, a conserved-pair the permuter plateaus on (best 1075 after the
+ * override-strip fix, iter 55k). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRunInit);
+#else
+void FieldEventRunInit(void) {
+    s16 numExtras;
+    s32 scriptBase;
+    u16 pc;
+    u16* slot;
+    u16* slot2;
+    u8 lo;
+    u8 op;
+    u8 op2;
+
+    g_FieldModelCount = 0;
+    g_CurrentEntity = 0;
+    if (g_FieldScripts->numEntities != 0) {
+        do {
+            if (g_FieldScriptDebugFlags & 3) {
+                FieldDebugStringCopy(g_DebugText, &D_800E0628);
+                FieldDebugStringConcat(
+                    g_DebugText,
+                    (u8*)g_FieldScripts + (g_CurrentEntity * 8) + 0x20);
+                if (g_FieldScriptDebugFlags & 1) {
+                    SetStrToDebugRow(4, 0, g_DebugText);
+                }
+                if (g_FieldScriptDebugFlags & 2) {
+                    DebugPrintToFieldWindow(g_DebugText);
+                }
+            }
+            scriptBase = g_CurrentEntity << 6;
+            numExtras = g_FieldScripts->numExtras * 4;
+            lo = ((u8*)g_FieldScripts + scriptBase +
+                  (g_FieldScripts->numEntities * 8) + numExtras)[0x20];
+            slot = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            *slot = (u16)lo;
+            *slot = lo | (((u8*)g_FieldScripts + scriptBase +
+                           (g_FieldScripts->numEntities * 8) + numExtras)[0x21]
+                          << 8);
+            op = *((u8*)g_FieldScripts + *slot);
+            g_FieldCurrentOpcode = op;
+            if (op != 0) {
+                do {
+                    g_FieldOpcodes[g_FieldCurrentOpcode]();
+                    op2 = *((u8*)g_FieldScripts +
+                            *((u16*)((g_CurrentEntity * 2) +
+                                     (u8*)g_FieldScriptPC)));
+                    g_FieldCurrentOpcode = op2;
+                } while (op2 != 0);
+            }
+            slot2 = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            pc = *slot2;
+            g_CurrentEntity += 1;
+            *slot2 = pc + 1;
+        } while ((u8)g_CurrentEntity < (u8)g_FieldScripts->numEntities);
+        g_CurrentEntity = 0;
+    }
+}
+#endif
 
 /* Enable the loaded field models that correspond to party members, then
  * disable (make non-solid, non-talkable, invisible) every model whose loader
@@ -5154,7 +5867,87 @@ void OpcodeFuncMova(void) {
     FieldMoveToEntityUpdate(GET_PARAM_U8(1));
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+/* Set up (or finish) a scripted move of the current entity toward a target
+ * entity: the current entity's move destination becomes the target's current
+ * position. Returns 1 while a move is being set up / is in progress, 0 when it
+ * just finished or when either entity has no model. Every global access
+ * re-materialises the g_EntityToModel / g_FieldModels bases through $at (the
+ * $at remat wall); codegen pinned via MASPSX_OVERRIDE, #else is the verified
+ * C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+#else
+s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
+    FieldEntity* cur;
+    FieldEntity* target;
+    FieldModelEntry* entry;
+    u8 curModel;
+    u8 targetModel;
+    u8 animCount;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        goto advance;
+    }
+    targetModel = g_EntityToModel[targetEntityId & 0xFF];
+    if (targetModel == 0xFF) {
+        goto advance;
+    }
+    cur = &g_FieldModels[curModel];
+    target = &g_FieldModels[targetModel];
+    cur->MoveEndI = target->SolidRange;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+    cur->MoveEndX = target->PosX;
+    cur->MoveEndY = target->PosY;
+    cur = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (cur->scriptedMoveMode != 1) {
+        goto setmode;
+    }
+    if (cur->ActionState == 1) {
+        if (g_FieldState->currentMovieFrame * 3 < cur->MoveSpeed) {
+            if (cur->activeAnimId == 2) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 2;
+        } else {
+            if (cur->activeAnimId == 1) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 1;
+        }
+        cur->animSpeed = 0x10;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+        curModel = g_EntityToModel[g_CurrentEntity];
+        entry = &g_FieldModelLoaderData[curModel];
+        animCount = D_80074F02[curModel];
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
+            *(u16*)(g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .animationOffset +
+                    g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .modelData +
+                    animCount * 0x10) -
+            1;
+    done_anim:
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
+        return 1;
+    }
+    if (cur->ActionState == 2) {
+        cur->scriptedMoveMode = 0;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+        goto advance;
+    }
+    goto out;
+setmode:
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    goto out;
+advance:
+    g_FieldScriptPC[g_CurrentEntity] += 2;
+    return 0;
+out:
+    return 0;
+}
+#endif
 
 void OpcodeFuncDira(void) {
     if (g_DebugLevel & 3) {
@@ -5299,7 +6092,54 @@ s32 OpcodeFuncTurnw(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+/* TURN (0xB5): turn the current entity to a target direction over a number of
+ * steps. If the previous turn finished (TurnType 3) clear it and advance. If an
+ * identical turn is already in flight, keep waiting. Otherwise (re)arm the
+ * turn: TurnStart = current Dir, TurnEnd = target. Verified C kept as the
+ * #else; codegen pinned via MASPSX_OVERRIDE (the g_FieldModels *0x84 base
+ * regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+#else
+s32 OpcodeFuncTurn(void) {
+    s16 dir;
+    FieldEntity* model;
+    u8 turnType;
+    u8 turnSteps;
+
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    turnSteps = GET_PARAM_U8(4);
+    turnType = GET_PARAM_U8(5);
+    if (g_DebugLevel & 3) {
+        if (turnType == 1) {
+            DebugPrintOpcode("turn", 5);
+        } else if (turnType == 2) {
+            DebugPrintOpcode("turnc", 5);
+        }
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->TurnType == 3) {
+        model->TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        PC_INC(6);
+        return 0;
+    }
+    dir = FieldEventReadMemoryS16(2, 2);
+    if (model->TurnStep != 0 && (s16)dir == model->TurnEnd &&
+        model->TurnType == turnType && model->TurnSteps == turnSteps) {
+        return 1;
+    }
+    model->TurnStart = g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = turnType;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = turnSteps;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd = dir;
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
 
@@ -7853,7 +8693,38 @@ s32 FieldEventSplitJoinEndTurn(s16 entityId) {
 // Begin of field_opcode_fade.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+/* FADE (0x6B): start a screen fade. Reads the fade type and per-channel target
+ * colours, then the speed. The jump table picks the fadeAdjust start value per
+ * fade family (subtractive fades start at the speed, additive at 0). The
+ * .rodata phase wall (jump table). Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+#else
+s32 OpcodeFuncFade(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fade", 8);
+    }
+    g_FieldState->fadeType = GET_PARAM_U8(7);
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8) + 1;
+        break;
+    default:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8);
+        break;
+    }
+    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(1, 1);
+    g_FieldState->fadeRed = FieldEventReadMemoryU8(2, 3);
+    g_FieldState->fadeGreen = FieldEventReadMemoryU8(3, 4);
+    g_FieldState->fadeBlue = FieldEventReadMemoryU8(4, 5);
+    PC_INC(9);
+    return 0;
+}
+#endif
 
 /* Every instruction matches except one: the original leaves the delay slot of
  * the first FieldEventReadMemoryU8 call empty and stores fadeType ahead of it,
@@ -7879,7 +8750,51 @@ s32 OpcodeFuncNfade(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+/* FADEW (0x6C): block the script until the active screen fade completes. The
+ * wait test depends on the fade type: subtractive fades complete when
+ * fadeAdjust reaches 0, the hold-colour fades when fadeAdjust reaches
+ * fadeSpeed, and the rest when fadeAdjust hits 0. Returns 1 while waiting, 0
+ * (advancing the PC) once done. Jump-table fadeType dispatch; the .rodata phase
+ * wall. Codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+#else
+s32 OpcodeFuncFadew(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fadew", 0);
+    }
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_INSTANT:
+    case FFT_INSTANT_BLACK:
+    case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
+    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
+    case FFT_FIELD_TO_STANDARD_ADD_HOLD_COLOR:
+    default:
+        if (g_FieldState->fadeAdjust == g_FieldState->fadeSpeed) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_intersect.c

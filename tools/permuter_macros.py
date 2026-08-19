@@ -26,7 +26,7 @@ Why bother, when the permuter randomizes on its own?
   * The randomizer's passes are generic. This project's near-misses are not:
     they cluster into a handful of shapes (narrow typed temporaries, stack
     slot order, address forms, store targets) that the recipes below encode
-    directly. See `recipes` for the catalogue and docs/PERMUTER_MACROS.md for
+    directly. See `recipes` for the catalogue and docs/decomp/PERMUTER_MACROS.md for
     the evidence behind each one.
 
 `align` exists because of a trap specific to this repo: the scorer compares
@@ -1470,7 +1470,7 @@ def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="See docs/PERMUTER_MACROS.md for the method these serve.",
+        epilog="See docs/decomp/PERMUTER_MACROS.md for the method these serve.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

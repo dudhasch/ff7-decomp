@@ -9,9 +9,13 @@ OVL_US += WORLD/WORLD.BIN
 .PHONY: all
 all: disks build
 
+# Set OVERLAYS to a comma-separated list to build and sha1-check only those,
+# e.g. `make build OVERLAYS=field,world`. Everything else is left untouched:
+# not split, not compiled, not linked. CI uses it to scope a pull request to
+# the overlays its changed files belong to -- see tools/affected_overlays.py.
 .PHONY: build
 build: bin/cc1-psx-26 bin/cc1-psx-272 bin/str disks/us/FIELD/FIELD.BIN.dec
-	@./mako.sh build
+	@./mako.sh build $(if $(OVERLAYS),--overlays $(OVERLAYS))
 
 disks/us/FIELD/FIELD.BIN.dec:
 	@for f in $(OVL_US); do \

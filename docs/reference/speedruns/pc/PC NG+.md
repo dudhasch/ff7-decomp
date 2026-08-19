@@ -1,0 +1,1 @@
+PC NG+, also known as just NG+ or New Game+, is the category that abuses the PC-exclusive [Wrong Warp](/index.php/Wrong_Warp "Wrong Warp") glitch to warp to the end of the game while allowing the use of pre-made save files to assist in performing glitches to complete the game more quickly.

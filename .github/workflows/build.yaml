@@ -5,12 +5,60 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  pull-requests: read
 jobs:
+  # Decide how much of the game a pull request actually has to rebuild. Runs on
+  # the base branch's checkout and only ever reads the PR's *file names* through
+  # the API, so no fork code is executed here.
+  scope:
+    if: github.repository == 'Xeeynamo/ff7-decomp'
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      overlays: ${{ steps.scope.outputs.overlays }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    - run: pip install pyyaml
+    - name: Work out which overlays are affected
+      id: scope
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        # Only pull requests get scoped. A push -- in particular to main, which
+        # publishes the progress report -- always rebuilds and re-checks
+        # everything.
+        if [ "${{ github.event_name }}" != 'pull_request_target' ]; then
+          echo "mode=full" >> "$GITHUB_OUTPUT"
+          echo "overlays=" >> "$GITHUB_OUTPUT"
+          echo "not a pull request: full build" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        gh api --paginate \
+          "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+          --jq '.[].filename' > changed.txt
+        echo "### Changed files ($(wc -l < changed.txt))" >> "$GITHUB_STEP_SUMMARY"
+        head -50 changed.txt | sed 's/^/- `/;s/$/`/' >> "$GITHUB_STEP_SUMMARY"
+        python3 tools/affected_overlays.py --from-file changed.txt --github-output \
+          | tee -a "$GITHUB_OUTPUT"
+    - name: Summarise
+      run: |
+        echo "### Build scope" >> "$GITHUB_STEP_SUMMARY"
+        echo "mode: \`${{ steps.scope.outputs.mode }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "overlays: \`${{ steps.scope.outputs.overlays || 'all' }}\`" >> "$GITHUB_STEP_SUMMARY"
+
   build:
     # Building and testing cannot work if the repository owner is not Xeeynamo
     # due to the missing secrets to clone the CI dependencies
-    if: github.repository == 'Xeeynamo/ff7-decomp'
+    needs: scope
+    if: github.repository == 'Xeeynamo/ff7-decomp' && needs.scope.outputs.mode != 'none'
     runs-on: ubuntu-latest
+    env:
+      # Empty for a full build, which is what `make build` already does.
+      OVERLAYS: ${{ needs.scope.outputs.overlays }}
     steps:
     - run: sudo apt-get install -y ninja-build 7zip
     # Ubuntu 24.04 uses binutils 2.42, which ships a version of mipsel-linux-gnu-ld that does not match the game.
@@ -57,8 +105,14 @@ jobs:
         7z x -sdel tmp/ff7.7z -odisks/
         rm tmp/*
         ls -la disks/
-    - run: make build
+    - name: Build (${{ needs.scope.outputs.mode }})
+      run: make build OVERLAYS=$OVERLAYS
+    # Only meaningful after a full build: the export is regenerated from the ELF
+    # of every overlay, so a partial build would leave it untouched and the
+    # check would pass without having verified anything. Every path that can
+    # change it -- config/, include/, src/main/ -- forces mode=full.
     - name: Check if updated ovl export is committed
+      if: needs.scope.outputs.mode == 'full'
       run: git diff --exit-code -- config/sym_ovl_export.us.txt
     - name: Generate progress report
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
