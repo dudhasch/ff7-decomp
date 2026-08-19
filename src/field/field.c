@@ -6224,7 +6224,79 @@ void OpcodeFuncPtura(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
+extern u8 D_800722C4;
+extern /*?*/s32 D_8007EB98;
+extern /*?*/s32 D_800831FC;
+extern s32 D_8009C544;
+extern s32 D_8009C6DC;
+extern u8 D_8009D820;
+
+/* OFSTD (0x?? offset-start): set up an offset animation for the current
+ * entity's model. Reads the four target offsets from the script, stores the
+ * mode byte, and either snapshots the current offsets as the start (mode!=0)
+ * or copies the ends into the starts (mode==0). Residual is the
+ * full-expression g_FieldModels[...] address CSE; pinned pending permuter. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
+#else
+s32 OpcodeFuncOfstd(void)
+{
+    s8* var_a0;
+    u16* temp_v1_3;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    void* temp_v0;
+    void* temp_v0_2;
+    void* temp_v0_3;
+    void* temp_v0_4;
+    void* temp_v0_5;
+    void* temp_v0_6;
+
+    if (*(&D_8007EB98 + D_800722C4) != 0xFF) {
+        if (D_8009D820 & 3) {
+            temp_v1 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+            switch (temp_v1) {                      // irregular
+                case 0:
+                    var_a0 = "ofstd";
+block_11:
+                    DebugPrintOpcode(var_a0, 5U);
+                    break;
+                case 1:
+                    var_a0 = "ofstl";
+                    goto block_11;
+                case 2:
+                    var_a0 = "ofstc";
+                    goto block_11;
+            }
+        }
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk54 = 0;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk52 = FieldEventReadMemoryS16(4, 0xA);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk44 = FieldEventReadMemoryS16(1, 4);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk4A = FieldEventReadMemoryS16(2, 6);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk50 = FieldEventReadMemoryS16(3, 8);
+        temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk56 = temp_v1_2;
+        if (temp_v1_2 != 0) {
+            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0->unk42 = (u16) temp_v0->unk40;
+            temp_v0_2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_2->unk48 = (u16) temp_v0_2->unk46;
+            temp_v0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_3->unk4E = (u16) temp_v0_3->unk4C;
+        } else {
+            temp_v0_4 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_4->unk40 = (u16) temp_v0_4->unk44;
+            temp_v0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_5->unk46 = (u16) temp_v0_5->unk4A;
+            temp_v0_6 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_6->unk4C = (u16) temp_v0_6->unk50;
+        }
+    }
+    temp_v1_3 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_v1_3 += 0xC;
+    return 0;
+}
+#endif
 
 /* Block until this entity's offset animation finishes. OfsType 3 means the last
  * step ran, so clear it and fall through; 0 means there was never one. */
