@@ -1147,7 +1147,134 @@ s32 FieldEntityAutoMove(FieldEntity* entity, s16 range) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
+extern /*?*/s32 D_8009ACA6;
+extern s32 D_800E4274;
+extern u16 D_80113F28;
+extern s32 D_80114458;
+extern s16 D_801144CC;
+
+/* Detect when a moving entity crosses a walkmesh triangle edge: walk the
+ * triangle's edges, compute the cross products against the entity's position,
+ * and return which edge (if any) the entity is crossing plus the resulting Z.
+ * Uses the 0x1F8000xx scratchpad for the per-edge vectors. m2c seed; residual
+ * is the cross-product regalloc and the scratchpad access ordering. Pinned
+ * pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
+#else
+s32 FieldEntityWalkmechCross(u16* arg0, void* arg1, void* arg2, void* arg3)
+{
+    s16 var_v0_3;
+    s32 temp_a0_2;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_a2_2;
+    s32 temp_a2_3;
+    s32 temp_a2_4;
+    s32 temp_t1;
+    s32 temp_v0;
+    s32 temp_v0_2;
+    s32 temp_v0_3;
+    s32 var_s3;
+    s32 var_v0;
+    s32 var_v0_2;
+    u16 temp_v1;
+    u16 var_a0;
+    void* temp_a0;
+
+    var_s3 = 0;
+    var_v0 = arg1->unk0;
+    if (var_v0 < 0) {
+        var_v0 += 0xFFF;
+    }
+    *(s32* )0x1F800030 = var_v0 >> 0xC;
+    var_v0_2 = arg1->unk4;
+    if (var_v0_2 < 0) {
+        var_v0_2 += 0xFFF;
+    }
+    *(s32* )0x1F800034 = var_v0_2 >> 0xC;
+    *(s32* )0x1F800038 = 0;
+    D_80113F28 = 0xFFFF;
+loop_5:
+    temp_a2 = *arg0 * 0x18;
+    FieldEntityVectorSub((s32* )0x1F800000, temp_a2 + 8 + D_800E4274, temp_a2 + D_800E4274);
+    temp_a2_2 = *arg0 * 0x18;
+    FieldEntityVectorSub((s32* )0x1F800000, temp_a2_2 + 0x10 + D_800E4274, temp_a2_2 + 8 + D_800E4274);
+    temp_a2_3 = *arg0 * 0x18;
+    FieldEntityVectorSub((s32* )0x1F800000, temp_a2_3 + D_800E4274, temp_a2_3 + 0x10 + D_800E4274);
+    temp_v1 = *arg0;
+    temp_a1 = *(s32* )0x1F800030;
+    temp_a0 = (temp_v1 * 0x18) + D_800E4274;
+    temp_a2_4 = *(s32* )0x1F800034;
+    temp_t1 = ((temp_a1 - temp_a0->unk8) * *(s32* )0x1F800014) - ((temp_a2_4 - temp_a0->unkA) * *(s32* )0x1F800010);
+    temp_a0_2 = ((temp_a1 - temp_a0->unk10) * *(s32* )0x1F800024) - ((temp_a2_4 - temp_a0->unk12) * *(s32* )0x1F800020);
+    if ((((temp_a1 - temp_a0->unk0) * *(s32* )0x1F800004) - ((temp_a2_4 - temp_a0->unk2) * *(s32* )0x1F800000)) >= 0) {
+        if (temp_t1 >= 0) {
+            if (temp_a0_2 < 0) {
+                if (temp_t1 < 0) {
+                    goto block_15;
+                }
+                if (temp_a0_2 < 0) {
+                    var_a0 = ((temp_v1 * 6) + D_80114458)->unk4;
+                    temp_v0 = (s32) (var_a0 << 0x10) >> 0x13;
+                    if (((s16) var_a0 >= 0) && !(((s32) *(&D_8009ACA6 + temp_v0) >> ((s16) var_a0 - (temp_v0 * 8))) & 1)) {
+                        goto block_23;
+                    }
+                    arg3->unk0 = (s32) *(s32* )0x1F800020;
+                    arg3->unk4 = (s32) *(s32* )0x1F800024;
+                    arg3->unk8 = (s32) *(s32* )0x1F800028;
+                    var_s3 = -8;
+                    if (((*(s32* )0x1F800020 * arg2->unk0) + (*(s32* )0x1F800024 * arg2->unk4)) >= 0) {
+                        var_s3 = 8;
+                    }
+                    var_v0_3 = 2;
+                    goto block_27;
+                }
+                goto loop_5;
+            }
+        } else {
+block_15:
+            var_a0 = ((temp_v1 * 6) + D_80114458)->unk2;
+            temp_v0_2 = (s32) (var_a0 << 0x10) >> 0x13;
+            if (((s16) var_a0 < 0) || (((s32) *(&D_8009ACA6 + temp_v0_2) >> ((s16) var_a0 - (temp_v0_2 * 8))) & 1)) {
+                arg3->unk0 = (s32) *(s32* )0x1F800010;
+                arg3->unk4 = (s32) *(s32* )0x1F800014;
+                arg3->unk8 = (s32) *(s32* )0x1F800018;
+                var_s3 = -8;
+                if (((*(s32* )0x1F800010 * arg2->unk0) + (*(s32* )0x1F800014 * arg2->unk4)) >= 0) {
+                    var_s3 = 8;
+                }
+                var_v0_3 = 1;
+block_27:
+                D_801144CC = var_v0_3;
+                D_80113F28 = *arg0;
+            } else {
+                goto block_23;
+            }
+        }
+    } else {
+        var_a0 = *((temp_v1 * 6) + D_80114458);
+        temp_v0_3 = (s32) (var_a0 << 0x10) >> 0x13;
+        if (((s16) var_a0 < 0) || (((s32) *(&D_8009ACA6 + temp_v0_3) >> ((s16) var_a0 - (temp_v0_3 * 8))) & 1)) {
+            arg3->unk0 = (s32) *(s32* )0x1F800000;
+            arg3->unk4 = (s32) *(s32* )0x1F800004;
+            arg3->unk8 = (s32) *(s32* )0x1F800008;
+            var_s3 = -8;
+            if (((*(s32* )0x1F800000 * arg2->unk0) + (*(s32* )0x1F800004 * arg2->unk4)) >= 0) {
+                var_s3 = 8;
+            }
+            D_801144CC = 0;
+            D_80113F28 = *arg0;
+        } else {
+block_23:
+            *arg0 = var_a0;
+            goto loop_5;
+        }
+    }
+    arg1->unk8 = FieldEntityCalculateZ((s32* )0x1F800000, (s32* )0x1F800010, (s32* )0x1F800030, (*arg0 * 0x18) + D_800E4274);
+    return var_s3;
+}
+#endif
 
 static void FieldEntityVectorSub(s32* arg0, s16* arg1, s16* arg2) {
     arg0[0] = arg1[0] - arg2[0];
