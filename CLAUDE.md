@@ -341,6 +341,37 @@ a near-miss, in rough order of frequency:
   `value - quotient * n` with an `s32` quotient. Hoist both the quotient and
   the remainder into locals ahead of an `if`/`else` that uses them, or gcc
   duplicates the division into both arms (`OpcodeFuncIdlck`).
+* **A loop bound as `s16` buys a `move` that `u16` folds away.** For
+  `for (i = 0; i < count; i++)` with `count` assigned from a `lbu` plus a
+  constant, gcc knows the value is small and non-negative, so the widening to
+  `int` collapses to a plain register copy and the zero-trip guard becomes
+  `beqz` rather than `blez`. Declared `u16` there is no widening node at all
+  and no copy is emitted. The two spellings therefore differ by exactly the
+  `move a0,s4` / `move t3,a0` pair a target may or may not have, and *neither
+  is the house style* — `OpcodeFuncAdpal` and `OpcodeFuncMppal2` in
+  `src/field/field4.c` have identical loop shapes and want opposite types.
+  Read the guard in the target: `blez` means the bound is plainly signed,
+  `beqz` plus a copy means `s16`, `beqz` with no copy means `u16`.
+* **`x * 2 * invariant` reassociates and hoists; `(x << 1) * invariant` does
+  not.** gcc folds the constant onto the loop-invariant operand and lifts
+  `invariant * 2` into the preheader, so a per-iteration `sll` in the target
+  becomes a preheader `sll` plus a changed multiply — three rows for what
+  reads as the same arithmetic. Spelling the doubling as a shift keeps it in
+  the body. The three MPPAL opcodes need this.
+* **Read a bitfield extraction off the target, do not derive it.** A channel
+  that is doubled before use is spelled with the doubling folded into the
+  shift and a mask one bit wider: `(color << 1) & 0x3E`, `(color >> 4) & 0x3F`,
+  `(color >> 9) & 0x3F` — *not* `((color >> 5) & 0x1F) * 2`, which is a
+  genuinely different value, not just a different phrasing. Deriving the
+  "obvious" form gives correct-looking C that is two instructions out per
+  channel and, for the middle channels, semantically wrong.
+* **Which of two pointers is declared first decides which base the target
+  computes first.** For a loop copying between two bases, declaring the load
+  base before the store base (or the reverse) is worth a dozen rows of
+  register naming, and the answer is not consistent even between siblings:
+  in `src/field/field4.c` the ADPALs and MPPALs compute the load base first,
+  the RTPALs the store base. Find which base feeds the `lhu` in the target
+  and declare that one first.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
@@ -449,6 +480,29 @@ Some functions cannot be decompiled alone, and the failure shows up as a red
   one. Fine, as long as you pass exactly the same string.
 
 Pass `--all` to triage a whole file at once.
+
+**Most of the "blocked" column is not blocked — it is pairs.** A BORROWS and
+a LENDS that name only *each other* are one unit and are actionable the moment
+you take them together, which `worklist.py` files under "Blocked — decompile
+the whole `.rodata` group or skip" without saying so. All six of
+`src/field/field4.c`'s blocked functions were three such pairs
+(`OpcodeFuncRtpal`/`Rtpal2`, `Adpal`/`Adpal2`, `Mppal`/`Mppal2`), each ~130
+instructions and near-clones of the other, which made them the cheapest work
+in the file rather than the most expensive. Scan the blocked table for
+reciprocal pairs before believing the "actionable" count.
+
+**`rodata_owner.py` reads `MASPSX_OVERRIDE` as if it were C, and it is not.**
+The tool decides a symbol is owned by C once it sees a body in the `.c`, so a
+function parked under `#else /* NON_MATCHINGS */` reports **SHARES** — "fine,
+as long as you pass exactly the same string". It is not fine: the compiled
+form is the `MASPSX_OVERRIDE`, the `.s` is still `.include`d, and the `.s`
+carries its own copy of the literal in `.rodata`. Writing the sibling as C
+then emits the string a second time and every later offset shifts. This costs
+a full `make build` to discover, because every function still diffs perfectly
+and only the overlay's SHA-1 fails — `OpcodeFuncAdpal2` matches instruction
+for instruction and still produced `build/us/field.exe: FAILED`. A pinned
+function is *not* an owner; treat SHARES as BORROWS whenever the named owner
+sits under a `MASPSX_OVERRIDE`.
 
 #### Jump table alignment, and the file splits it implies
 
