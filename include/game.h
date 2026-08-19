@@ -565,7 +565,7 @@ typedef struct {
     /* 0x04 */ u8 modelEntryIndex; // index into FieldModelData->modelEntries
     /* 0x05 */ u8 npcFlag;         // NPC/model type flag?
     /* 0x06 */ u8 unk6;
-    /* 0x07 */ u8 globalModelId; // BCX/global model lookup id
+    /* 0x07 */ s8 globalModelId; // BCX/global model lookup id
 } FieldModelLoaderData;          // size:0x8
 
 typedef struct {

@@ -1218,7 +1218,7 @@ void FieldModelLoadAndInit(void) {
     while (SystemCdromReadChain() != 0) {
     }
     D_80075E10 = (u32)FieldModelLoadGlobalModels(
-        g_FieldModelData, D_8007E770, (u8*)D_80075E10, 1);
+        (FieldModelFileDesc*)D_8007E770, g_FieldModelData, (u8*)D_80075E10, 1);
     ((s32*)0x1F800000)[0] = (s32)D_800DF08C;
     ((s32*)0x1F800000)[1] = (s32)D_800DF0D4;
     D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
@@ -1954,22 +1954,23 @@ void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
 #endif
 
 extern u_long* D_800DFCA0;
-u8* FieldModelLoadBcx(FieldModelData* data, s32 arg1, u8* pkts, s32 index);
+u8* FieldModelLoadBcx(
+    FieldModelFileDesc* desc, FieldModelData* data, u8* pkts, s32 index);
 
 /* Loads every global (BCX) model in the header, then optionally kicks off the
  * next streamed read. Scratchpad word 0 is clobbered by each load and restored
  * before the next one; word 1 holds the sector/size pair for that read. */
 u8* FieldModelLoadGlobalModels(
-    FieldModelData* data, s32 arg1, u8* pkts, s32 readFile) {
+    FieldModelFileDesc* desc, FieldModelData* data, u8* pkts, s32 readFile) {
     u32* fileInfo;
     s32 saved;
     u32 i;
 
     saved = ((s32*)0x1F800000)[0];
     fileInfo = (u32*)((s32*)0x1F800000)[1];
-    for (i = 0; i < data->unk2; i++) {
+    for (i = 0; i < desc->count; i++) {
         ((s32*)0x1F800000)[0] = saved;
-        pkts = FieldModelLoadBcx(data, arg1, pkts, i);
+        pkts = FieldModelLoadBcx(desc, data, pkts, i);
     }
     if (readFile) {
         DS_read(fileInfo[0], fileInfo[1], D_800DFCA0, NULL);
