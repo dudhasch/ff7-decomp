@@ -93,6 +93,16 @@ fifth that cannot be fixed at all. Both were found on `func_801D080C`
   into one aggregate so an offset rides in the relocation's addend.
 
 Compiler-generated jump tables have no name to align to either. So a function
+
+* **a symbol the C reaches as a struct field** — `retarget` is meant to catch
+  this and did not, for a reason worth knowing: its guard skips any symbol whose
+  name already appears in `base.c`, and `src/magic/escape.c` reaches the byte at
+  0x80151909 as `D_801518E4[row].D_80151909`. The word match saw the *field*
+  name and concluded the two sides already agreed, so six points of pure naming
+  noise stayed in the score and `--stop-on-zero` could never fire. Fixed — the
+  guard now ignores anything preceded by `.` or `->` — but the shape recurs
+  wherever a `D_` name doubles as a member name, and the symptom is silent:
+  `retarget` prints *nothing to retarget* and you believe it.
 can have a **nonzero noise floor** — 280 for `func_801D080C` — and then
 `--stop-on-zero` never fires however close you get. Read the floor off the
 `--debug` two-column diff (rows differing only in symbol text) and watch for
@@ -192,6 +202,9 @@ to paste, with the reasoning attached. Indexed by what `--debug` tells you:
 | branch differences | `branch-polarity`, `loop-form` |
 | right instructions, wrong base register | `addr-form` |
 | loads batched ahead of stores | `struct-store` |
+| a value the target keeps in a slot and increments, you recompute inline | `giv-hoist` |
+| a spilled giv duplicating a multiply already in a register | `addr-eval-order` |
+| some accesses to one indexed object use the wrong addressing form | `cse-split` |
 | a-register off by one and a parameter is unused | `fake-arg` |
 | nothing left you can explain | `region-random` |
 

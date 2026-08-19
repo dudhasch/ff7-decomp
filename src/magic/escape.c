@@ -161,7 +161,17 @@ static void EscapeCaptureScreen(void) {
  * and `--stop-on-zero` never fires), and `-g -gcoff` dropped from the scratch's
  * compile.sh. Uncorrected, it reported 85 against a base of 250 for a candidate
  * measuring 28/24 -- worse than the body it started from. Corrected, it found
- * 3 and 4 in 2.8M iterations. Re-measure every output against the overlay. */
+ * 3 and 4 in 2.8M iterations. Re-measure every output against the overlay.
+ *
+ * The slot tie-break has since been searched exhaustively rather than randomly,
+ * with the `giv-hoist`, `addr-eval-order` and `cse-split` recipes this body
+ * produced (docs/PERMUTER_MACROS.md): 8100 candidates over the hoist site of
+ * each of `vy`, `vx`, `m` and `c0`, five m/n split patterns for each of the two
+ * v-coordinate statements, and every declaration order. It ran to completion
+ * and found nothing below the score of this body -- several distinct points tie
+ * with it, none beat it. So the remaining twelve rows are not reachable through
+ * any of those four axes, and re-running that space is wasted time. The next
+ * hypothesis has to come from somewhere else. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
