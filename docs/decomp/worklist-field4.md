@@ -5,8 +5,8 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 16 |
-| handwritten — can never match | 14 |
+| remaining `INCLUDE_ASM` | 15 |
+| handwritten — can never match | 13 |
 | blocked on a `.rodata` group | 0 |
 | **actionable** | **2** |
 | …of which already parked near-miss | 0 |
@@ -28,5 +28,5 @@ the `.c` — those are the cheapest wins left, finish them first.
 These `.s` files carry `/* Handwritten function */`. No C compiles to
 them. They are not part of the remaining work.
 
-`KawaiAnimatedPointLight`, `KawaiApplyBoneTransform`, `KawaiDirectionalColorGradient`, `KawaiExecute`, `KawaiGradientColor`, `KawaiLightingApplyToModel`, `KawaiRenderClippedPart`, `KawaiSetColorToPartPkts`, `KawaiSetColorToPartPktsBelowLvl`, `KawaiSetColorToPktsBelowLvl`, `KawaiSetCustomLightToModelPkts`, `KawaiSetLightingToModelPkts`, `KawaiSetLightingToPartPkts`, `KawaiSetSplashToPktsBelowLvl`
+`KawaiAnimatedPointLight`, `KawaiApplyBoneTransform`, `KawaiDirectionalColorGradient`, `KawaiExecute`, `KawaiGradientColor`, `KawaiLightingApplyToModel`, `KawaiRenderClippedPart`, `KawaiSetColorToPartPkts`, `KawaiSetColorToPktsBelowLvl`, `KawaiSetCustomLightToModelPkts`, `KawaiSetLightingToModelPkts`, `KawaiSetLightingToPartPkts`, `KawaiSetSplashToPktsBelowLvl`
 
