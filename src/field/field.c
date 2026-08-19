@@ -752,7 +752,53 @@ void FieldBGScrollInit(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
+/* Project a point onto a trigger line: for a type-1 or type-2 trigger compute
+ * the closest on-line point to the entity and write it back into arg1. m2c
+ * seed; the residual is regalloc across the divide-by-length-squared and the
+ * two near-duplicate branches. Codegen pinned via MASPSX_OVERRIDE pending a
+ * permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
+#else
+void FieldCalcPointOnLine(void* arg0, void* arg1)
+{
+    s16 temp_a2_3;
+    s16 temp_t0;
+    s16 temp_t1;
+    s16 temp_v0;
+    s16 temp_v1;
+    s32 temp_a0;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_a2_2;
+    s32 temp_a2_4;
+    s32 temp_t0_2;
+    s32 temp_t2;
+    s32 temp_t2_2;
+
+    if (arg0->unk14 == 1) {
+        temp_t0 = arg0->unkC;
+        temp_a2 = arg0->unk10 - (temp_t0 + 0x140);
+        temp_v0 = arg0->unkE;
+        temp_a0 = arg0->unk12 - (temp_v0 + 0xF0);
+        temp_t2 = -(((temp_t0 - (arg1->unk0 - 0xA0)) * temp_a2) + ((temp_v0 - (arg1->unk2 - 0x78)) * temp_a0));
+        temp_a2_2 = (s32) ((temp_a2 * temp_a2) + (temp_a0 * temp_a0)) >> 8;
+        arg1->unk0 = (s16) (((s32) ((s32) (temp_t2 * temp_a2) / temp_a2_2) >> 8) + 0xA0 + temp_t0);
+        arg1->unk2 = (s16) (((s32) ((s32) (temp_t2 * temp_a0) / temp_a2_2) >> 8) + 0x78 + (u16) arg0->unkE);
+    }
+    if (arg0->unk14 == 2) {
+        temp_t1 = arg0->unkC;
+        temp_t0_2 = arg0->unk10 - (temp_t1 + 0x140);
+        temp_a2_3 = arg0->unk12;
+        temp_v1 = arg0->unkE;
+        temp_a1 = temp_v1 - (temp_a2_3 - 0xF0);
+        temp_t2_2 = -(((temp_t1 - (arg1->unk0 - 0xA0)) * temp_t0_2) + ((temp_a2_3 - (arg1->unk2 + 0x78)) * temp_a1));
+        temp_a2_4 = (s32) ((temp_t0_2 * temp_t0_2) + ((temp_v1 - temp_a2_3) * temp_a1)) >> 8;
+        arg1->unk0 = (s16) (((s32) ((s32) (temp_t2_2 * temp_t0_2) / temp_a2_4) >> 8) + 0xA0 + temp_t1);
+        arg1->unk2 = (s16) (((s32) ((s32) (temp_t2_2 * temp_a1) / temp_a2_4) >> 8) - 0x78 + (u16) arg0->unk12);
+    }
+}
+#endif
 
 /* Scroll limits at the head of the field's trigger block. g_FieldTriggers is
  * typed s32 because it is assigned as a raw word on load. */
