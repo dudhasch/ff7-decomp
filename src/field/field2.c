@@ -6,9 +6,140 @@
  * would push it 4 bytes forward. Do not merge this unit into a 0 mod 8
  * neighbour. */
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+/* Seed the background-scroll state machine from the requested scroll mode.
+ * Only runs while idle (D_8009AC13 == 0). Modes: 0 stops and recentres; 1 arms
+ * scrolling in place; 2/3 begin a single-target scroll; 4 teleports the current
+ * position to the alt source; 5-9 begin a dual-target (eased) scroll. The
+ * target positions/step/fraction are what FieldBGScrollUpdate consumes each
+ * frame.
+ *
+ * Instructions all match; the only diff is the jump table landing at
+ * .rodata+0x54 (target) vs +0x58 (ours) — the field overlay's .rodata base is
+ * 4 mod 8 and this function needs the --phase 4 jump-table demotion, but the
+ * overlay carries both phases at once (the file-split residue). Codegen pinned
+ * via MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+#else
+extern u8 D_8009AC11;  // scroll mode (jump-table selector)
+extern u8 D_8009AC13;  // scroll state (0 = idle)
+extern s16 D_8009A100; // scroll enable
+extern u16 D_8009AC14; // scroll source X
+extern u16 D_8009ABFE; // alt scroll source X
+extern u16 D_8009AC00; // alt scroll source Y
+extern s16 D_80071E38; // current scroll X
+extern s16 D_80071E3C; // current scroll Y
+extern s16 D_8009C558; // scroll step
+extern s16 D_80075CF8; // scroll sub-position / fraction
+extern s16 D_80075E14; // target scroll X
+extern s16 D_80075E1C; // target scroll Y
+extern s16 D_80075E18; // alt target scroll X
+extern s16 D_80075E20; // alt target scroll Y
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
+void FieldBGScrollInit(void) {
+    if (D_8009AC13 != 0) {
+        return;
+    }
+    switch (D_8009AC11) {
+    case 0:
+        D_8009A100 = 0;
+        D_80071E38 = 0;
+        D_80071E3C = 0;
+        D_8009AC13 = 2;
+        break;
+    case 1:
+        D_8009A100 = 1;
+        D_8009AC13 = 1;
+        break;
+    case 2:
+    case 3:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        break;
+    case 4:
+        D_8009A100 = 1;
+        D_8009AC13 = 2;
+        D_80071E38 = D_8009ABFE;
+        D_80071E3C = D_8009AC00;
+        break;
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+        D_8009A100 = 1;
+        D_80075CF8 = 0;
+        D_8009AC13 = 1;
+        D_8009C558 = D_8009AC14;
+        D_80075E14 = D_80071E38;
+        D_80075E1C = D_80071E3C;
+        D_80075E18 = D_8009ABFE;
+        D_80075E20 = D_8009AC00;
+        break;
+    }
+}
+#endif
+
+/* Project a point onto a trigger line: for a type-1 or type-2 trigger compute
+ * the closest on-line point to the entity and write it back into arg1. m2c
+ * seed; the residual is regalloc across the divide-by-length-squared and the
+ * two near-duplicate branches. Codegen pinned via MASPSX_OVERRIDE pending a
+ * permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
+#else
+void FieldCalcPointOnLine(void* arg0, void* arg1) {
+    s16 temp_a2_3;
+    s16 temp_t0;
+    s16 temp_t1;
+    s16 temp_v0;
+    s16 temp_v1;
+    s32 temp_a0;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_a2_2;
+    s32 temp_a2_4;
+    s32 temp_t0_2;
+    s32 temp_t2;
+    s32 temp_t2_2;
+
+    if (arg0->unk14 == 1) {
+        temp_t0 = arg0->unkC;
+        temp_a2 = arg0->unk10 - (temp_t0 + 0x140);
+        temp_v0 = arg0->unkE;
+        temp_a0 = arg0->unk12 - (temp_v0 + 0xF0);
+        temp_t2 = -(((temp_t0 - (arg1->unk0 - 0xA0)) * temp_a2) +
+                    ((temp_v0 - (arg1->unk2 - 0x78)) * temp_a0));
+        temp_a2_2 = (s32)((temp_a2 * temp_a2) + (temp_a0 * temp_a0)) >> 8;
+        arg1->unk0 = (s16)(((s32)((s32)(temp_t2 * temp_a2) / temp_a2_2) >> 8) +
+                           0xA0 + temp_t0);
+        arg1->unk2 = (s16)(((s32)((s32)(temp_t2 * temp_a0) / temp_a2_2) >> 8) +
+                           0x78 + (u16)arg0->unkE);
+    }
+    if (arg0->unk14 == 2) {
+        temp_t1 = arg0->unkC;
+        temp_t0_2 = arg0->unk10 - (temp_t1 + 0x140);
+        temp_a2_3 = arg0->unk12;
+        temp_v1 = arg0->unkE;
+        temp_a1 = temp_v1 - (temp_a2_3 - 0xF0);
+        temp_t2_2 = -(((temp_t1 - (arg1->unk0 - 0xA0)) * temp_t0_2) +
+                      ((temp_a2_3 - (arg1->unk2 + 0x78)) * temp_a1));
+        temp_a2_4 = (s32)((temp_t0_2 * temp_t0_2) +
+                          ((temp_v1 - temp_a2_3) * temp_a1)) >>
+                    8;
+        arg1->unk0 =
+            (s16)(((s32)((s32)(temp_t2_2 * temp_t0_2) / temp_a2_4) >> 8) +
+                  0xA0 + temp_t1);
+        arg1->unk2 =
+            (s16)(((s32)((s32)(temp_t2_2 * temp_a1) / temp_a2_4) >> 8) - 0x78 +
+                  (u16)arg0->unk12);
+    }
+}
+#endif
 
 /* Scroll limits at the head of the field's trigger block. g_FieldTriggers is
  * typed s32 because it is assigned as a raw word on load. */
@@ -52,7 +183,91 @@ s32 FieldBGGetEntityScreenPos(long* screenPos) {
     return FieldCalcWorldToScreenPos(&pos, screenPos);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
+extern s16 D_80071E38;
+extern s16 D_80071E3C;
+extern s16 D_80075CF8;
+extern s16 D_80075E14;
+extern s16 D_80075E18;
+extern s16 D_80075E1C;
+extern s16 D_80075E20;
+extern u8 D_8009AC11;
+extern u8 D_8009AC13;
+extern s16 D_8009C558;
+
+/* Per-frame background scroll: on the field's scroll state machine, drive the
+ * background X/Y toward the entity's clamped screen position (linear or
+ * ease-in-out depending on the mode). The seed is semantically close; the
+ * residual is the oversized stack frame (dead locals the original declared)
+ * plus regalloc. Codegen pinned via MASPSX_OVERRIDE pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
+#else
+void FieldBGScrollUpdate(void) {
+    s32 sp10;
+    s16 var_a1;
+    s16 var_v0_2;
+    s32 var_v0;
+
+#define unksp12 (((s16*)&sp10)[1])
+    if (D_8009AC13 == 1) {
+        switch (D_8009AC11) {
+        case 1:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = -(s16)(u16)sp10;
+            D_80071E3C = -(s16)unksp12;
+            return;
+        case 2:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32) - (s16)sp10,
+                                             (s32)D_8009C558, (s32)D_80075CF8);
+            var_a1 = -unksp12;
+        block_5:
+            var_v0 = FieldCalcLinearStep(
+                (s32)D_80075E1C, (s32)var_a1, (s32)D_8009C558, (s32)D_80075CF8);
+        block_6:
+            D_80071E3C = (s16)var_v0;
+            if (D_8009C558 != D_80075CF8) {
+                var_v0_2 = D_80075CF8 + 1;
+            block_13:
+                D_80075CF8 = var_v0_2;
+            } else {
+            block_11:
+                D_8009AC13 = 2;
+                return;
+            }
+            break;
+        case 3:
+            FieldBGGetEntityScreenPos(&sp10);
+            FieldBGClampPos((s16*)&sp10);
+            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32) - (s16)sp10,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            var_v0 = FieldCalcEaseInOut((s32)D_80075E1C, (s32)-unksp12,
+                                        (s32)D_8009C558, (s32)D_80075CF8);
+            goto block_6;
+        case 5:
+            var_a1 = D_80075E20;
+            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32)D_80075E18,
+                                             (s32)D_8009C558, (s32)D_80075CF8);
+            goto block_5;
+        case 6:
+            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32)D_80075E18,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            D_80071E3C = FieldCalcEaseInOut((s32)D_80075E1C, (s32)D_80075E20,
+                                            (s32)D_8009C558, (s32)D_80075CF8);
+            if (D_8009C558 == D_80075CF8) {
+                goto block_11;
+            }
+            var_v0_2 = D_80075CF8 + 1;
+            goto block_13;
+        }
+    } else {
+    default:
+    }
+#undef unksp12
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 
@@ -127,13 +342,117 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
     *(u16*)&D_8009ABF4.pcDirection = gateway->destDirection;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+/* Per-frame talk scan: on the rising edge of the OK button, score every entity
+ * by how directly the player faces it (and how near), then request the talk
+ * script of the best candidate. Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE (the walking quality-array pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+#else
+void FieldEntityCheckTalk(void) {
+    VECTOR from;
+    VECTOR to;
+    s16 quality[16];
+    s32 sqrDist;
+    s16 best;
+    u16 bestId;
+    u8 dirTo;
+    s32 i;
+
+    if (!(g_FieldPad2State & 0x20) || (g_FieldPad2PrevState & 0x20)) {
+        return;
+    }
+    from.vx = g_FieldEntity[g_PlayerModelId].PosX >> 12;
+    from.vy = g_FieldEntity[g_PlayerModelId].PosY >> 12;
+    from.vz = g_FieldEntity[g_PlayerModelId].PosZ >> 12;
+    for (i = 0; i < D_8009AC1C; i++) {
+        quality[i] = 0x100;
+        if (i == g_PlayerModelId) {
+            continue;
+        }
+        if (g_FieldEntity[i].TalkOff != 0) {
+            continue;
+        }
+        to.vx = g_FieldEntity[i].PosX >> 12;
+        to.vy = g_FieldEntity[i].PosY >> 12;
+        to.vz = g_FieldEntity[i].PosZ >> 12;
+        if (from.vx == to.vx && from.vy == to.vy) {
+            continue;
+        }
+        if ((u32)(from.vz - to.vz + 0xFF) >= 0x1FF) {
+            continue;
+        }
+        dirTo = FieldEntityDirByVec(&from, &to, &sqrDist);
+        if ((u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo) >= 0x81) {
+            quality[i] =
+                0x100 - (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        } else {
+            quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        }
+        if (sqrDist >= g_FieldEntity[i].TalkRange +
+                           g_FieldEntity[g_PlayerModelId].SolidRange) {
+            quality[i] = 0x100;
+        }
+    }
+    best = 0x40;
+    bestId = g_PlayerModelId;
+    for (i = 0; i < D_8009AC1C; i++) {
+        if (quality[i] < best) {
+            best = quality[i];
+            bestId = i;
+        }
+    }
+    if (bestId != g_PlayerModelId && best != 0x40) {
+        g_FieldEntity[bestId].requestTalkScript = 1;
+    }
+}
+#endif
 
 s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
 
 s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+extern u8 D_800DEF88[];
+
+/* Direction (0-255) from one point to another, plus the squared distance.
+ * Computes the fixed-point slope of the dominant axis, looks up the angle in
+ * the arctan table D_800DEF88, and corrects for the quadrant. The two hardware
+ * divisions and the quadrant branch ladder are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+#else
+u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
+    s32 dx;
+    s32 dy;
+    s32 dist;
+    s32 slope;
+    s32 slopeX;
+    s32 slopeY;
+    u8 angle;
+
+    dx = to->vx - from->vx;
+    dy = to->vy - from->vy;
+    *sqrDist = dx * dx + dy * dy;
+    dist = SquareRoot0(*sqrDist);
+    slopeX = (dx << 12) / dist >> 5;
+    slopeY = (dy << 12) / dist >> 5;
+    if (slopeX * slopeX < slopeY * slopeY) {
+        if (slopeY > 0) {
+            angle = D_800DEF88[slopeX * 2] + 0x40;
+        } else {
+            angle = -0x40 - D_800DEF88[-slopeX * 2];
+        }
+    } else {
+        if (slopeX > 0) {
+            angle = D_800DEF88[slopeY * 2] - 0x40;
+        } else {
+            angle = -0x80 - D_800DEF88[-slopeY * 2];
+        }
+    }
+    return angle & 0xFF;
+}
+#endif
 
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist);
 
@@ -169,7 +488,151 @@ s32 FieldEntityAutoMove(FieldEntity* entity, s16 range) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
+extern /*?*/ s32 D_8009ACA6;
+extern s32 D_800E4274;
+extern u16 D_80113F28;
+extern s32 D_80114458;
+extern s16 D_801144CC;
+
+/* Detect when a moving entity crosses a walkmesh triangle edge: walk the
+ * triangle's edges, compute the cross products against the entity's position,
+ * and return which edge (if any) the entity is crossing plus the resulting Z.
+ * Uses the 0x1F8000xx scratchpad for the per-edge vectors. m2c seed; residual
+ * is the cross-product regalloc and the scratchpad access ordering. Pinned
+ * pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
+#else
+s32 FieldEntityWalkmechCross(u16* arg0, void* arg1, void* arg2, void* arg3) {
+    s16 var_v0_3;
+    s32 temp_a0_2;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_a2_2;
+    s32 temp_a2_3;
+    s32 temp_a2_4;
+    s32 temp_t1;
+    s32 temp_v0;
+    s32 temp_v0_2;
+    s32 temp_v0_3;
+    s32 var_s3;
+    s32 var_v0;
+    s32 var_v0_2;
+    u16 temp_v1;
+    u16 var_a0;
+    void* temp_a0;
+
+    var_s3 = 0;
+    var_v0 = arg1->unk0;
+    if (var_v0 < 0) {
+        var_v0 += 0xFFF;
+    }
+    *(s32*)0x1F800030 = var_v0 >> 0xC;
+    var_v0_2 = arg1->unk4;
+    if (var_v0_2 < 0) {
+        var_v0_2 += 0xFFF;
+    }
+    *(s32*)0x1F800034 = var_v0_2 >> 0xC;
+    *(s32*)0x1F800038 = 0;
+    D_80113F28 = 0xFFFF;
+loop_5:
+    temp_a2 = *arg0 * 0x18;
+    FieldEntityVectorSub(
+        (s32*)0x1F800000, temp_a2 + 8 + D_800E4274, temp_a2 + D_800E4274);
+    temp_a2_2 = *arg0 * 0x18;
+    FieldEntityVectorSub((s32*)0x1F800000, temp_a2_2 + 0x10 + D_800E4274,
+                         temp_a2_2 + 8 + D_800E4274);
+    temp_a2_3 = *arg0 * 0x18;
+    FieldEntityVectorSub((s32*)0x1F800000, temp_a2_3 + D_800E4274,
+                         temp_a2_3 + 0x10 + D_800E4274);
+    temp_v1 = *arg0;
+    temp_a1 = *(s32*)0x1F800030;
+    temp_a0 = (temp_v1 * 0x18) + D_800E4274;
+    temp_a2_4 = *(s32*)0x1F800034;
+    temp_t1 = ((temp_a1 - temp_a0->unk8) * *(s32*)0x1F800014) -
+              ((temp_a2_4 - temp_a0->unkA) * *(s32*)0x1F800010);
+    temp_a0_2 = ((temp_a1 - temp_a0->unk10) * *(s32*)0x1F800024) -
+                ((temp_a2_4 - temp_a0->unk12) * *(s32*)0x1F800020);
+    if ((((temp_a1 - temp_a0->unk0) * *(s32*)0x1F800004) -
+         ((temp_a2_4 - temp_a0->unk2) * *(s32*)0x1F800000)) >= 0) {
+        if (temp_t1 >= 0) {
+            if (temp_a0_2 < 0) {
+                if (temp_t1 < 0) {
+                    goto block_15;
+                }
+                if (temp_a0_2 < 0) {
+                    var_a0 = ((temp_v1 * 6) + D_80114458)->unk4;
+                    temp_v0 = (s32)(var_a0 << 0x10) >> 0x13;
+                    if (((s16)var_a0 >= 0) &&
+                        !(((s32) * (&D_8009ACA6 + temp_v0) >>
+                           ((s16)var_a0 - (temp_v0 * 8))) &
+                          1)) {
+                        goto block_23;
+                    }
+                    arg3->unk0 = (s32) * (s32*)0x1F800020;
+                    arg3->unk4 = (s32) * (s32*)0x1F800024;
+                    arg3->unk8 = (s32) * (s32*)0x1F800028;
+                    var_s3 = -8;
+                    if (((*(s32*)0x1F800020 * arg2->unk0) +
+                         (*(s32*)0x1F800024 * arg2->unk4)) >= 0) {
+                        var_s3 = 8;
+                    }
+                    var_v0_3 = 2;
+                    goto block_27;
+                }
+                goto loop_5;
+            }
+        } else {
+        block_15:
+            var_a0 = ((temp_v1 * 6) + D_80114458)->unk2;
+            temp_v0_2 = (s32)(var_a0 << 0x10) >> 0x13;
+            if (((s16)var_a0 < 0) || (((s32) * (&D_8009ACA6 + temp_v0_2) >>
+                                       ((s16)var_a0 - (temp_v0_2 * 8))) &
+                                      1)) {
+                arg3->unk0 = (s32) * (s32*)0x1F800010;
+                arg3->unk4 = (s32) * (s32*)0x1F800014;
+                arg3->unk8 = (s32) * (s32*)0x1F800018;
+                var_s3 = -8;
+                if (((*(s32*)0x1F800010 * arg2->unk0) +
+                     (*(s32*)0x1F800014 * arg2->unk4)) >= 0) {
+                    var_s3 = 8;
+                }
+                var_v0_3 = 1;
+            block_27:
+                D_801144CC = var_v0_3;
+                D_80113F28 = *arg0;
+            } else {
+                goto block_23;
+            }
+        }
+    } else {
+        var_a0 = *((temp_v1 * 6) + D_80114458);
+        temp_v0_3 = (s32)(var_a0 << 0x10) >> 0x13;
+        if (((s16)var_a0 < 0) || (((s32) * (&D_8009ACA6 + temp_v0_3) >>
+                                   ((s16)var_a0 - (temp_v0_3 * 8))) &
+                                  1)) {
+            arg3->unk0 = (s32) * (s32*)0x1F800000;
+            arg3->unk4 = (s32) * (s32*)0x1F800004;
+            arg3->unk8 = (s32) * (s32*)0x1F800008;
+            var_s3 = -8;
+            if (((*(s32*)0x1F800000 * arg2->unk0) +
+                 (*(s32*)0x1F800004 * arg2->unk4)) >= 0) {
+                var_s3 = 8;
+            }
+            D_801144CC = 0;
+            D_80113F28 = *arg0;
+        } else {
+        block_23:
+            *arg0 = var_a0;
+            goto loop_5;
+        }
+    }
+    arg1->unk8 = FieldEntityCalculateZ(
+        (s32*)0x1F800000, (s32*)0x1F800010, (s32*)0x1F800030,
+        (*arg0 * 0x18) + D_800E4274);
+    return var_s3;
+}
+#endif
 
 void FieldEntityVectorSub(s32* arg0, s16* arg1, s16* arg2) {
     arg0[0] = arg1[0] - arg2[0];
@@ -293,7 +756,84 @@ s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
+/* Walk the map's 32 trigger lines against one entity and raise the script
+ * requests each is due. Entering a line's radius arms touch-on (and, if the
+ * entity crossed the line this frame and faces it within +/-64, push and
+ * isOnLine), leaving arms touch-off. Returns 1 if any line is in range. The
+ * crossing test is the four-way sign ladder; the walking flag pointer is the
+ * regalloc wall. Codegen pinned via MASPSX_OVERRIDE; the #else is verified C.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
+#else
+u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
+    s32* from;
+    s32* to;
+    s32* nearest;
+    FieldLine* line;
+    s32 sqrDist;
+    s32 crossFrom;
+    s32 crossTo;
+    u8 hit;
+    s32 i;
+
+    from = (s32*)0x1F800000;
+    to = (s32*)0x1F800010;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    to[0] = dest->vx;
+    to[1] = dest->vy;
+    to[2] = entity->PosZ >> 12;
+    hit = 0;
+    for (i = 0; i < 32; i++) {
+        line = &lines[i];
+        if (line->isActive != 1) {
+            continue;
+        }
+        line->isOnLine = 0;
+        sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            hit = 1;
+            if (line->touch == 0) {
+                line->requestTouchOnScript = 1;
+            }
+            line->touch = 1;
+            crossFrom =
+                (line->pos.x2 - line->pos.x1) * (from[1] - line->pos.y1) -
+                (from[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
+            crossTo = (line->pos.x2 - line->pos.x1) * (to[1] - line->pos.y1) -
+                      (to[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
+            if (!((crossFrom >= 0 && crossTo < 0) ||
+                  (crossTo >= 0 && crossFrom < 0) ||
+                  (crossFrom > 0 && crossTo <= 0) ||
+                  (crossTo > 0 && crossFrom <= 0))) {
+                line->across = 1;
+            }
+            if (nearest[0] != from[0] || nearest[1] != from[1]) {
+                line->proximityAngle = FieldEntityDirByVec(
+                    (VECTOR*)from, (VECTOR*)nearest, &sqrDist);
+                if ((u8)(line->proximityAngle - entity->MoveDir + 0x40) >=
+                    0x80) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            line->requestPushScript = 1;
+            line->isOnLine = 1;
+        } else {
+            if (line->touch == 1) {
+                line->requestTouchOffScript = 1;
+            }
+            line->touch = 0;
+        }
+    }
+    return hit;
+}
+#endif
 
 /* Walk the map's 32 trigger lines against one entity and raise the script
  * requests each one is due. Entering a line's radius arms its touch-on script
@@ -482,7 +1022,78 @@ s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
 #endif
 
 const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+/* Walk the 12 background triggers against one entity and arm/disarm each it
+ * crosses or comes near. In-proximity arms directly when the entity stands on
+ * the line, else needs the entity facing it within +/-64; crossing types 4/5
+ * arm/disarm on the back-side sign test. Each state change plays the trigger's
+ * sound effect. Verified C kept as the #else; codegen pinned via
+ * MASPSX_OVERRIDE (the dual walking-pointer regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+#else
+void FieldEntityTriggerCheck(
+    FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
+    s16 seIds[4];
+    s32* from;
+    s32* nearest;
+    FieldBgTrigger* trigger;
+    s32 sqrDist;
+    s32 cross;
+    u8 dir;
+    s32 i;
+
+    memcpy(seIds, (void*)D_800A00BC, 8);
+    from = (s32*)0x1F800000;
+    nearest = (s32*)0x1F800020;
+    from[0] = entity->PosX >> 12;
+    from[1] = entity->PosY >> 12;
+    from[2] = entity->PosZ >> 12;
+    for (i = 0; i < 12; i++) {
+        trigger = &triggers[i];
+        if (trigger->entityId == 0xFF) {
+            continue;
+        }
+        sqrDist = FieldEntitySqrDistToLine((FieldLine*)trigger, from, nearest);
+        if (sqrDist != -1 &&
+            sqrDist < entity->SolidRange * entity->SolidRange) {
+            if (from[0] == nearest[0] && from[1] == nearest[1]) {
+                if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                    func_8001117C(seIds[trigger->unk0F]);
+                }
+                continue;
+            }
+            dir =
+                FieldEntityDirByVec((VECTOR*)from, (VECTOR*)nearest, &sqrDist);
+            if ((u8)(dir - entity->MoveDir + 0x40) >= 0x80) {
+                continue;
+            }
+            if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+            continue;
+        }
+        if (trigger->type >= 4) {
+            cross = (trigger->pos.x2 - trigger->pos.x1) *
+                        (from[1] - trigger->pos.y1) -
+                    (from[0] - trigger->pos.x1) *
+                        (trigger->pos.y2 - trigger->pos.y1);
+            if (cross > 0) {
+                continue;
+            }
+        }
+        if (trigger->type == 2 || trigger->type == 4) {
+            if (FieldEntityBgTriggerActivate(trigger, 1) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+        if (trigger->type == 3 || trigger->type == 5) {
+            if (FieldEntityBgTriggerActivate(trigger, 0) == 1) {
+                func_8001117C(seIds[trigger->unk0F]);
+            }
+        }
+    }
+}
+#endif
 
 /* FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
  * the C matches, but gcc precedes the switch's jump table with `.align 3` and
@@ -518,7 +1129,38 @@ void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
 /////////////////////////////////////////////////
 
 const u32 D_800A00DC[] = {0x00000000};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+/* Top-level field model loader: build the FieldModelData from the loaded model
+ * header, stream the field's model set off the CD, load the global and local
+ * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
+ * state. Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+#else
+void FieldModelLoadAndInit(void) {
+    FieldModelData* data;
+    s32 i;
+
+    D_800DFCA0 = (u_long*)0x80128000;
+    data = g_FieldModelData;
+    FieldModelStructInit((FieldModelFileDesc*)D_8007E770, data);
+    DS_read(g_FieldLzsInfo[g_CurrentFieldIndex * 6],
+            g_FieldLzsInfo[g_CurrentFieldIndex * 6 + 1], (u32*)0x80128000,
+            NULL);
+    while (SystemCdromReadChain() != 0) {
+    }
+    D_80075E10 = (u32)FieldModelLoadGlobalModels(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10, 1);
+    ((s32*)0x1F800000)[0] = (s32)D_800DF08C;
+    ((s32*)0x1F800000)[1] = (s32)D_800DF0D4;
+    D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
+        g_FieldModelData, D_8007E770, (u8*)D_80075E10);
+    for (i = 0; i < g_FieldModelData->modelCount; i++) {
+        KawaiLoadEyesMouthTexToVram(
+            &g_FieldModelData->modelEntries[i], (u8*)0x1F800000);
+    }
+    KawaiClearData();
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", HandleKawaiDataInModel);
 
@@ -742,7 +1384,164 @@ u8 FieldGetNextRandomU8(void) {
     return g_RandomTable[D_80071C20];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBattleCheck);
+extern s8 D_800716D0;
+extern u16 D_8007173C;
+extern /*?*/ s32 D_80074F14;
+extern s16 D_8007E774;
+extern s8 D_8007EBC8;
+extern s16 D_8009ABF6;
+extern u8 D_8009AC30;
+extern u8 D_8009C6D8;
+
+/* Check for a random or scripted battle this frame: roll the encounter, pick
+ * the battle from the field's encounter table, and kick off the transition if
+ * one triggers. m2c seed; residual is the encounter-table regalloc and the
+ * divide scheduling. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBattleCheck);
+#else
+void FieldBattleCheck(void) {
+    s16 temp_v0;
+    s16 var_v0;
+    s32 temp_s0;
+    s32 temp_v1;
+    s32 var_a0;
+    s32 var_a0_2;
+    s32 var_a1;
+    s32 var_a1_2;
+    s32 var_s0;
+    s32 var_s0_2;
+    s32 var_s0_3;
+    s32 var_s1;
+    s32 var_v0_2;
+    s32 var_v0_3;
+    u16 temp_a0;
+    u16 temp_a1;
+    u16 temp_v1_2;
+    u16 temp_v1_3;
+    u32 temp_a0_2;
+    u32 temp_a2;
+    u32 temp_a2_2;
+    u32 temp_a2_3;
+
+    if (D_8009AC30 == 0) {
+        var_s1 = g_FieldEncounters;
+    } else {
+        var_s1 = g_FieldEncounters + 0x18;
+    }
+    D_8009C6D8 += 0x20;
+    if (D_8009C6D8 == 0) {
+        func_800262D8();
+        Savemap.memory_bank_4[6].unk0 = (u8)(Savemap.memory_bank_4[6].unk0 + 1);
+        if ((Savemap.memory_bank_4[6].unk0 == 0) &&
+            (Savemap.memory_bank_4[6].unk1 != 0xFF)) {
+            Savemap.memory_bank_4[6].unk1 =
+                (u8)(Savemap.memory_bank_4[6].unk1 + 1);
+        }
+        temp_a0 = var_s1->unk0;
+        if ((temp_a0 & 1) && (g_FieldMovieStreamActive == 0) &&
+            (D_8009AC2F == 0)) {
+            D_8007173C += (s32) * (&D_80074F14 + (g_PlayerModelId * 0x84)) /
+                          (s32)(temp_a0 >> 8);
+            if ((u32)(FieldGetRandomU8FromList() & 0xFF) <
+                (u32)(D_80062F1B & 0x7F)) {
+                D_800716D0 = 4;
+            } else {
+                D_800716D0 = 0;
+            }
+            if ((u32)(FieldGetRandomU8FromList() & 0xFF) <
+                (u32)((u32)(D_8007173C * D_80062F19) >> 0xC)) {
+                StopFieldMapPreload();
+                D_8009ABF5 = 2;
+                D_8007EBC8 = 1;
+                temp_a0_2 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
+                if (!(D_80062F1B & 0x80)) {
+                    var_s0 = (s32)(var_s1->unkE << 0x10) >> 0x1A;
+                } else {
+                    var_s0 = (s32)(var_s1->unkE << 0x10) >> 0x1B;
+                }
+                if ((u32)(temp_a0_2 & 0xFF) < (u32)(var_s0 & 0xFF)) {
+                    D_800716D0 = 0;
+                    var_v0 = var_s1->unkE & 0x3FF;
+                    goto block_31;
+                }
+                if (!(D_80062F1B & 0x80)) {
+                    var_v0_2 = (s32)(var_s1->unk10 << 0x10) >> 0x1A;
+                } else {
+                    var_v0_2 = (s32)(var_s1->unk10 << 0x10) >> 0x1B;
+                }
+                temp_s0 = var_s0 + var_v0_2;
+                temp_a2 = temp_a0_2 & 0xFF;
+                if (temp_a2 < (u32)(temp_s0 & 0xFF)) {
+                    D_800716D0 = 0;
+                    var_v0 = var_s1->unk10 & 0x3FF;
+                    goto block_31;
+                }
+                temp_a1 = var_s1->unk12;
+                temp_v1 = temp_s0 + ((s32)(temp_a1 << 0x10) >> 0x1A);
+                if (temp_a2 < (u32)(temp_v1 & 0xFF)) {
+                    D_8009ABF6 = temp_a1 & 0x3FF;
+                    return;
+                }
+                if (!(D_80062F1B & 0x80)) {
+                    var_v0_3 = (s32)(var_s1->unk14 << 0x10) >> 0x1A;
+                } else {
+                    var_v0_3 = (s32)(var_s1->unk14 << 0x10) >> 0x1B;
+                }
+                if ((u32)(temp_a0_2 & 0xFF) <
+                    (u32)((temp_v1 + var_v0_3) & 0xFF)) {
+                    var_v0 = var_s1->unk14 & 0x3FF;
+                block_31:
+                    D_8009ABF6 = var_v0;
+                    return;
+                }
+                var_s0_2 = 0;
+                var_a0 = 0;
+                temp_a2_2 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
+                var_a1 = var_s1;
+                D_8009ABF6 = var_s1->unkC & 0x3FF;
+            loop_34:
+                temp_v1_2 = var_a1->unk2;
+                var_s0_2 += (s32)(temp_v1_2 << 0x10) >> 0x1A;
+                if (temp_a2_2 >= (u32)(var_s0_2 & 0xFF)) {
+                    var_a0 += 1;
+                    var_a1 += 2;
+                    if (var_a0 < 5) {
+                        goto loop_34;
+                    }
+                } else {
+                    D_8009ABF6 = temp_v1_2 & 0x3FF;
+                }
+                if (D_8009ABF6 != D_8007E774) {
+                    D_8007E774 = D_8009ABF6;
+                    return;
+                }
+                var_s0_3 = 0;
+                var_a0_2 = 0;
+                temp_a2_3 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
+                var_a1_2 = var_s1;
+                D_8009ABF6 = var_s1->unkC & 0x3FF;
+            loop_40:
+                temp_v1_3 = var_a1_2->unk2;
+                var_s0_3 += (s32)(temp_v1_3 << 0x10) >> 0x1A;
+                var_a0_2 += 1;
+                if (temp_a2_3 >= (u32)(var_s0_3 & 0xFF)) {
+                    var_a1_2 += 2;
+                    if (var_a0_2 >= 5) {
+
+                    } else {
+                        goto loop_40;
+                    }
+                } else {
+                    temp_v0 = temp_v1_3 & 0x3FF;
+                    D_8009ABF6 = temp_v0;
+                    D_8007E774 = temp_v0;
+                }
+            }
+        }
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_arrow.c
@@ -763,7 +1562,115 @@ void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
     SetDrawMode(dm, 0, 1, GetTPage(0, 0, 0x3C0, 0x100), NULL);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
+extern u16 D_8011446C;
+
+/* Project the field-exit-arrow marker positions (the per-trigger 3D points)
+ * through the camera and add a sprite packet for each visible one to the OT,
+ * in both the trigger-arrow and the field-exit sets. m2c seed; the residual is
+ * the OT-link store scheduling and the GTE RotTransPers arg setup. Codegen
+ * pinned via MASPSX_OVERRIDE pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
+#else
+void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
+    u16 sp10;
+    u16 sp12;
+    u16 sp14;
+    s32 sp18;
+    s32 sp1C;
+    s16 var_s4;
+    s16 var_s4_2;
+    s16 var_v0;
+    s16 var_v0_3;
+    s32 temp_a0_2;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_s0;
+    s32 temp_s0_2;
+    s32 temp_s3;
+    s32 var_v0_2;
+    s32 var_v1;
+    void* temp_a0;
+    void* temp_a1_2;
+    void* temp_s0_3;
+    void* temp_s1;
+    void* temp_v1;
+
+    if (((*g_FieldExitArrowState == 1) && (g_FieldAnimLock == 0)) ||
+        (*g_FieldExitArrowState == 2)) {
+        var_s4 = 0;
+        PushMatrix();
+        SetRotMatrix(arg1);
+        SetTransMatrix(arg1);
+        var_v1 = 0 << 0x10;
+        do {
+            temp_s0 = var_v1 >> 0x10;
+            var_v0 = var_s4 + 1;
+            if (((g_FieldTriggers + temp_s0)->unk218 == 1) &&
+                ((temp_a0 = (temp_s0 * 0x18) + arg2,
+                  temp_a1 = (s32)(temp_a0->unk0 + temp_a0->unk6) / 2,
+                  sp10 = (u16)temp_a1,
+                  temp_a2 = (s32)(temp_a0->unk2 + temp_a0->unk8) / 2,
+                  sp12 = (u16)temp_a2,
+                  sp14 = (u16)((s32)(temp_a0->unk4 + temp_a0->unkA) / 2),
+                  ((temp_a1 << 0x10) != 0)) ||
+                 (var_v0 = var_s4 + 1, ((temp_a2 << 0x10) != 0)))) {
+                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
+                temp_a0_2 = temp_s0 * 0x10;
+                temp_a1_2 = temp_a0_2 + arg0;
+                temp_a1_2->unk400D = 0xD0;
+                temp_a1_2->unk400C = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
+                temp_a1_2->unk4008 = (s16)(sp10 - 7);
+                temp_a1_2->unk400A = (s16)(sp12 - 8);
+                temp_a1_2->unk4000 = (s32)((temp_a1_2->unk4000 & 0xFF000000) |
+                                           (arg0->unk0 & 0xFFFFFF));
+                arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
+                                   ((arg0 + (temp_a0_2 + 0x4000)) & 0xFFFFFF));
+                var_v0 = var_s4 + 1;
+            }
+            var_s4 = var_v0;
+            var_v1 = var_s4 << 0x10;
+        } while (var_v0 < 0xC);
+        var_s4_2 = 0;
+        var_v0_2 = 0 << 0x10;
+        do {
+            temp_s0_2 = var_v0_2 >> 0x10;
+            temp_s3 = temp_s0_2 * 0x10;
+            temp_v1 = g_FieldTriggers + temp_s3;
+            var_v0_3 = var_s4_2 + 1;
+            if (temp_v1->unk230 != 0) {
+                sp10 = temp_v1->unk224;
+                sp12 = temp_v1->unk228;
+                sp14 = temp_v1->unk22C;
+                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
+                temp_s1 = temp_s3 + arg0;
+                temp_s1->unk40CD = 0xD0;
+                temp_s1->unk40CC = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
+                temp_s0_3 = arg0 + ((temp_s0_2 + 0xC) * 0x10);
+                temp_s0_3->unk4008 = (s16)(sp10 - 7);
+                temp_s0_3->unk400A = (s16)(sp12 - 8);
+                if ((g_FieldTriggers + temp_s3)->unk230 == 2) {
+                    temp_s0_3->unk400E = GetClut(0x100, 0x1E8);
+                }
+                temp_s1->unk40C0 = (s32)((temp_s1->unk40C0 & 0xFF000000) |
+                                         (arg0->unk0 & 0xFFFFFF));
+                arg0->unk0 =
+                    (s32)((arg0->unk0 & 0xFF000000) |
+                          ((s32)(arg0 + (temp_s3 + 0x40C0)) & 0xFFFFFF));
+                var_v0_3 = var_s4_2 + 1;
+            }
+            var_s4_2 = var_v0_3;
+            var_v0_2 = var_s4_2 << 0x10;
+        } while (var_v0_3 < 0xC);
+        PopMatrix();
+        arg0->unk4180 =
+            (s32)((arg0->unk4180 & 0xFF000000) | (arg0->unk0 & 0xFFFFFF));
+        arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
+                           ((s32)(arg0 + 0x4180) & 0xFFFFFF));
+        D_8011446C += 1;
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_model.c

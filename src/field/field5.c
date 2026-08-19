@@ -2212,7 +2212,114 @@ void FieldDebugRender(u_long* ot) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderPage);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderString);
+extern /*?*/ s32 D_800E1036;
+
+/* Render one debug-page string's characters as GPU sprites into the render
+ * buffer. Decodes each FF7 text char to a glyph index (the switch is the
+ * jump table), computes the UV coords, links the packet into the OT. m2c
+ * seed, semantically close; the residual is regalloc across the jump-table
+ * dispatch and the OT-link store ordering. Codegen pinned via MASPSX_OVERRIDE
+ * pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugRenderString);
+#else
+void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
+    s16 var_t3;
+    s32 temp_a0;
+    s32 temp_a1;
+    s32 temp_t0;
+    s32 temp_t5;
+    s32* temp_a0_2;
+    u32 var_a0;
+    u8 temp_v0;
+    u8 temp_v1;
+    u8* temp_a2;
+    u8* var_t2;
+
+    var_t2 = arg2;
+    var_t3 = arg3;
+    if (*var_t2 != 0) {
+        temp_t5 = arg0 * 0x17A;
+    loop_2:
+        if ((((*(D_800E0748 + temp_t5) + *(D_800E074C + temp_t5)) - 8) >=
+             var_t3) &&
+            (g_FieldDebugRChars < 0x158)) {
+            temp_v0 = *var_t2;
+            switch (temp_v0) {
+            case 0x20:
+                var_a0 = 0x3F;
+                break;
+            case 0x3A:
+                var_a0 = 0xD5;
+                break;
+            case 0x2E:
+                var_a0 = 0xB2;
+                break;
+            case 0x2B:
+                var_a0 = 0xB3;
+                break;
+            case 0x2F:
+                var_a0 = 0xD4;
+                break;
+            case 0x2D:
+                var_a0 = 0xD0;
+                break;
+            case 0x2A:
+                var_a0 = 0xCF;
+                break;
+            case 0x21:
+                var_a0 = 0xAE;
+                break;
+            case 0x3F:
+                var_a0 = 0xAF;
+                break;
+            case 0x3D:
+                var_a0 = 0xDA;
+                break;
+            case 0x23:
+                var_a0 = 0xD6;
+                break;
+            case 0x3E:
+                var_a0 = 0xD9;
+                break;
+            default:
+                temp_v1 = *var_t2;
+                if (temp_v1 < 0x3AU) {
+                    var_a0 = *var_t2 + 3;
+                } else if (temp_v1 >= 0x61U) {
+                    var_a0 = *var_t2 + 0x53;
+                } else {
+                    var_a0 = *var_t2 + 0x73;
+                }
+                break;
+            }
+            var_t2 += 1;
+            D_800E1028[(g_FieldDebugRb * 0x1580) + (g_FieldDebugRChars * 0x10)]
+                .unkC = (s8)(((var_a0 & 0xF) * 8) - 0x80);
+            D_800E1028[(g_FieldDebugRb * 0x1580) + (g_FieldDebugRChars * 0x10)]
+                .unkD = (s8)(((var_a0 >> 1) & 0x78) - 0x80);
+            temp_a1 = g_FieldDebugRb * 0x1580;
+            temp_t0 = g_FieldDebugRChars * 0x10;
+            temp_a0 = temp_a1 + temp_t0;
+            temp_a2 = &D_800E1028[temp_a0];
+            temp_a2->unk8 = var_t3;
+            temp_a2->unkA = (s16)arg4;
+            *(&D_800E1036 + temp_a0) =
+                D_800E4200[*(temp_t5 + D_800E08A8 + arg1)];
+            temp_a0_2 = (g_FieldDebugRb * 0x1C) + (arg0 * 4) + D_800E41C8;
+            temp_a2->unk0 =
+                (s32)((temp_a2->unk0 & 0xFF000000) | (*temp_a0_2 & 0xFFFFFF));
+            g_FieldDebugRChars += 1;
+            *temp_a0_2 = (*temp_a0_2 & 0xFF000000) |
+                         ((s32)(temp_a1 + (temp_t0 + D_800E1028)) & 0xFFFFFF);
+            var_t3 += 8;
+            if (*var_t2 != 0) {
+                goto loop_2;
+            }
+        }
+    }
+}
+#endif
 
 /* Append a line to a debug page (no colour), wrapping back to the top row once
  * the page's pixel height can no longer hold another 10-pixel row. Same

@@ -165,11 +165,11 @@ static void EscapeCaptureScreen(void) {
  *
  * The slot tie-break has since been searched exhaustively rather than randomly,
  * with the `giv-hoist`, `addr-eval-order` and `cse-split` recipes this body
- * produced (docs/decomp/PERMUTER_MACROS.md): 8100 candidates over the hoist site of
- * each of `vy`, `vx`, `m` and `c0`, five m/n split patterns for each of the two
- * v-coordinate statements, and every declaration order. It ran to completion
- * and found nothing below the score of this body -- several distinct points tie
- * with it, none beat it.
+ * produced (docs/decomp/PERMUTER_MACROS.md): 8100 candidates over the hoist
+ * site of each of `vy`, `vx`, `m` and `c0`, five m/n split patterns for each of
+ * the two v-coordinate statements, and every declaration order. It ran to
+ * completion and found nothing below the score of this body -- several distinct
+ * points tie with it, none beat it.
  *
  * That space was empty because the knob is not in it. Reading cc1's own RTL
  * (`-dL`, see CLAUDE.md) settles what the two slots are: the row loop's

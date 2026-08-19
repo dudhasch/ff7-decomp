@@ -9,7 +9,219 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiExecute);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
+extern u8 D_800DF114;
+extern /*?*/ s32 D_800DF520;
+
+/* Apply the GTE lighting to each vertex colour of a model's packets: for each
+ * part's polygons run the NormalColorColSingle GTE op and write the result
+ * into the packet's RGB. m2c seed; the residual is the GTE intrinsic codegen
+ * (lwc2/nccs/swc2) and the per-part stride walking. Pinned pending a permuter
+ * pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE(
+    "asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
+#else
+void KawaiSetVertexColorFromLighting(void* arg0) {
+    s32* var_a3;
+    u32 temp_t3;
+    u32 temp_t3_2;
+    u32 temp_t3_3;
+    u32 temp_t3_4;
+    u32 temp_t3_5;
+    u32 temp_t3_6;
+    u32 temp_t3_7;
+    u32 temp_t3_8;
+    u32 temp_t7;
+    u32 temp_t7_2;
+    u32 var_t0;
+    u32 var_t0_2;
+    u32 var_t0_3;
+    u32 var_t0_4;
+    u32 var_t0_5;
+    u32 var_t0_6;
+    u32 var_t0_7;
+    u32 var_t0_8;
+    u32 var_v1;
+    u32 var_v1_2;
+    u32 var_v1_3;
+    u32 var_v1_4;
+    u8* var_a1;
+    u8* var_a1_2;
+    u8* var_a1_3;
+    u8* var_a1_4;
+    u8* var_t2;
+    u8* var_t2_2;
+    u8* var_t2_3;
+    u8* var_t2_4;
+
+    var_a3 = arg0->unk1C;
+    if (D_800DF114 != 0) {
+        var_a3 += arg0->unk16;
+    }
+    temp_t7 = arg0->unk4;
+    temp_t3 = temp_t7 & 0xFF;
+    var_t0 = 0;
+    if (temp_t3 != 0) {
+        var_t2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1 += 1;
+                } while (var_v1 < 4U);
+                *var_t2 = *var_t2;
+            }
+            var_t0 += 1;
+            var_t2 += 0x34;
+            var_a3 += 0x34;
+        } while (var_t0 < temp_t3);
+    }
+    temp_t3_2 = (u32)(temp_t7 & 0xFF00) >> 8;
+    var_t0_2 = 0;
+    if (temp_t3_2 != 0) {
+        var_t2_2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_2 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_2 += 1;
+                } while (var_v1_2 < 3U);
+                *var_t2_2 = *var_t2_2;
+            }
+            var_t0_2 += 1;
+            var_t2_2 += 0x28;
+            var_a3 += 0x28;
+        } while (var_t0_2 < temp_t3_2);
+    }
+    temp_t3_3 = (temp_t7 >> 0x10) & 0xFF;
+    var_t0_3 = 0;
+    if (temp_t3_3 != 0) {
+        var_a1 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1 = *var_a1;
+            }
+            var_t0_3 += 1;
+            var_a1 += 0x28;
+            var_a3 += 0x28;
+        } while (var_t0_3 < temp_t3_3);
+    }
+    temp_t3_4 = temp_t7 >> 0x18;
+    var_t0_4 = 0;
+    if (temp_t3_4 != 0) {
+        var_a1_2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_2 = *var_a1_2;
+            }
+            var_t0_4 += 1;
+            var_a1_2 += 0x20;
+            var_a3 += 0x20;
+        } while (var_t0_4 < temp_t3_4);
+    }
+    temp_t7_2 = arg0->unk8;
+    temp_t3_5 = temp_t7_2 & 0xFF;
+    var_t0_5 = 0;
+    if (temp_t3_5 != 0) {
+        var_a1_3 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_3 = *var_a1_3;
+            }
+            var_t0_5 += 1;
+            var_a1_3 += 0x14;
+            var_a3 += 0x14;
+        } while (var_t0_5 < temp_t3_5);
+    }
+    temp_t3_6 = (u32)(temp_t7_2 & 0xFF00) >> 8;
+    var_t0_6 = 0;
+    if (temp_t3_6 != 0) {
+        var_a1_4 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_4 = *var_a1_4;
+            }
+            var_t0_6 += 1;
+            var_a1_4 += 0x18;
+            var_a3 += 0x18;
+        } while (var_t0_6 < temp_t3_6);
+    }
+    temp_t3_7 = (temp_t7_2 >> 0x10) & 0xFF;
+    var_t0_7 = 0;
+    if (temp_t3_7 != 0) {
+        var_t2_3 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_3 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_3 += 1;
+                } while (var_v1_3 < 3U);
+                *var_t2_3 = *var_t2_3;
+            }
+            var_t0_7 += 1;
+            var_t2_3 += 0x1C;
+            var_a3 += 0x1C;
+        } while (var_t0_7 < temp_t3_7);
+    }
+    temp_t3_8 = temp_t7_2 >> 0x18;
+    var_t0_8 = 0;
+    if (temp_t3_8 != 0) {
+        var_t2_4 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_4 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_4 += 1;
+                } while (var_v1_4 < 4U);
+                *var_t2_4 = *var_t2_4;
+            }
+            var_t0_8 += 1;
+            var_t2_4 += 0x24;
+            var_a3 += 0x24;
+        } while (var_t0_8 < temp_t3_8);
+    }
+}
+#endif
 
 /* Applies one unaligned little-endian u16 per colour channel to every part of
  * the model, and puts the seventh byte in the scratchpad for the handwritten
@@ -131,17 +343,452 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToPolyColor);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+/* Set the semi-transparency/shade bits of every packet of every part of one
+ * model. Walks each part's double-buffered packet area (the two ordering-table
+ * copies) and toggles the ABE and shade bits of each primitive's tag byte. The
+ * 8 unrolled primitive-type blocks (strides 34/28/28/20/14/18/1C/24) and the
+ * dual walking-pointer tag/base induction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+#else
+s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    u8* part;
+    u8* base;
+    u8* tag;
+    u32 partCount;
+    u32 enable;
+    u32 i;
+    u32 ot;
+    u32 j;
+    u32 n;
+
+    parts = model->modelData + model->partsOffset;
+    partCount = model->partCount;
+    enable = data[0];
+    if (partCount == 0) {
+        return 1;
+    }
+    part = parts;
+    for (i = 0; i < partCount; i++, part += 0x20) {
+        for (ot = 0; ot < 2; ot++) {
+            base = *(u8**)(part + 0x1C);
+            if (ot != 0) {
+                base += *(u16*)(part + 0x16);
+            }
+            n = part[4];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x34, base += 0x34) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[5];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[6];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[7];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x20, base += 0x20) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[8];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x14, base += 0x14) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[9];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x18, base += 0x18) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[10];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x1C, base += 0x1C) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[11];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x24, base += 0x24) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+        }
+    }
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPktsBelowLvl);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+/* Per-KAWAI-slot colour fade record (16 slots, 0x3C each; only the first 0x14
+ * bytes are used by KawaiFadeModelColor). */
+typedef struct {
+    /* 0x00 */ s16 curR;
+    /* 0x02 */ s16 curG;
+    /* 0x04 */ s16 curB;
+    /* 0x06 */ s16 targetR;
+    /* 0x08 */ s16 targetG;
+    /* 0x0A */ s16 targetB;
+    /* 0x0C */ s16 deltaR;
+    /* 0x0E */ s16 deltaG;
+    /* 0x10 */ s16 deltaB;
+    /* 0x12 */ u8 unk12;
+    /* 0x13 */ u8 done;
+} KawaiColorFadeSlot;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+extern KawaiColorFadeSlot D_800DFE3C[16];
+extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+/* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
+ * the slot from the descriptor; data[0]==1 exports the current colour to the
+ * scratch quad, pushes it to the packets, and advances each channel toward its
+ * target, clamping. Returns 1 while fading, 0 when done. The scratch-quad $at
+ * remat and the slot*0x3C strength reduction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+#else
+s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
+    KawaiColorFadeSlot* slot;
+    s32 done;
+
+    slot = &D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->curR = data[0x02] | (data[0x03] << 8);
+        slot->curG = data[0x04] | (data[0x05] << 8);
+        slot->curB = data[0x06] | (data[0x07] << 8);
+        slot->targetR = data[0x08] | (data[0x09] << 8);
+        slot->targetG = data[0x0A] | (data[0x0B] << 8);
+        slot->targetB = data[0x0C] | (data[0x0D] << 8);
+        slot->deltaR = data[0x0E] | (data[0x0F] << 8);
+        slot->deltaG = data[0x10] | (data[0x11] << 8);
+        slot->deltaB = data[0x12] | (data[0x13] << 8);
+        slot->unk12 = data[0x14];
+        slot->done = 0;
+        return 1;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->curR;
+        D_800DFE1C[1] = slot->curR >> 8;
+        D_800DFE1C[2] = slot->curG;
+        D_800DFE1C[3] = slot->curG >> 8;
+        D_800DFE1C[4] = slot->curB;
+        D_800DFE1C[5] = slot->curB >> 8;
+        D_800DFE1C[6] = slot->unk12;
+        KawaiSetColorToModelPkts(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->curR += slot->deltaR;
+        if (slot->deltaR >= 0) {
+            if (slot->curR >= slot->targetR) {
+                slot->curR = slot->targetR;
+                done |= 1;
+            }
+        } else if (slot->curR <= slot->targetR) {
+            slot->curR = slot->targetR;
+            done |= 1;
+        }
+        slot->curG += slot->deltaG;
+        if (slot->deltaG >= 0) {
+            if (slot->curG >= slot->targetG) {
+                slot->curG = slot->targetG;
+                done |= 2;
+            }
+        } else if (slot->curG <= slot->targetG) {
+            slot->curG = slot->targetG;
+            done |= 2;
+        }
+        slot->curB += slot->deltaB;
+        if (slot->deltaB >= 0) {
+            if (slot->curB >= slot->targetB) {
+                slot->curB = slot->targetB;
+                done |= 4;
+            }
+        } else if (slot->curB <= slot->targetB) {
+            slot->curB = slot->targetB;
+            done |= 4;
+        }
+        if (done == 7) {
+            slot->done++;
+        }
+        return 1;
+    }
+    return 0;
+}
+#endif
+
+/* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
+ * copies the 0x1E-byte descriptor into the slot: 11 GTE params (colour matrix
+ * data[0..2], light matrix data[3..0xA]) then eight LE u16 light/vertex colour
+ * pairs. data[0]==1 expands the slot into the D_800DFE1C scratch buffer (the
+ * pairs byte-wise, lo then hi) and calls the handwritten GTE driver. The slot
+ * reuses the KawaiFadeModelColor table's 0x3C stride but a flat lighting-blob
+ * layout. The apply arm re-materialises each scratch byte store through $at
+ * (the scratch-quad $at remat wall, same as KawaiFadeModelColor); codegen
+ * pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+#else
+s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
+    u8* slot;
+    u16 pair;
+
+    slot = (u8*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot[0x00] = data[0x02];
+        slot[0x01] = data[0x03];
+        slot[0x02] = data[0x04];
+        slot[0x03] = data[0x05];
+        slot[0x04] = data[0x06];
+        slot[0x05] = data[0x07];
+        slot[0x06] = data[0x08];
+        slot[0x07] = data[0x09];
+        slot[0x08] = data[0x0A];
+        slot[0x09] = data[0x0B];
+        slot[0x0A] = data[0x0C];
+        *(u16*)(slot + 0x0C) = data[0x0E] | (data[0x0F] << 8);
+        *(u16*)(slot + 0x0E) = data[0x10] | (data[0x11] << 8);
+        *(u16*)(slot + 0x10) = data[0x12] | (data[0x13] << 8);
+        *(u16*)(slot + 0x12) = data[0x14] | (data[0x15] << 8);
+        *(u16*)(slot + 0x14) = data[0x16] | (data[0x17] << 8);
+        *(u16*)(slot + 0x16) = data[0x18] | (data[0x19] << 8);
+        *(u16*)(slot + 0x18) = data[0x1A] | (data[0x1B] << 8);
+        *(u16*)(slot + 0x1C) = data[0x1E] | (data[0x1F] << 8);
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot[0];
+        D_800DFE1C[1] = slot[1];
+        D_800DFE1C[2] = slot[2];
+        D_800DFE1C[3] = slot[3];
+        D_800DFE1C[4] = slot[4];
+        D_800DFE1C[5] = slot[5];
+        D_800DFE1C[6] = slot[6];
+        D_800DFE1C[7] = slot[7];
+        D_800DFE1C[8] = slot[8];
+        D_800DFE1C[9] = slot[9];
+        D_800DFE1C[0x0A] = slot[0x0A];
+        pair = *(u16*)(slot + 0x0C);
+        D_800DFE1C[0x0B] = pair;
+        D_800DFE1C[0x0C] = pair >> 8;
+        pair = *(u16*)(slot + 0x0E);
+        D_800DFE1C[0x0D] = pair;
+        D_800DFE1C[0x0E] = pair >> 8;
+        pair = *(u16*)(slot + 0x10);
+        D_800DFE1C[0x0F] = pair;
+        D_800DFE1C[0x10] = pair >> 8;
+        pair = *(u16*)(slot + 0x12);
+        D_800DFE1C[0x11] = pair;
+        D_800DFE1C[0x12] = pair >> 8;
+        pair = *(u16*)(slot + 0x14);
+        D_800DFE1C[0x13] = pair;
+        D_800DFE1C[0x14] = pair >> 8;
+        pair = *(u16*)(slot + 0x16);
+        D_800DFE1C[0x15] = pair;
+        D_800DFE1C[0x16] = pair >> 8;
+        pair = *(u16*)(slot + 0x18);
+        D_800DFE1C[0x17] = pair;
+        D_800DFE1C[0x18] = pair >> 8;
+        D_800DFE1C[0x1B] = slot[0x1C];
+        KawaiSetCustomLightToModelPkts(model, D_800DFE1C);
+        return 0;
+    }
+    return 0;
+}
+#endif
+
+/* Fade a model's vertex colour over time below a light level (KAWAI
+ * sub-command). Four channels (cur@0/2/4/6, target@8/A/C/E, delta@10/12/14/16,
+ * unk18@0x18, done@0x19 in the 0x3C-stride slot table). data[0]==0 inits the
+ * slot from twelve LE u16 descriptor words; data[0]==1 exports the four cur
+ * channels + unk18 to the D_800DFE1C scratch buffer, pushes them to the
+ * below-level packets, then advances each channel toward its target with the
+ * sign-aware clamp and bumps done once all four reach 0xF. Returns 1 while
+ * fading, 0 when done. The scratch-quad $at remat in the apply arm is the wall
+ * (same as KawaiFadeModelColor); codegen pinned via MASPSX_OVERRIDE, #else is
+ * the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+#else
+typedef struct {
+    /* 0x00 */ u16 cur0;
+    /* 0x02 */ u16 cur1;
+    /* 0x04 */ u16 cur2;
+    /* 0x06 */ u16 cur3;
+    /* 0x08 */ s16 target0;
+    /* 0x0A */ s16 target1;
+    /* 0x0C */ s16 target2;
+    /* 0x0E */ s16 target3;
+    /* 0x10 */ s16 delta0;
+    /* 0x12 */ s16 delta1;
+    /* 0x14 */ s16 delta2;
+    /* 0x16 */ s16 delta3;
+    /* 0x18 */ u8 unk18;
+    /* 0x19 */ u8 done;
+} KawaiFadeBelowLvlSlot;
+
+s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
+    KawaiFadeBelowLvlSlot* slot;
+    s32 done;
+
+    slot = (KawaiFadeBelowLvlSlot*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->cur0 = data[0x02] | (data[0x03] << 8);
+        slot->cur1 = data[0x04] | (data[0x05] << 8);
+        slot->cur2 = data[0x06] | (data[0x07] << 8);
+        slot->cur3 = data[0x08] | (data[0x09] << 8);
+        slot->target0 = data[0x0A] | (data[0x0B] << 8);
+        slot->target1 = data[0x0C] | (data[0x0D] << 8);
+        slot->target2 = data[0x0E] | (data[0x0F] << 8);
+        slot->target3 = data[0x10] | (data[0x11] << 8);
+        slot->delta0 = data[0x12] | (data[0x13] << 8);
+        slot->delta1 = data[0x14] | (data[0x15] << 8);
+        slot->delta2 = data[0x16] | (data[0x17] << 8);
+        slot->delta3 = data[0x18] | (data[0x19] << 8);
+        slot->done = 0;
+        slot->unk18 = data[0x1A];
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->cur0;
+        D_800DFE1C[1] = slot->cur0 >> 8;
+        D_800DFE1C[2] = slot->cur1;
+        D_800DFE1C[3] = slot->cur1 >> 8;
+        D_800DFE1C[4] = slot->cur2;
+        D_800DFE1C[5] = slot->cur2 >> 8;
+        D_800DFE1C[6] = slot->cur3;
+        D_800DFE1C[7] = slot->cur3 >> 8;
+        D_800DFE1C[8] = slot->unk18;
+        KawaiSetColorToPktsBelowLvl(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->cur0 += slot->delta0;
+        if (slot->delta0 >= 0) {
+            if ((s16)slot->cur0 < slot->target0) {
+                goto cur0done;
+            }
+        } else if (slot->target0 < (s16)slot->cur0) {
+            goto cur0done;
+        }
+        slot->cur0 = slot->target0;
+        done |= 1;
+    cur0done:
+        slot->cur1 += slot->delta1;
+        if (slot->delta1 >= 0) {
+            if ((s16)slot->cur1 < slot->target1) {
+                goto cur1done;
+            }
+        } else if (slot->target1 < (s16)slot->cur1) {
+            goto cur1done;
+        }
+        slot->cur1 = slot->target1;
+        done |= 2;
+    cur1done:
+        slot->cur2 += slot->delta2;
+        if (slot->delta2 >= 0) {
+            if ((s16)slot->cur2 < slot->target2) {
+                goto cur2done;
+            }
+        } else if (slot->target2 < (s16)slot->cur2) {
+            goto cur2done;
+        }
+        slot->cur2 = slot->target2;
+        done |= 4;
+    cur2done:
+        slot->cur3 += slot->delta3;
+        if (slot->delta3 >= 0) {
+            if ((s16)slot->cur3 < slot->target3) {
+                goto cur3done;
+            }
+        } else if (slot->target3 < (s16)slot->cur3) {
+            goto cur3done;
+        }
+        slot->cur3 = slot->target3;
+        done |= 8;
+    cur3done:
+        if (done == 0xF) {
+            slot->done++;
+        }
+        return 0;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToModelPkts);
 
@@ -318,9 +965,365 @@ void FieldEventUpdate(s32 arg0) {
     UpdateFieldExitArrows(arg0);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
+extern /*?*/ s32 D_8007078C;
+extern s16 D_800716DC;
+extern /*?*/ s32 D_80071748;
+extern /*?*/ s32 D_80071A88;
+extern s8 D_80075F23;
+extern /*?*/ s32 D_8007E7AC;
+extern /*?*/ s32 D_8007E7AE;
+extern /*?*/ s32 D_8007E7B0;
+extern /*?*/ s32 D_8007E7B2;
+extern /*?*/ s32 D_8007E7B4;
+extern /*?*/ s32 D_8007E7B6;
+extern /*?*/ s32 D_8007E7B8;
+extern /*?*/ s32 D_8007E7B9;
+extern /*?*/ s32 D_8007E7BA;
+extern /*?*/ s32 D_8007E7BB;
+extern /*?*/ s32 D_8007E7BC;
+extern /*?*/ s32 D_8007E7BD;
+extern /*?*/ s32 D_8007E7BE;
+extern /*?*/ s32 D_8007E7BF;
+extern /*?*/ s32 D_8007E7C2;
+extern /*?*/ s32 D_800833F8;
+extern s16 D_80095D84;
+extern /*?*/ s32 D_8009A1C4;
+extern s8 D_8009AD38;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventRunInit);
+/* Zero and default-initialise the whole field runtime state: the entity table,
+ * the per-model flags, the script state, and the various counters. m2c seed
+ * (the ?* are unknown-typed pointers). Residual is the wide store scheduling.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
+#else
+void FieldInitDefaultValues(void) {
+    ? *var_t0;
+    ? *var_t1;
+    ? *var_t2;
+    s16* var_v1;
+    s32 var_a1;
+    s32 var_a2;
+    s32 var_a2_2;
+    s32 var_a3;
+    s32 var_a3_2;
+    s32 var_a3_3;
+    s32 var_a3_4;
+    s32 var_a3_5;
+    s32 var_a3_6;
+    s32 var_a3_7;
+    s32 var_a3_8;
+    s32 var_a3_9;
+    s32 var_v0;
+    s32 var_v0_2;
+    s32 var_v1_3;
+    s8* temp_a0;
+    s8* temp_v1;
+    s8* var_a0;
+    s8* var_v0_4;
+    u8(*var_t3)[8];
+    u8* temp_a1;
+    u8* var_v0_3;
+    u8* var_v1_2;
+    void* temp_v0;
+    void* temp_v0_2;
+    void* temp_v0_3;
+    void* temp_v0_4;
+    void* temp_v0_5;
+    void* temp_v0_6;
+    void* temp_v1_2;
+    void* temp_v1_3;
+    void* temp_v1_4;
+
+    D_8009C6E0->unk1 = 0;
+    D_8009C6E0->unk2 = 0;
+    D_8009C6E0->unk26 = 0;
+    D_8009C6E0->unk32 = 0;
+    D_8009C6E0->unk2E = 1;
+    D_8009C6E0->unk2A = 0;
+    D_8009C6E0->unk2C = 0;
+    D_8009C6E0->unk30 = 2;
+    D_80081DC4 = 0;
+    D_8009C6E0->unk28 = (s16)D_8009C6DC->unk3;
+    D_8009C6E0->unk33 = 0;
+    D_8009C6E0->unk34 = 0;
+    D_8009C6E0->unk35 = 0;
+    D_8009C6E0->unk3B = 0;
+    D_8009C6E0->unk36 = 0;
+    D_8009C6E0->unk37 = 0;
+    D_8009C6E0->unk3D = 0;
+    D_8009C6E0->unk48 = 0;
+    D_8009C6E0->unk44 = 0;
+    D_8009C6E0->unk40 = 0;
+    D_8009C6E0->unk3E = 0;
+    D_8009C6E0->unk3C = 0;
+    D_8009C6E0->unk12 = 0;
+    D_8009C6E0->unk13 = 0;
+    D_8009C6E0->unk14 = 0;
+    D_8009C6E0->unk8A = 0;
+    D_8009C6E0->unk18 = 0;
+    D_8009C6E0->unk1A = 0;
+    D_8009C6E0->unk98 = 0;
+    D_8009C6E0->unk8B = 0;
+    D_8009C6E0->unk99 = 0;
+    D_8009C6E0->unk3A = 0;
+    var_a3 = 0xFF;
+    D_8009C6E0->unk8E = 0;
+    D_8009C6E0->unk9C = 0;
+    D_8009C6E0->unk94 = 0;
+    D_8009C6E0->unkA2 = 0;
+    D_8009C6E0->unk96 = 0;
+    D_8009C6E0->unkA4 = 0;
+    D_8009C6E0->unk1D = 0;
+    var_a0 = &D_80075F23;
+    D_8009C6E0->unk10 = (u16)D_8009C6DC->unk8;
+    do {
+        *var_a0 = 0;
+        var_a3 -= 1;
+        var_a0 -= 1;
+    } while (var_a3 >= 0);
+    var_a3_2 = 0;
+    do {
+        var_a2 = 0;
+        if ((s32)D_8009C6DC->unk2 > 0) {
+            var_t3 = SavedScriptIds;
+            var_t2 = &D_80071A88;
+            var_t1 = &D_800833F8;
+            var_t0 = &D_80071748;
+            do {
+                temp_a1 = &(*var_t3)[var_a3_2];
+                var_t3 += 8;
+                temp_a0 = var_t2 + var_a3_2;
+                var_t2 += 8;
+                temp_v1 = var_t1 + var_a3_2;
+                var_t1 += 8;
+                *((var_a3_2 * 2) + var_t0) = 0;
+                *temp_v1 = 0;
+                *temp_a0 = 0xFF;
+                *temp_a1 = 0;
+                var_a2 += 1;
+                var_t0 += 0x10;
+            } while (var_a2 < (s32)D_8009C6DC->unk2);
+        }
+        var_a3_2 += 1;
+    } while (var_a3_2 < 8);
+    var_a3_3 = 0;
+    if ((s32)D_8009C6DC->unk2 > 0) {
+        var_v1 = &D_800716DC;
+        do {
+            *(&D_8009A1C4 + var_a3_3) = 7;
+            *(&D_8007EB98 + var_a3_3) = 0xFF;
+            *var_v1 = 0;
+            *(&D_80081D90 + var_a3_3) = 0;
+            *(&D_8007078C + var_a3_3) = 0xFF;
+            g_FieldScriptDebugEntities[var_a3_3] = 0;
+            var_a3_3 += 1;
+            var_v1 += 2;
+        } while (var_a3_3 < (s32)D_8009C6DC->unk2);
+    }
+    var_a3_4 = 0;
+    if ((s32)D_8009C6DC->unk3 > 0) {
+        var_a1 = 0;
+        do {
+            temp_v0 = var_a1 + D_8009C544;
+            temp_v0->unk36 = 0;
+            temp_v0->unk66 = 0;
+            temp_v0->unkC = 0;
+            temp_v0->unk10 = 0;
+            temp_v0->unk14 = 0;
+            temp_v0->unk72 = 0;
+            temp_v0->unk74 = 0;
+            (var_a1 + D_8009C544)->unk38 = 0;
+            (var_a1 + D_8009C544)->unk3B = 0;
+            (var_a1 + D_8009C544)->unk39 = 0;
+            (var_a1 + D_8009C544)->unk3A = 0;
+            temp_v0_2 = var_a1 + D_8009C544;
+            temp_v0_2->unk56 = 0;
+            temp_v0_2->unk3C = 0;
+            temp_v0_2->unk3E = 0;
+            temp_v0_2->unk40 = 0;
+            temp_v0_2->unk46 = 0;
+            temp_v0_2->unk4C = 0;
+            temp_v0_2->unk42 = 0;
+            temp_v0_2->unk48 = 0;
+            temp_v0_2->unk4E = 0;
+            temp_v0_2->unk44 = 0;
+            temp_v0_2->unk4A = 0;
+            temp_v0_2->unk50 = 0;
+            temp_v0_2->unk52 = 0;
+            temp_v0_2->unk54 = 0;
+            (var_a1 + D_8009C544)->unk5E = 0;
+            temp_v0_3 = var_a1 + D_8009C544;
+            temp_v0_3->unk60 = 0x10;
+            temp_v0_3->unk5C = 0;
+            temp_v0_3->unk78 = 0;
+            temp_v0_3->unk7C = 0;
+            temp_v0_3->unk80 = 0;
+            temp_v0_3->unk62 = 0;
+            temp_v0_3->unk64 = 0;
+            temp_v0_4 = var_a1 + D_8009C544;
+            temp_v0_4->unk5D = 0;
+            temp_v1_2 = var_a1 + D_8009C544;
+            temp_v0_4->unk70 = (s16)((s16)D_8009C6E0->unk10 * 2);
+            temp_v1_2->unk5A = 0;
+            temp_v1_2->unk68 = 0;
+            temp_v1_2->unk6A = 0;
+            (var_a1 + D_8009C544)->unk58 = 0;
+            (var_a1 + D_8009C544)->unk59 = 0;
+            (var_a1 + D_8009C544)->unk5B = 0;
+            (var_a1 + D_8009C544)->unk37 = 0;
+            var_v0 = (s16)D_8009C6E0->unk10 * 0x1E;
+            temp_v1_3 = var_a1 + D_8009C544;
+            if (var_v0 < 0) {
+                var_v0 += 0x1FF;
+            }
+            temp_v1_3->unk6C = (s16)(var_v0 >> 9);
+            var_v0_2 = (s16)D_8009C6E0->unk10 * 0x50;
+            if (var_v0_2 < 0) {
+                var_v0_2 += 0x1FF;
+            }
+            temp_v1_3->unk6E = (s16)(var_v0_2 >> 9);
+            D_8008325C[var_a3_4] = 0;
+            D_800756E8[var_a3_4] = 0;
+            D_8009D828[var_a3_4] = 0x10;
+            D_80082248[var_a3_4] = 0x10;
+            temp_v1_4 = var_a1 + D_8009C544;
+            temp_v1_4->unk8 = 0;
+            temp_v1_4->unk0 = 0;
+            temp_v1_4->unk2 = 0;
+            temp_v1_4->unk4 = 0;
+            (var_a1 + D_8009C544)->unk9 = 0;
+            var_a3_4 += 1;
+            var_a1 += 0x84;
+        } while (var_a3_4 < (s32)D_8009C6DC->unk3);
+    }
+    var_a3_5 = 0;
+    do {
+        temp_v0_5 = D_8009C6E0 + var_a3_5;
+        var_a3_5 += 1;
+        temp_v0_5->unkF2 = 0;
+    } while (var_a3_5 < 0x40);
+    var_a3_6 = 0;
+    do {
+        temp_v0_6 = D_8009C6E0 + var_a3_6;
+        var_a3_6 += 1;
+        temp_v0_6->unkB2 = 0;
+    } while (var_a3_6 < 0x40);
+    var_a3_7 = 0;
+    var_v1_2 = D_80095DE0;
+    do {
+        var_a2_2 = 0xF;
+        var_v0_3 = var_v1_2 + 0x1E;
+    loop_23:
+        *var_v0_3 = 0;
+        var_a2_2 -= 1;
+        var_v0_3 -= 2;
+        if (var_a2_2 >= 0) {
+            goto loop_23;
+        }
+        var_a3_7 += 1;
+        var_v1_2 += 0x20;
+    } while (var_a3_7 < 0x40);
+    var_a3_8 = 0;
+    var_v1_3 = 0;
+    do {
+        *(&D_8007E7BD + var_v1_3) = 0;
+        *(&D_8007E7BC + var_v1_3) = 0;
+        *(&D_8007E7BB + var_v1_3) = 0;
+        *(&D_8007E7BA + var_v1_3) = 0;
+        *(&D_8007E7BE + var_v1_3) = 0;
+        *(&D_8007E7BF + var_v1_3) = 0;
+        *(&D_8007E7B8 + var_v1_3) = 0;
+        *(&D_8007E7B9 + var_v1_3) = 0;
+        *(&D_8007E7C2 + var_v1_3) = 0;
+        *(&D_8007E7AC + var_v1_3) = 0;
+        *(&D_8007E7AE + var_v1_3) = 0;
+        *(&D_8007E7B0 + var_v1_3) = 0;
+        *(&D_8007E7B2 + var_v1_3) = 0;
+        *(&D_8007E7B4 + var_v1_3) = 0;
+        *(&D_8007E7B6 + var_v1_3) = 0;
+        var_a3_8 += 1;
+        var_v1_3 += 0x18;
+    } while (var_a3_8 < 0x20);
+    D_80095D84 = 0;
+    var_a3_9 = 8;
+    var_v0_4 = &D_8009AD38;
+    do {
+        *var_v0_4 = 0xFF;
+        var_a3_9 -= 1;
+        var_v0_4 -= 1;
+    } while (var_a3_9 >= 0);
+    g_EntityForSplitJoin = 0xFF;
+    g_FieldMovieOpcodeActive = 0;
+    Savemap.memory_bank_1[31] |= 3;
+}
+#endif
+
+/* Walks every entity's first script and runs its initialisation opcodes
+ * (everything up to the terminating 0). The script-offset table sits past the
+ * entity-name table and the extras table in the script header. Semantically
+ * correct; codegen pinned via MASPSX_OVERRIDE: gcc 2.6.3 fixes the address
+ * arithmetic order (the <<6/<<3/<<1 sequence) and re-materialises the script
+ * pointer, a conserved-pair the permuter plateaus on (best 1075 after the
+ * override-strip fix, iter 55k). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRunInit);
+#else
+void FieldEventRunInit(void) {
+    s16 numExtras;
+    s32 scriptBase;
+    u16 pc;
+    u16* slot;
+    u16* slot2;
+    u8 lo;
+    u8 op;
+    u8 op2;
+
+    g_FieldModelCount = 0;
+    g_CurrentEntity = 0;
+    if (g_FieldScripts->numEntities != 0) {
+        do {
+            if (g_FieldScriptDebugFlags & 3) {
+                FieldDebugStringCopy(g_DebugText, &D_800E0628);
+                FieldDebugStringConcat(
+                    g_DebugText,
+                    (u8*)g_FieldScripts + (g_CurrentEntity * 8) + 0x20);
+                if (g_FieldScriptDebugFlags & 1) {
+                    SetStrToDebugRow(4, 0, g_DebugText);
+                }
+                if (g_FieldScriptDebugFlags & 2) {
+                    DebugPrintToFieldWindow(g_DebugText);
+                }
+            }
+            scriptBase = g_CurrentEntity << 6;
+            numExtras = g_FieldScripts->numExtras * 4;
+            lo = ((u8*)g_FieldScripts + scriptBase +
+                  (g_FieldScripts->numEntities * 8) + numExtras)[0x20];
+            slot = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            *slot = (u16)lo;
+            *slot = lo | (((u8*)g_FieldScripts + scriptBase +
+                           (g_FieldScripts->numEntities * 8) + numExtras)[0x21]
+                          << 8);
+            op = *((u8*)g_FieldScripts + *slot);
+            g_FieldCurrentOpcode = op;
+            if (op != 0) {
+                do {
+                    g_FieldOpcodes[g_FieldCurrentOpcode]();
+                    op2 = *((u8*)g_FieldScripts +
+                            *((u16*)((g_CurrentEntity * 2) +
+                                     (u8*)g_FieldScriptPC)));
+                    g_FieldCurrentOpcode = op2;
+                } while (op2 != 0);
+            }
+            slot2 = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            pc = *slot2;
+            g_CurrentEntity += 1;
+            *slot2 = pc + 1;
+        } while ((u8)g_CurrentEntity < (u8)g_FieldScripts->numEntities);
+        g_CurrentEntity = 0;
+    }
+}
+#endif
 
 /* Enable the loaded field models that correspond to party members, then
  * disable (make non-solid, non-talkable, invisible) every model whose loader
@@ -522,7 +1525,128 @@ done:
     FieldUpdateAnimationState();
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldUpdateAnimationState);
+extern /*?*/ s32 D_80074F02;
+extern void* D_8009C6E0;
+extern u8 D_8007EB98[];
+extern s32 D_8009C544;
+extern /*?*/ s32 D_8009C6DC;
+
+/* Per-frame animation state machine for every loaded model: dispatch on the
+ * model's animation state, advance the current frame by the playback speed,
+ * and wrap/transition at the last frame. m2c seed; residual is regalloc across
+ * the switch and the per-model address CSE. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldUpdateAnimationState);
+#else
+void FieldUpdateAnimationState(void) {
+    FieldModelEntry* temp_v0;
+    FieldModelEntry* temp_v0_2;
+    s32 temp_a3;
+    s32 temp_v1_4;
+    s32 var_t2;
+    s32* var_t0;
+    u8 temp_a0;
+    u8 temp_a0_2;
+    u8 temp_a0_3;
+    u8 temp_a0_4;
+    u8 temp_a0_5;
+    u8 temp_a0_6;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    u8 temp_v1_3;
+    void* temp_a2;
+    void* temp_v1_5;
+    void* temp_v1_6;
+    void* temp_v1_7;
+    void* temp_v1_8;
+    void* var_a0;
+
+    var_t2 = 0;
+    if ((s32)D_8009C6DC->unk2 > 0) {
+        var_t0 = &D_8007EB98;
+        do {
+            temp_a0 = *var_t0;
+            if ((temp_a0 != 0xFF) &&
+                ((D_8009C6E0->unk2A != temp_a0) || (D_8009C6E0->unk32 != 0))) {
+                temp_v1 = D_800756E8[temp_a0];
+                switch (temp_v1) {
+                case 0:
+                    temp_a0_2 = *var_t0;
+                    temp_a3 = temp_a0_2 * 0x84;
+                    temp_a2 = temp_a3 + D_8009C544;
+                    temp_v1_2 = D_8008325C[temp_a0_2];
+                    if (temp_a2->unk5E != temp_v1_2) {
+                        temp_a2->unk5E = temp_v1_2;
+                        temp_v1_3 = *var_t0;
+                        ((temp_v1_3 * 0x84) + D_8009C544)->unk60 =
+                            (u16)D_80082248[temp_v1_3];
+                        ((*var_t0 * 0x84) + D_8009C544)->unk62 = 0;
+                        temp_a0_3 = *var_t0;
+                        temp_v0 = &g_FieldModelData->modelEntries
+                                       [g_FieldModelLoaderData[temp_a0_3]
+                                            .modelEntryIndex];
+                        temp_v1_4 = temp_a0_3 * 0x84;
+                        (temp_v1_4 + D_8009C544)->unk64 =
+                            (s16)(*((*(&D_80074F02 + temp_v1_4) * 0x10) +
+                                    &temp_v0->modelData
+                                         [temp_v0->animationOffset]) -
+                                  1);
+                    } else {
+                        temp_v0_2 = &g_FieldModelData->modelEntries
+                                         [g_FieldModelLoaderData[temp_a0_2]
+                                              .modelEntryIndex];
+                        temp_a2->unk64 =
+                            (s16)(*((*(&D_80074F02 + temp_a3) * 0x10) +
+                                    &temp_v0_2->modelData
+                                         [temp_v0_2->animationOffset]) -
+                                  1);
+                        var_a0 = (*var_t0 * 0x84) + D_8009C544;
+                    block_11:
+                        if (((s32)(var_a0->unk62 << 0x10) >> 0x14) >=
+                            var_a0->unk64) {
+                            var_a0->unk62 = 0U;
+                        }
+                    }
+                    break;
+                case 1:
+                    var_a0 = (*var_t0 * 0x84) + D_8009C544;
+                    goto block_11;
+                case 2:
+                    temp_a0_4 = *var_t0;
+                    temp_v1_5 = (temp_a0_4 * 0x84) + D_8009C544;
+                    if (((s32)(temp_v1_5->unk62 << 0x10) >> 0x14) >=
+                        temp_v1_5->unk64) {
+                        D_800756E8[temp_a0_4] = 4;
+                    case 3:
+                    case 4:
+                        temp_v1_6 = (*var_t0 * 0x84) + D_8009C544;
+                        temp_v1_6->unk62 = (s16)(temp_v1_6->unk64 * 0x10);
+                    }
+                    break;
+                case 5:
+                    temp_a0_5 = *var_t0;
+                    temp_v1_7 = (temp_a0_5 * 0x84) + D_8009C544;
+                    if (((s32)(temp_v1_7->unk62 << 0x10) >> 0x14) >=
+                        temp_v1_7->unk64) {
+                        D_800756E8[temp_a0_5] = 0;
+                    }
+                    break;
+                case 6:
+                    temp_a0_6 = *var_t0;
+                    temp_v1_8 = (temp_a0_6 * 0x84) + D_8009C544;
+                    if (((s32)(temp_v1_8->unk62 << 0x10) >> 0x14) >=
+                        temp_v1_8->unk64) {
+                        D_800756E8[temp_a0_6] = 3;
+                    }
+                    break;
+                }
+            }
+            var_t2 += 1;
+            var_t0 += 1;
+        } while (var_t2 < (s32)D_8009C6DC->unk2);
+    }
+}
+#endif
 
 u8 FieldEventRequestRun(s16 entityId, s16 priority, s16 scriptId) {
     u16 offset;
@@ -670,7 +1794,114 @@ void UpdateFieldExitArrows(s32 arg0) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
+extern /*?*/ s32 D_800E48FC;
+extern /*?*/ s32 D_800E48FE;
+extern /*?*/ s32 D_800E4900;
+extern /*?*/ s32 D_800E4901;
+extern /*?*/ s32 D_800E4904;
+extern /*?*/ s32 D_800E4906;
+extern /*?*/ s32 D_800E4908;
+extern /*?*/ s32 D_800E4909;
+extern /*?*/ s32 D_800E490C;
+extern /*?*/ s32 D_800E490E;
+extern /*?*/ s32 D_800E4910;
+extern /*?*/ s32 D_800E4911;
+extern /*?*/ s32 D_800E4914;
+extern /*?*/ s32 D_800E4916;
+extern /*?*/ s32 D_800E4918;
+extern /*?*/ s32 D_800E4919;
+
+/* Draw the field-exit arrow sprite (a POLY_FT4) at the given OT slot, pulsing
+ * its colour over time. m2c seed; residual is the packet-field store ordering.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
+#else
+void DrawFieldExitArrow(s32* arg0) {
+    POLY_FT4* temp_v1_5;
+    s16 temp_v1;
+    s16 temp_v1_2;
+    s16 temp_v1_3;
+    s16 temp_v1_4;
+    s16 var_a2;
+    s16 var_a3;
+    s32 temp_v0;
+    s32 temp_v0_2;
+    s32 temp_v0_3;
+    s32 temp_v0_4;
+    s32 var_v0;
+
+    if ((g_FieldMovieOpcodeActive == 0) &&
+        ((D_80114464 != 0x7FFF) || (D_80114468 != D_80114464))) {
+        var_a2 = D_80114464;
+        if (D_80114464 >= 0x141) {
+            var_a2 = 0x140;
+        }
+        if (D_80114464 < 0) {
+            var_a2 = 0;
+        }
+        var_a3 = D_80114468;
+        if (D_80114468 >= 0xE1) {
+            var_a3 = 0xE0;
+        }
+        if (D_80114468 < 0) {
+            var_a3 = 0;
+        }
+        D_80114490 ^= 1;
+        if (var_a2 >= 0x123) {
+            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x8F;
+            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x7F;
+            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x8F;
+            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x7F;
+            temp_v0 = D_80114490 * 0x28;
+            temp_v1 = var_a2 - 0x10;
+            *(&D_800E48FC + temp_v0) = temp_v1;
+            *(&D_800E4904 + temp_v0) = var_a2;
+            *(&D_800E490C + temp_v0) = temp_v1;
+            *(&D_800E4914 + temp_v0) = var_a2;
+            var_v0 = var_a3 << 0x10;
+        } else {
+            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x80;
+            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x90;
+            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x80;
+            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x90;
+            temp_v0_2 = D_80114490 * 0x28;
+            temp_v1_2 = var_a2 + 0x10;
+            *(&D_800E48FC + temp_v0_2) = var_a2;
+            *(&D_800E4904 + temp_v0_2) = temp_v1_2;
+            *(&D_800E490C + temp_v0_2) = var_a2;
+            *(&D_800E4914 + temp_v0_2) = temp_v1_2;
+            var_v0 = var_a3 << 0x10;
+        }
+        if ((var_v0 >> 0x10) < 0x11) {
+            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x6F;
+            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x6F;
+            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x5F;
+            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x5F;
+            temp_v0_3 = D_80114490 * 0x28;
+            temp_v1_3 = var_a3 + 0x10;
+            *(&D_800E48FE + temp_v0_3) = var_a3;
+            *(&D_800E4906 + temp_v0_3) = var_a3;
+            *(&D_800E490E + temp_v0_3) = temp_v1_3;
+            *(&D_800E4916 + temp_v0_3) = temp_v1_3;
+        } else {
+            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x60;
+            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x60;
+            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x70;
+            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x70;
+            temp_v0_4 = D_80114490 * 0x28;
+            temp_v1_4 = var_a3 - 0x10;
+            *(&D_800E48FE + temp_v0_4) = temp_v1_4;
+            *(&D_800E4906 + temp_v0_4) = temp_v1_4;
+            *(&D_800E490E + temp_v0_4) = var_a3;
+            *(&D_800E4916 + temp_v0_4) = var_a3;
+        }
+        temp_v1_5 = &D_800E48F4[D_80114490];
+        temp_v1_5->tag = (temp_v1_5->tag & 0xFF000000) | (*arg0 & 0xFFFFFF);
+        *arg0 = (*arg0 & 0xFF000000) | ((s32)temp_v1_5 & 0xFFFFFF);
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_event_debug.c
@@ -3079,9 +4310,179 @@ s32 OpcodeFuncAnimEx(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
+/* CANIM (change animation): switch the current model's animation to a new id
+ * read from the script, recompute the frame rate from the base speed and the
+ * script's divisor, and clamp the last frame. Twin of OpcodeFuncCanmEx. m2c
+ * seed; residual is the per-model address CSE and the divide scheduling.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
+#else
+s32 OpcodeFuncCanim(void) {
+    FieldModelEntry* temp_v1_5;
+    s16 temp_v0;
+    s32 temp_a1_4;
+    s32 temp_lo;
+    u16* temp_a0;
+    u16* temp_a3;
+    u16* temp_v1_2;
+    u8 temp_a1;
+    u8 temp_a1_2;
+    u8 temp_a1_3;
+    u8 temp_v1;
+    u8 temp_v1_4;
+    void* temp_v1_3;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("canim", 4U);
+    }
+    temp_a1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_a1 != 0xFF) {
+        temp_v1 = D_800756E8[temp_a1];
+        if (temp_v1 != 3) {
+            if ((s32)temp_v1 >= 4) {
+                if (temp_v1 != 4) {
+                    return 1;
+                }
+                D_800756E8[temp_a1] = 0;
+                temp_v1_2 = (D_800722C4 * 2) + &D_800831FC;
+                *temp_v1_2 += 5;
+                return 0;
+            }
+            if ((s32)temp_v1 < 2) {
+                if ((s32)temp_v1 >= 0) {
+                    goto block_10;
+                }
+                // Duplicate return node #19. Try simplifying control flow for
+                // better match
+                return 1;
+            }
+            return 1;
+        }
+    block_10:
+        temp_v1_3 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
+        temp_a1_2 = temp_v1_3->unk4;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E =
+            (u8)temp_v1_3->unk1;
+        temp_v1_4 = *(&D_8007EB98 + D_800722C4);
+        ((temp_v1_4 * 0x84) + D_8009C544)->unk60 =
+            (s16)((s16)D_8009D828[temp_v1_4] / (s32)temp_a1_2);
+        temp_a3 = (D_800722C4 * 2) + &D_800831FC;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 =
+            (s16)(((s32)(D_8009C6DC + *temp_a3)->unk2 / (s32)temp_a1_2) * 0x10);
+        temp_lo = (s32)(D_8009C6DC + *temp_a3)->unk3 / (s32)temp_a1_2;
+        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
+        temp_v1_5 =
+            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3]
+                                                .modelEntryIndex];
+        temp_a1_4 = temp_a1_3 * 0x84;
+        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) +
+                    &temp_v1_5->modelData[temp_v1_5->animationOffset]) +
+                  0xFFFF;
+        if (temp_v0 < temp_lo) {
+            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+        } else {
+            (temp_a1_4 + D_8009C544)->unk64 = (s16)temp_lo;
+        }
+        if (g_FieldCurrentOpcode == 0xB0) {
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 5;
+            goto block_15;
+        }
+        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
+        return 1;
+    }
+block_15:
+    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_a0 += 5;
+    return 0;
+}
+#endif
+
+/* CANM! (change animation, extended): switch the current model's animation to
+ * a new id read from the script, recompute the frame rate from the base speed
+ * and the script's divisor, and clamp the last frame. The D_800756E8 state
+ * drives the if-else chain. m2c seed; residual is the per-model address CSE
+ * and the divide scheduling. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
+#else
+s32 OpcodeFuncCanmEx(void) {
+    FieldModelEntry* temp_v1_4;
+    s16 temp_v0;
+    s32 temp_a1_4;
+    s32 temp_lo;
+    u16* temp_a0;
+    u16* temp_a1_2;
+    u8 temp_a1;
+    u8 temp_a1_3;
+    u8 temp_a3;
+    u8 temp_v1;
+    u8 temp_v1_3;
+    void* temp_v1_2;
+
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("canm!", 4U);
+    }
+    temp_a1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_a1 != 0xFF) {
+        temp_v1 = D_800756E8[temp_a1];
+        if (temp_v1 != 3) {
+            if ((s32)temp_v1 >= 4) {
+                if (temp_v1 != 4) {
+                    return 1;
+                }
+                D_800756E8[temp_a1] = 3;
+                goto block_17;
+            }
+            if ((s32)temp_v1 < 2) {
+                if ((s32)temp_v1 >= 0) {
+                    goto block_10;
+                }
+                // Duplicate return node #20. Try simplifying control flow for
+                // better match
+                return 1;
+            }
+            return 1;
+        }
+    block_10:
+        temp_v1_2 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
+        temp_a3 = temp_v1_2->unk4;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E =
+            (u8)temp_v1_2->unk1;
+        temp_v1_3 = *(&D_8007EB98 + D_800722C4);
+        ((temp_v1_3 * 0x84) + D_8009C544)->unk60 =
+            (s16)((s16)D_8009D828[temp_v1_3] / (s32)temp_a3);
+        temp_a1_2 = (D_800722C4 * 2) + &D_800831FC;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 =
+            (s16)((D_8009C6DC + *temp_a1_2)->unk2 * 0x10);
+        temp_lo = (s32)(D_8009C6DC + *temp_a1_2)->unk3 / (s32)temp_a3;
+        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
+        temp_v1_4 =
+            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3]
+                                                .modelEntryIndex];
+        temp_a1_4 = temp_a1_3 * 0x84;
+        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) +
+                    &temp_v1_4->modelData[temp_v1_4->animationOffset]) +
+                  0xFFFF;
+        if (temp_v0 < temp_lo) {
+            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+        } else {
+            (temp_a1_4 + D_8009C544)->unk64 = (s16)temp_lo;
+        }
+        if (g_FieldCurrentOpcode == 0xB1) {
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 6;
+        block_17:
+            goto block_18;
+        }
+        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
+        return 1;
+    }
+block_18:
+    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_a0 += 5;
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncAnimw(void) {
     u8 modelIdx;
@@ -3125,11 +4526,175 @@ s32 OpcodeFuncAnimb(void) {
 // Start of field_opcode_model_move.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMove);
+/////////////////////////////////////////////////
+// Start of field_opcode_model_move.c
+/////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+/* MOVE (0x??): start a scripted move of the current entity toward a target
+ * read from the script, picking the walk/run animation by distance and setting
+ * the scripted-move state machine going. m2c seed using the raw D_ symbols;
+ * residual is the full-expression g_FieldModels[...] address CSE. Pinned
+ * pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMove);
+#else
+s32 OpcodeFuncMove(void) {
+    FieldModelEntry* temp_v0;
+    s16 temp_a0_2;
+    s32 temp_v1_2;
+    s32 var_a0;
+    u16* temp_a0_3;
+    u8 temp_a0;
+    u8 temp_a1_2;
+    u8 temp_v1;
+    void* temp_a1;
+    void* temp_v1_3;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("move", 5U);
+    }
+    temp_v1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_v1 == 0xFF) {
+        var_a0 = D_800722C4 * 2;
+        goto block_16;
+    }
+    ((temp_v1 * 0x84) + D_8009C544)->unk68 = 0;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk37 = 0;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk78 =
+        (s32)((s32)(FieldEventReadMemoryS16(1, 2) << 0x10) >> 4);
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk7C =
+        (s32)((s32)(FieldEventReadMemoryS16(2, 4) << 0x10) >> 4);
+    temp_a1 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+    if ((D_8009C6E0->unk10 * 3) < (s32)temp_a1->unk70) {
+        if (temp_a1->unk5E != 2) {
+            temp_a1->unk5E = 2U;
+            goto block_9;
+        }
+    } else if (temp_a1->unk5E != 1) {
+        temp_a1->unk5E = 1U;
+    block_9:
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk60 = 0x10;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 = 0;
+        temp_a0 = *(&D_8007EB98 + D_800722C4);
+        temp_v0 =
+            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a0]
+                                                .modelEntryIndex];
+        temp_v1_2 = temp_a0 * 0x84;
+        (temp_v1_2 + D_8009C544)->unk64 =
+            (s16)(*((*(&D_80074F02 + temp_v1_2) * 0x10) +
+                    &temp_v0->modelData[temp_v0->animationOffset]) -
+                  1);
+    }
+    D_800756E8[*(&D_8007EB98 + D_800722C4)] = 1;
+    temp_v1_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+    temp_a1_2 = temp_v1_3->unk5D;
+    if (temp_a1_2 == 1) {
+        temp_a0_2 = temp_v1_3->unk6A;
+        if (temp_a0_2 != temp_a1_2) {
+            if (temp_a0_2 != 2) {
+                goto block_17;
+            }
+            temp_v1_3->unk5D = 0U;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 0;
+            var_a0 = D_800722C4 * 2;
+        block_16:
+            temp_a0_3 = var_a0 + &D_800831FC;
+            *temp_a0_3 += 6;
+            return 0;
+        }
+        return 1;
+    }
+block_17:
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5D = 1;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
+    return 1;
+}
+#endif
+
+/* FMOVE (0xAD): move the current entity to a target while keeping its facing.
+ * If a move is in flight (scriptedMoveMode 1), poll it (return 1) until
+ * ActionState 2 marks it done, then clear the mode. Otherwise start the move.
+ * Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE (the
+ * g_FieldModels *0x84 base regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+#else
+s32 OpcodeFuncFmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveDirAdd = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(3, 6) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 2;
+        } else if (
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+        return 1;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    return 1;
+}
+#endif
+
+/* CMOVE (0xA9): start (or continue) a scripted walk of the current entity to a
+ * target point. Unlike JUMP it never blocks -- it arms the walk mode and steps
+ * over its own 6 bytes every call; the field model update drives the walk
+ * per-frame. The g_FieldModels *0x84 base regalloc is the wall; codegen pinned
+ * via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+#else
+s32 OpcodeFuncCmove(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("cmove", 5);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 2) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            PC_INC(6);
+            return 0;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(6);
+            return 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    PC_INC(6);
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncFcfix(void) {
     if (g_DebugLevel & 3) {
@@ -3143,7 +4708,48 @@ s32 OpcodeFuncFcfix(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+/* JUMP (0xC0): make the current entity jump to a target over a number of
+ * frames. If a jump is already in flight, poll it (return 1) until ActionState
+ * 2 marks it done, then clear the move mode. Otherwise start a new jump. The
+ * scalar clear-stores go through the full g_FieldModels[...] indexed expression
+ * (the original rematerialises the address). Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+#else
+s32 OpcodeFuncJump(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("jump", 8);
+    }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(11);
+        return 0;
+    }
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode ==
+        SMODE_JUMP) {
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+            return 1;
+        }
+        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+                SMODE_NONE;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+        }
+    }
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
+        SMODE_JUMP;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (s32)FieldEventReadMemoryS16(1, 3) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (s32)FieldEventReadMemoryS16(2, 5) << 12;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndI =
+        FieldEventReadMemoryS16(3, 7);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveSteps =
+        FieldEventReadMemoryS16(4, 9);
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncLader);
 
@@ -3170,7 +4776,87 @@ void OpcodeFuncMova(void) {
     FieldMoveToEntityUpdate(GET_PARAM_U8(1));
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+/* Set up (or finish) a scripted move of the current entity toward a target
+ * entity: the current entity's move destination becomes the target's current
+ * position. Returns 1 while a move is being set up / is in progress, 0 when it
+ * just finished or when either entity has no model. Every global access
+ * re-materialises the g_EntityToModel / g_FieldModels bases through $at (the
+ * $at remat wall); codegen pinned via MASPSX_OVERRIDE, #else is the verified
+ * C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+#else
+s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
+    FieldEntity* cur;
+    FieldEntity* target;
+    FieldModelEntry* entry;
+    u8 curModel;
+    u8 targetModel;
+    u8 animCount;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        goto advance;
+    }
+    targetModel = g_EntityToModel[targetEntityId & 0xFF];
+    if (targetModel == 0xFF) {
+        goto advance;
+    }
+    cur = &g_FieldModels[curModel];
+    target = &g_FieldModels[targetModel];
+    cur->MoveEndI = target->SolidRange;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+    cur->MoveEndX = target->PosX;
+    cur->MoveEndY = target->PosY;
+    cur = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (cur->scriptedMoveMode != 1) {
+        goto setmode;
+    }
+    if (cur->ActionState == 1) {
+        if (g_FieldState->currentMovieFrame * 3 < cur->MoveSpeed) {
+            if (cur->activeAnimId == 2) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 2;
+        } else {
+            if (cur->activeAnimId == 1) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 1;
+        }
+        cur->animSpeed = 0x10;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+        curModel = g_EntityToModel[g_CurrentEntity];
+        entry = &g_FieldModelLoaderData[curModel];
+        animCount = D_80074F02[curModel];
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
+            *(u16*)(g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .animationOffset +
+                    g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .modelData +
+                    animCount * 0x10) -
+            1;
+    done_anim:
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
+        return 1;
+    }
+    if (cur->ActionState == 2) {
+        cur->scriptedMoveMode = 0;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+        goto advance;
+    }
+    goto out;
+setmode:
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    goto out;
+advance:
+    g_FieldScriptPC[g_CurrentEntity] += 2;
+    return 0;
+out:
+    return 0;
+}
+#endif
 
 void OpcodeFuncDira(void) {
     if (g_DebugLevel & 3) {
@@ -3195,7 +4881,40 @@ void OpcodeFuncPdira(void) {
     FieldEventSetDirByActorId(actorId);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+/* Face the current entity towards another entity. Reads both models' fixed
+ * point positions, computes the direction with FieldEntityDirByVec, and snaps
+ * the current entity's Dir to it, cancelling any turn in progress. No-op when
+ * either entity has no model. The g_FieldModels *0x84 base regalloc is the
+ * wall; codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+#else
+void FieldEventSetDirByActorId(u8 actorId) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    u8 curModel;
+    u8 targetModel;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        return;
+    }
+    targetModel = g_EntityToModel[actorId];
+    if (targetModel == 0xFF) {
+        return;
+    }
+    from.vx = g_FieldModels[curModel].PosX >> 12;
+    from.vy = g_FieldModels[curModel].PosY >> 12;
+    from.vz = g_FieldModels[curModel].PosZ >> 12;
+    to.vx = g_FieldModels[targetModel].PosX >> 12;
+    to.vy = g_FieldModels[targetModel].PosY >> 12;
+    to.vz = g_FieldModels[targetModel].PosZ >> 12;
+    g_FieldModels[curModel].Dir = FieldEntityDirByVec(&from, &to, &sqrDist);
+    g_FieldModels[curModel].TurnType = 0;
+    g_FieldModels[curModel].TurnStep = 0;
+}
+#endif
 
 void OpcodeFuncTura(void) {
     if (g_DebugLevel & 3) {
@@ -3220,9 +4939,212 @@ void OpcodeFuncPtura(void) {
     FieldEntityTurnToEntity(actorId);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
+/* Turn the current entity to face a target entity: snapshot the current
+ * direction, compute the target facing from the position delta, and set the
+ * turn state machine going (choosing the short way around). m2c seed; residual
+ * is the per-model address CSE and the turn-delta sign logic. Pinned pending a
+ * permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
+#else
+void FieldEntityTurnToEntity(u8 actorId) {
+    s32 sp10;
+    s32 sp14;
+    s32 sp18;
+    s32 sp20;
+    s32 sp24;
+    s32 sp28;
+    s32 sp30;
+    s16 temp_v0_2;
+    s16 temp_v1_4;
+    s16 temp_v1_5;
+    s16 var_a0_2;
+    s16 var_v0;
+    s32 temp_a1_2;
+    s32 temp_a3;
+    s32 temp_t0;
+    s32 temp_t1;
+    s32 var_a0;
+    u16 temp_a1_3;
+    u16 temp_a3_2;
+    u16* temp_a0;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    u8 temp_v1_3;
+    void* temp_a1;
+    void* temp_a2;
+    void* temp_v0;
+    void* var_a0_3;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
+    temp_v1 = *(&D_8007EB98 + D_800722C4);
+    if ((temp_v1 == 0xFF) || (*(&D_8007EB98 + (s16)actorId) == 0xFF)) {
+        var_a0 = D_800722C4 * 2;
+        goto block_5;
+    }
+    temp_a1 = (temp_v1 * 0x84) + D_8009C544;
+    temp_v1_2 = temp_a1->unk3B;
+    if (temp_v1_2 == 3) {
+        temp_a1->unk3B = 0U;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
+        var_a0 = D_800722C4 * 2;
+    block_5:
+        temp_a0 = var_a0 + &D_800831FC;
+        *temp_a0 += 4;
+        return;
+    }
+    if ((temp_a1->unk3A == 0) || (temp_v1_2 != 2) ||
+        (temp_a1->unk39 !=
+         (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2)) {
+        temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+        temp_v0->unk3C = (s16)temp_v0->unk38;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B = 2;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 =
+            (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2;
+        temp_t0 =
+            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unkC >>
+            0xC;
+        sp10 = temp_t0;
+        temp_t1 =
+            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk10 >>
+            0xC;
+        sp14 = temp_t1;
+        sp18 =
+            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk14 >>
+            0xC;
+        temp_a1_2 =
+            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unkC >>
+            0xC;
+        sp20 = temp_a1_2;
+        temp_a3 =
+            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unk10 >>
+            0xC;
+        sp24 = temp_a3;
+        sp28 =
+            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unk14 >>
+            0xC;
+        if (temp_t0 == temp_a1_2) {
+            if (temp_t1 == temp_a3) {
+                sp10 = temp_t0 + 1;
+            }
+        }
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E =
+            (s16)(FieldEntityDirByVec((VECTOR*)&sp10, (VECTOR*)&sp20, &sp30) &
+                  0xFF);
+        temp_v1_3 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+        switch (temp_v1_3) { // irregular
+        case 2:
+            temp_a2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_a1_3 = temp_a2->unk3E;
+            temp_a3_2 = temp_a2->unk3C;
+            temp_v1_4 = temp_a1_3 - temp_a3_2;
+            var_a0_2 = temp_v1_4;
+            if (temp_v1_4 & 0x8000) {
+                var_a0_2 = ~temp_v1_4 + 1;
+            }
+            if (var_a0_2 >= 0x81) {
+                if ((s16)temp_a3_2 < (s16)temp_a1_3) {
+                    temp_a2->unk3E = (u16)(temp_a1_3 - 0x100);
+                } else {
+                    temp_a2->unk3E = (u16)(temp_a1_3 + 0x100);
+                }
+            }
+            break;
+        case 1:
+            var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v1_5 = var_a0_3->unk3E;
+            if ((s32)var_a0_3->unk38 < temp_v1_5) {
+                var_v0 = temp_v1_5 - 0x100;
+            block_27:
+                var_a0_3->unk3E = var_v0;
+            }
+            break;
+        case 0:
+            var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_2 = var_a0_3->unk3E;
+            var_v0 = temp_v0_2 + 0x100;
+            if (temp_v0_2 < (s32)var_a0_3->unk38) {
+                goto block_27;
+            }
+            break;
+        }
+    }
+}
+#endif
+
+extern u8 D_800722C4;
+extern /*?*/ s32 D_800831FC;
+extern u8 D_8009D820;
+
+/* OFSTD (0x?? offset-start): set up an offset animation for the current
+ * entity's model. Reads the four target offsets from the script, stores the
+ * mode byte, and either snapshots the current offsets as the start (mode!=0)
+ * or copies the ends into the starts (mode==0). Residual is the
+ * full-expression g_FieldModels[...] address CSE; pinned pending permuter. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
+#else
+s32 OpcodeFuncOfstd(void) {
+    s8* var_a0;
+    u16* temp_v1_3;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    void* temp_v0;
+    void* temp_v0_2;
+    void* temp_v0_3;
+    void* temp_v0_4;
+    void* temp_v0_5;
+    void* temp_v0_6;
+
+    if (*(&D_8007EB98 + D_800722C4) != 0xFF) {
+        if (D_8009D820 & 3) {
+            temp_v1 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+            switch (temp_v1) { // irregular
+            case 0:
+                var_a0 = "ofstd";
+            block_11:
+                DebugPrintOpcode(var_a0, 5U);
+                break;
+            case 1:
+                var_a0 = "ofstl";
+                goto block_11;
+            case 2:
+                var_a0 = "ofstc";
+                goto block_11;
+            }
+        }
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk54 = 0;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk52 =
+            FieldEventReadMemoryS16(4, 0xA);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk44 =
+            FieldEventReadMemoryS16(1, 4);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk4A =
+            FieldEventReadMemoryS16(2, 6);
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk50 =
+            FieldEventReadMemoryS16(3, 8);
+        temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk56 = temp_v1_2;
+        if (temp_v1_2 != 0) {
+            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0->unk42 = (u16)temp_v0->unk40;
+            temp_v0_2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_2->unk48 = (u16)temp_v0_2->unk46;
+            temp_v0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_3->unk4E = (u16)temp_v0_3->unk4C;
+        } else {
+            temp_v0_4 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_4->unk40 = (u16)temp_v0_4->unk44;
+            temp_v0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_5->unk46 = (u16)temp_v0_5->unk4A;
+            temp_v0_6 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0_6->unk4C = (u16)temp_v0_6->unk50;
+        }
+    }
+    temp_v1_3 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_v1_3 += 0xC;
+    return 0;
+}
+#endif
 
 /* Block until this entity's offset animation finishes. OfsType 3 means the last
  * step ran, so clear it and fall through; 0 means there was never one. */
@@ -3282,9 +5204,181 @@ s32 OpcodeFuncTurnw(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+/* TURN (0xB5): turn the current entity to a target direction over a number of
+ * steps. If the previous turn finished (TurnType 3) clear it and advance. If an
+ * identical turn is already in flight, keep waiting. Otherwise (re)arm the
+ * turn: TurnStart = current Dir, TurnEnd = target. Verified C kept as the
+ * #else; codegen pinned via MASPSX_OVERRIDE (the g_FieldModels *0x84 base
+ * regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+#else
+s32 OpcodeFuncTurn(void) {
+    s16 dir;
+    FieldEntity* model;
+    u8 turnType;
+    u8 turnSteps;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    turnSteps = GET_PARAM_U8(4);
+    turnType = GET_PARAM_U8(5);
+    if (g_DebugLevel & 3) {
+        if (turnType == 1) {
+            DebugPrintOpcode("turn", 5);
+        } else if (turnType == 2) {
+            DebugPrintOpcode("turnc", 5);
+        }
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->TurnType == 3) {
+        model->TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        PC_INC(6);
+        return 0;
+    }
+    dir = FieldEventReadMemoryS16(2, 2);
+    if (model->TurnStep != 0 && (s16)dir == model->TurnEnd &&
+        model->TurnType == turnType && model->TurnSteps == turnSteps) {
+        return 1;
+    }
+    model->TurnStart = g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = turnType;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = turnSteps;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd = dir;
+    return 1;
+}
+#endif
+
+/* TURNR (turn toward a direction, with the trnrc/trnlc turn-clockwise /
+ * counter-clockwise variants): set up the current entity's turn toward a
+ * target direction read from the script, choosing the short way around. The
+ * turn state lives in the FieldEntity TurnStart/TurnEnd/TurnStep fields. m2c
+ * seed; residual is the per-model address CSE and the turn-delta sign logic.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
+#else
+s32 OpcodeFuncTurnr(void) {
+    s16 temp_v0_2;
+    s16 temp_v1_3;
+    s16 temp_v1_4;
+    s16 var_a0_2;
+    s8* var_a0;
+    u16 temp_a1_2;
+    u16 temp_a3;
+    u16* temp_a0_6;
+    u8 temp_a0;
+    u8 temp_a0_2;
+    u8 temp_a2;
+    u8 temp_v1_2;
+    void* temp_a0_3;
+    void* temp_a0_4;
+    void* temp_a0_5;
+    void* temp_a1;
+    void* temp_a2_2;
+    void* temp_v0;
+    void* temp_v1;
+
+    temp_a0 = D_800722C4;
+    if (*(&D_8007EB98 + temp_a0) != 0xFF) {
+        if (D_8009D820 & 3) {
+            temp_v1 = D_8009C6DC + *(&D_800831FC + (temp_a0 * 2));
+            temp_a0_2 = temp_v1->unk5;
+            switch (temp_a0_2) { // irregular
+            case 1:
+                var_a0 = "turnr";
+                if (temp_v1->unk3 != 0) {
+                    var_a0 = "turnl";
+                }
+            block_9:
+                DebugPrintOpcode(var_a0, 5U);
+                break;
+            case 2:
+                var_a0 = "trnrc";
+                if (temp_v1->unk3 != 0) {
+                    var_a0 = "trnlc";
+                }
+                goto block_9;
+            }
+        }
+        temp_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+        temp_a2 = temp_a0_3->unk3B;
+        if (temp_a2 == 3) {
+            temp_a0_3->unk3B = 0U;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
+            goto block_30;
+        }
+        if ((temp_a0_3->unk3A == 0) ||
+            (temp_a1 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)),
+             (temp_a2 != temp_a1->unk5)) ||
+            (temp_a0_3->unk39 != temp_a1->unk4)) {
+            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0->unk3C = (s16)temp_v0->unk38;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B =
+                (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk5;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 =
+                (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk4;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E =
+                (s16)(FieldEventReadMemoryU8(2, 2) & 0xFF);
+            temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+            if (temp_v1_2 != 1) {
+                if ((s32)temp_v1_2 < 2) {
+                    if (temp_v1_2 != 0) {
+                        return 1;
+                    }
+                    temp_a0_4 =
+                        (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                    temp_v0_2 = temp_a0_4->unk3E;
+                    if (temp_v0_2 < (s32)temp_a0_4->unk38) {
+                        temp_a0_4->unk3E = (s16)(temp_v0_2 + 0x100);
+                    }
+                    goto block_31;
+                }
+                if (temp_v1_2 == 2) {
+                    temp_a2_2 =
+                        (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                    temp_a1_2 = temp_a2_2->unk3E;
+                    temp_a3 = temp_a2_2->unk3C;
+                    temp_v1_3 = temp_a1_2 - temp_a3;
+                    var_a0_2 = temp_v1_3;
+                    if (temp_v1_3 & 0x8000) {
+                        var_a0_2 = ~temp_v1_3 + 1;
+                    }
+                    if (var_a0_2 >= 0x81) {
+                        if ((s16)temp_a3 < (s16)temp_a1_2) {
+                            temp_a2_2->unk3E = (u16)(temp_a1_2 - 0x100);
+                        } else {
+                            temp_a2_2->unk3E = (u16)(temp_a1_2 + 0x100);
+                        }
+                    }
+                }
+                // Duplicate return node #32. Try simplifying control flow for
+                // better match
+                return 1;
+            }
+            temp_a0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v1_4 = temp_a0_5->unk3E;
+            if ((s32)temp_a0_5->unk38 < temp_v1_4) {
+                temp_a0_5->unk3E = (s16)(temp_v1_4 - 0x100);
+            }
+        block_31:
+            // Duplicate return node #32. Try simplifying control flow for
+            // better match
+            return 1;
+        }
+        return 1;
+    }
+block_30:
+    temp_a0_6 = (temp_a0 * 2) + &D_800831FC;
+    *temp_a0_6 += 6;
+    return 0;
+}
+#endif
 
 /* Snap this entity to a facing, cancelling any turn in progress. Returns 1 when
  * the entity actually has a model, unlike most opcodes. */
@@ -5734,9 +7828,158 @@ s32 OpcodeFuncSplit(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventJoinSet);
+extern /*?*/ s32 D_80081D90;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+/* Drive one party member through a JOIN: state 0 starts the turn toward the
+ * leader, state 2 waits for the turn then starts the move, state 1 waits for
+ * the move then marks done, state 3 is done. Returns 1 while a step is in
+ * progress. Twin of FieldEventSplitSet. m2c seed; residual is the g_FieldModels
+ * *0x84 base regalloc and the s16 arg-widening. Pinned pending a permuter pass.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventJoinSet);
+#else
+s32 FieldEventJoinSet(u8 arg0, u8 arg1) {
+    s32 sp18;
+    s32 sp1C;
+    s32 sp20;
+    s32 sp28;
+    s32 sp2C;
+    s32 sp30;
+    s32 sp38;
+    s32 var_v0;
+    u8 temp_s0;
+    u8 temp_v1;
+    void* temp_v0;
+
+    if (*Savemap.memory_bank_2[9] != 0xFF) {
+        temp_s0 = D_8009AD30[*Savemap.memory_bank_2[9]];
+        if (D_8009D820 & 3) {
+            FieldDebugAddParseValueToPage2("join p0=", (s32)temp_s0, 2);
+            if (D_8009D820 & 3) {
+                FieldDebugAddParseValueToPage2("join p1=", (s32)(s16)arg0, 2);
+            }
+        }
+        if ((temp_s0 != 0xFF) && ((s16)arg0 != 0xFF)) {
+            temp_v1 = *(&D_80081D90 + (s16)arg0);
+            if (temp_v1 != 1) {
+                if ((s32)temp_v1 < 2) {
+                    if (temp_v1 != 0) {
+                        return 0;
+                    }
+                    sp18 =
+                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
+                            ->unkC >>
+                        0xC;
+                    sp1C =
+                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
+                            ->unk10 >>
+                        0xC;
+                    sp20 =
+                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
+                            ->unk14 >>
+                        0xC;
+                    sp28 = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
+                               ->unkC >>
+                           0xC;
+                    sp2C = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
+                               ->unk10 >>
+                           0xC;
+                    sp30 = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
+                               ->unk14 >>
+                           0xC;
+                    FieldEventSplitJoinSetTurn(
+                        (s16)arg0,
+                        ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
+                            ->unk38,
+                        FieldEntityDirByVec(
+                            (VECTOR*)&sp18, (VECTOR*)&sp28, &sp38) &
+                            0xFF);
+                    *(&D_80081D90 + (s16)arg0) = 2;
+                    return 0;
+                }
+                if (temp_v1 != 2) {
+                    var_v0 = 1;
+                    if (temp_v1 != 3) {
+                        return 0;
+                    }
+                    // Duplicate return node #21. Try simplifying control flow
+                    // for better match
+                    return var_v0;
+                }
+                if (FieldEventSplitJoinEndTurn((s16)arg0) != 0) {
+                    temp_v0 = (*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544;
+                    FieldEventSplitJoinSetMove(
+                        (s16)arg0, (s32)(temp_v0->unkC * 0x10) >> 0x10,
+                        (s32)(temp_v0->unk10 * 0x10) >> 0x10, (s16)arg1, 0);
+                    *(&D_80081D90 + (s16)arg0) = 1;
+                    if (D_8009D820 & 3) {
+                        FieldDebugAddParseValueToPage2("end setmove", 0, 0);
+                        return 0;
+                    }
+                }
+                goto block_20;
+            }
+            if (FieldEventSplitJoinEndMove((s16)arg0) != 0) {
+                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk59 = 1;
+                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk5B = 1;
+                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk5C = 0;
+                *(&D_80081D90 + (s16)arg0) = 3;
+                return 1;
+            }
+        block_20:
+            var_v0 = 0;
+            return var_v0;
+        }
+        goto block_19;
+    }
+block_19:
+    return 1;
+}
+#endif
+
+/* Drive one party member through a SPLIT: state 0 starts the move, state 1
+ * waits for the move then starts the turn, state 2 waits for the turn, state 3
+ * is done. Returns 1 while a step is still in progress. The g_FieldModels
+ * *0x84 base regalloc and the s16 arg-widening (<<0x10/>>0x10) are the wall;
+ * codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+#else
+s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("split p1=", entityId, 2);
+    }
+    if (entityId == 0xFF) {
+        return 1;
+    }
+    switch (g_EntitySplitJoinState[entityId]) {
+    case 0:
+        FieldEventSplitJoinSetMove(entityId, x, y, turnDir, a4);
+        g_EntitySplitJoinState[entityId] = 1;
+        return 0;
+    case 1:
+        if (FieldEventSplitJoinEndMove(entityId) == 0) {
+            return 0;
+        }
+        g_FieldModels[g_EntityToModel[entityId]].SolidOff = 0;
+        g_FieldModels[g_EntityToModel[entityId]].TalkOff = 0;
+        FieldEventSplitJoinSetTurn(
+            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir, a4 & 0xFF);
+        g_EntitySplitJoinState[entityId] = 2;
+        return 0;
+    case 2:
+        if (FieldEventSplitJoinEndTurn(entityId) == 0) {
+            return 0;
+        }
+        g_EntitySplitJoinState[entityId] = 3;
+        return 1;
+    case 3:
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetMove);
 
@@ -5819,7 +8062,42 @@ s32 FieldEventSplitJoinEndTurn(s16 entityId) {
 // Begin of field_opcode_fade.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+/////////////////////////////////////////////////
+// Begin of field_opcode_fade.c
+/////////////////////////////////////////////////
+
+/* FADE (0x6B): start a screen fade. Reads the fade type and per-channel target
+ * colours, then the speed. The jump table picks the fadeAdjust start value per
+ * fade family (subtractive fades start at the speed, additive at 0). The
+ * .rodata phase wall (jump table). Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+#else
+s32 OpcodeFuncFade(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fade", 8);
+    }
+    g_FieldState->fadeType = GET_PARAM_U8(7);
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8) + 1;
+        break;
+    default:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8);
+        break;
+    }
+    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(1, 1);
+    g_FieldState->fadeRed = FieldEventReadMemoryU8(2, 3);
+    g_FieldState->fadeGreen = FieldEventReadMemoryU8(3, 4);
+    g_FieldState->fadeBlue = FieldEventReadMemoryU8(4, 5);
+    PC_INC(9);
+    return 0;
+}
+#endif
 
 /* The two volatile casts are delay-slot barriers, not a claim about the
  * hardware. gcc reorg happily sinks a plain store sitting just ahead of a call
@@ -5872,7 +8150,51 @@ s32 OpcodeFuncNfade(void) {
  * The `!= 0` arm takes no cast because the original does not sign-extend
  * there -- a zero test does not need it. */
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+/* FADEW (0x6C): block the script until the active screen fade completes. The
+ * wait test depends on the fade type: subtractive fades complete when
+ * fadeAdjust reaches 0, the hold-colour fades when fadeAdjust reaches
+ * fadeSpeed, and the rest when fadeAdjust hits 0. Returns 1 while waiting, 0
+ * (advancing the PC) once done. Jump-table fadeType dispatch; the .rodata phase
+ * wall. Codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+#else
+s32 OpcodeFuncFadew(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fadew", 0);
+    }
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_INSTANT:
+    case FFT_INSTANT_BLACK:
+    case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
+    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
+        if (g_FieldState->fadeAdjust == 0) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
+    case FFT_FIELD_TO_STANDARD_ADD_HOLD_COLOR:
+    default:
+        if (g_FieldState->fadeAdjust == g_FieldState->fadeSpeed) {
+            PC_INC(1);
+            return 0;
+        }
+        return 1;
+    }
+}
+#endif
 #else
 s32 OpcodeFuncFadew(void) {
     if (g_DebugLevel & 3) {
