@@ -1,6 +1,13 @@
 # Toolchain lever: a maspsx rewrite-rule engine for the gcc-2.6.3 walls
 
-Status: **draft / not implemented.** This is the design for the one lever that
+Status: **Rule 1 (`$at` re-materialisation) IMPLEMENTED** in the maspsx fork
+(commit `9aa660a`, branch `override-hack`) as `MASPSX_AT_REMAT(name)`. Opt-in
+per function via a zero-byte `asm("# maspsx-atremat:<name>")` marker; the pass
+runs as a post-pass over `process_lines` output with a match/guard/rewrite
+engine (8 fixtures in `tools/maspsx/tests/test_at_remat.py`). See
+*Implementation notes* at the bottom for the gap it does not yet close.
+
+This is the design for the one lever that
 unblocks the bulk of the remaining `src/field/field.c` `INCLUDE_ASM` functions.
 It exists because the evidence (below) says the C is already correct for most of
 them and the residue is a small set of gcc/aspsx codegen idioms that no amount of
@@ -173,3 +180,23 @@ repeated per use.
 The measure of success: the number of `#else /* NON_MATCHINGS */` bodies in
 field.c that move to plain C (via pragma) or to matched (via a rule), without a
 single red `make build`.
+
+## Implementation notes (Rule 1 shipped, maspsx 9aa660a)
+
+The `$at` pass is live as `MASPSX_AT_REMAT(name)`. Two findings from building
+it that the draft did not foresee:
+
+* **gcc emits the CSEd base as a single `la $r,Sym`, not always a
+  `lui`/`addiu` pair.** The matcher accepts both (the assembler expands `la`
+  identically). Tests cover each form.
+* **The marker must be a top-level `asm("...")`, not `__asm__(...)`.** cc1
+  2.6.3 rejects a top-level `__asm__` whose string begins with `#`, but passes
+  a top-level `asm(...)` straight through to the assembler as a comment. The
+  call site needs a trailing `;` (`MASPSX_AT_REMAT(Fn);`).
+
+Known residual: the pass repairs the `$at` idiom but not gcc *sinking an
+unrelated store* into the same window. `FieldDebugPageAddPos` splits both bases
+correctly, yet still mismatches because gcc moves the `D_8009D824 = 1` store
+below the array accesses — a store-ordering gap that needs its own rule (or the
+pragma). Convert a function to the marker only when checkfn confirms a clean
+MATCH; otherwise keep it pinned.
