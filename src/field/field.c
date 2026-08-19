@@ -6836,7 +6836,122 @@ void OpcodeFuncPtura(void) {
     FieldEntityTurnToEntity(actorId);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
+/* Turn the current entity to face a target entity: snapshot the current
+ * direction, compute the target facing from the position delta, and set the
+ * turn state machine going (choosing the short way around). m2c seed; residual
+ * is the per-model address CSE and the turn-delta sign logic. Pinned pending a
+ * permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
+#else
+void FieldEntityTurnToEntity(u8 actorId)
+{
+    s32 sp10;
+    s32 sp14;
+    s32 sp18;
+    s32 sp20;
+    s32 sp24;
+    s32 sp28;
+    s32 sp30;
+    s16 temp_v0_2;
+    s16 temp_v1_4;
+    s16 temp_v1_5;
+    s16 var_a0_2;
+    s16 var_v0;
+    s32 temp_a1_2;
+    s32 temp_a3;
+    s32 temp_t0;
+    s32 temp_t1;
+    s32 var_a0;
+    u16 temp_a1_3;
+    u16 temp_a3_2;
+    u16* temp_a0;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    u8 temp_v1_3;
+    void* temp_a1;
+    void* temp_a2;
+    void* temp_v0;
+    void* var_a0_3;
+
+    temp_v1 = *(&D_8007EB98 + D_800722C4);
+    if ((temp_v1 == 0xFF) || (*(&D_8007EB98 + (s16) actorId) == 0xFF)) {
+        var_a0 = D_800722C4 * 2;
+        goto block_5;
+    }
+    temp_a1 = (temp_v1 * 0x84) + D_8009C544;
+    temp_v1_2 = temp_a1->unk3B;
+    if (temp_v1_2 == 3) {
+        temp_a1->unk3B = 0U;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
+        var_a0 = D_800722C4 * 2;
+block_5:
+        temp_a0 = var_a0 + &D_800831FC;
+        *temp_a0 += 4;
+        return;
+    }
+    if ((temp_a1->unk3A == 0) || (temp_v1_2 != 2) || (temp_a1->unk39 != (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2)) {
+        temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+        temp_v0->unk3C = (s16) temp_v0->unk38;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B = 2;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = (u8) (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2;
+        temp_t0 = (s32) ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unkC >> 0xC;
+        sp10 = temp_t0;
+        temp_t1 = (s32) ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk10 >> 0xC;
+        sp14 = temp_t1;
+        sp18 = (s32) ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk14 >> 0xC;
+        temp_a1_2 = (s32) ((*(&D_8007EB98 + (s16) actorId) * 0x84) + D_8009C544)->unkC >> 0xC;
+        sp20 = temp_a1_2;
+        temp_a3 = (s32) ((*(&D_8007EB98 + (s16) actorId) * 0x84) + D_8009C544)->unk10 >> 0xC;
+        sp24 = temp_a3;
+        sp28 = (s32) ((*(&D_8007EB98 + (s16) actorId) * 0x84) + D_8009C544)->unk14 >> 0xC;
+        if (temp_t0 == temp_a1_2) {
+            if (temp_t1 == temp_a3) {
+                sp10 = temp_t0 + 1;
+            }
+        }
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E = (s16) (FieldEntityDirByVec((VECTOR* ) &sp10, (VECTOR* ) &sp20, &sp30) & 0xFF);
+        temp_v1_3 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+        switch (temp_v1_3) {                        // irregular
+            case 2:
+                temp_a2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                temp_a1_3 = temp_a2->unk3E;
+                temp_a3_2 = temp_a2->unk3C;
+                temp_v1_4 = temp_a1_3 - temp_a3_2;
+                var_a0_2 = temp_v1_4;
+                if (temp_v1_4 & 0x8000) {
+                    var_a0_2 = ~temp_v1_4 + 1;
+                }
+                if (var_a0_2 >= 0x81) {
+                    if ((s16) temp_a3_2 < (s16) temp_a1_3) {
+                        temp_a2->unk3E = (u16) (temp_a1_3 - 0x100);
+                    } else {
+                        temp_a2->unk3E = (u16) (temp_a1_3 + 0x100);
+                    }
+                }
+                break;
+            case 1:
+                var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                temp_v1_5 = var_a0_3->unk3E;
+                if ((s32) var_a0_3->unk38 < temp_v1_5) {
+                    var_v0 = temp_v1_5 - 0x100;
+block_27:
+                    var_a0_3->unk3E = var_v0;
+                }
+                break;
+            case 0:
+                var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                temp_v0_2 = var_a0_3->unk3E;
+                var_v0 = temp_v0_2 + 0x100;
+                if (temp_v0_2 < (s32) var_a0_3->unk38) {
+                    goto block_27;
+                }
+                break;
+        }
+    }
+}
+#endif
 
 extern u8 D_800722C4;
 extern /*?*/s32 D_8007EB98;
