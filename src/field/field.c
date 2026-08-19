@@ -2077,6 +2077,7 @@ void KawaiClearData(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiExecute);
 
+void KawaiSetCustomLightToModelPkts(FieldModelEntry* model, u8* data);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
@@ -2425,7 +2426,85 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+/* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
+ * copies the 0x1E-byte descriptor into the slot: 11 GTE params (colour matrix
+ * data[0..2], light matrix data[3..0xA]) then eight LE u16 light/vertex colour
+ * pairs. data[0]==1 expands the slot into the D_800DFE1C scratch buffer (the
+ * pairs byte-wise, lo then hi) and calls the handwritten GTE driver. The slot
+ * reuses the KawaiFadeModelColor table's 0x3C stride but a flat lighting-blob
+ * layout. The apply arm re-materialises each scratch byte store through $at
+ * (the scratch-quad $at remat wall, same as KawaiFadeModelColor); codegen
+ * pinned via MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+#else
+s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
+    u8* slot;
+    u16 pair;
+
+    slot = (u8*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot[0x00] = data[0x02];
+        slot[0x01] = data[0x03];
+        slot[0x02] = data[0x04];
+        slot[0x03] = data[0x05];
+        slot[0x04] = data[0x06];
+        slot[0x05] = data[0x07];
+        slot[0x06] = data[0x08];
+        slot[0x07] = data[0x09];
+        slot[0x08] = data[0x0A];
+        slot[0x09] = data[0x0B];
+        slot[0x0A] = data[0x0C];
+        *(u16*)(slot + 0x0C) = data[0x0E] | (data[0x0F] << 8);
+        *(u16*)(slot + 0x0E) = data[0x10] | (data[0x11] << 8);
+        *(u16*)(slot + 0x10) = data[0x12] | (data[0x13] << 8);
+        *(u16*)(slot + 0x12) = data[0x14] | (data[0x15] << 8);
+        *(u16*)(slot + 0x14) = data[0x16] | (data[0x17] << 8);
+        *(u16*)(slot + 0x16) = data[0x18] | (data[0x19] << 8);
+        *(u16*)(slot + 0x18) = data[0x1A] | (data[0x1B] << 8);
+        *(u16*)(slot + 0x1C) = data[0x1E] | (data[0x1F] << 8);
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot[0];
+        D_800DFE1C[1] = slot[1];
+        D_800DFE1C[2] = slot[2];
+        D_800DFE1C[3] = slot[3];
+        D_800DFE1C[4] = slot[4];
+        D_800DFE1C[5] = slot[5];
+        D_800DFE1C[6] = slot[6];
+        D_800DFE1C[7] = slot[7];
+        D_800DFE1C[8] = slot[8];
+        D_800DFE1C[9] = slot[9];
+        D_800DFE1C[0x0A] = slot[0x0A];
+        pair = *(u16*)(slot + 0x0C);
+        D_800DFE1C[0x0B] = pair;
+        D_800DFE1C[0x0C] = pair >> 8;
+        pair = *(u16*)(slot + 0x0E);
+        D_800DFE1C[0x0D] = pair;
+        D_800DFE1C[0x0E] = pair >> 8;
+        pair = *(u16*)(slot + 0x10);
+        D_800DFE1C[0x0F] = pair;
+        D_800DFE1C[0x10] = pair >> 8;
+        pair = *(u16*)(slot + 0x12);
+        D_800DFE1C[0x11] = pair;
+        D_800DFE1C[0x12] = pair >> 8;
+        pair = *(u16*)(slot + 0x14);
+        D_800DFE1C[0x13] = pair;
+        D_800DFE1C[0x14] = pair >> 8;
+        pair = *(u16*)(slot + 0x16);
+        D_800DFE1C[0x15] = pair;
+        D_800DFE1C[0x16] = pair >> 8;
+        pair = *(u16*)(slot + 0x18);
+        D_800DFE1C[0x17] = pair;
+        D_800DFE1C[0x18] = pair >> 8;
+        D_800DFE1C[0x1B] = slot[0x1C];
+        KawaiSetCustomLightToModelPkts(model, D_800DFE1C);
+        return 0;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
 
@@ -2606,7 +2685,71 @@ void FieldEventUpdate(s32 arg0) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventRunInit);
+/* Walks every entity's first script and runs its initialisation opcodes
+ * (everything up to the terminating 0). The script-offset table sits past the
+ * entity-name table and the extras table in the script header. Semantically
+ * correct; codegen pinned via MASPSX_OVERRIDE: gcc 2.6.3 fixes the address
+ * arithmetic order (the <<6/<<3/<<1 sequence) and re-materialises the script
+ * pointer, a conserved-pair the permuter plateaus on (best 1075 after the
+ * override-strip fix, iter 55k). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRunInit);
+#else
+void FieldEventRunInit(void) {
+    s16 numExtras;
+    s32 scriptBase;
+    u16 pc;
+    u16* slot;
+    u16* slot2;
+    u8 lo;
+    u8 op;
+    u8 op2;
+
+    g_FieldModelCount = 0;
+    g_CurrentEntity = 0;
+    if (g_FieldScripts->numEntities != 0) {
+        do {
+            if (g_FieldScriptDebugFlags & 3) {
+                FieldDebugStringCopy(g_DebugText, &D_800E0628);
+                FieldDebugStringConcat(
+                    g_DebugText,
+                    (u8*)g_FieldScripts + (g_CurrentEntity * 8) + 0x20);
+                if (g_FieldScriptDebugFlags & 1) {
+                    SetStrToDebugRow(4, 0, g_DebugText);
+                }
+                if (g_FieldScriptDebugFlags & 2) {
+                    DebugPrintToFieldWindow(g_DebugText);
+                }
+            }
+            scriptBase = g_CurrentEntity << 6;
+            numExtras = g_FieldScripts->numExtras * 4;
+            lo = ((u8*)g_FieldScripts + scriptBase +
+                  (g_FieldScripts->numEntities * 8) + numExtras)[0x20];
+            slot = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            *slot = (u16)lo;
+            *slot = lo | (((u8*)g_FieldScripts + scriptBase +
+                           (g_FieldScripts->numEntities * 8) + numExtras)[0x21]
+                          << 8);
+            op = *((u8*)g_FieldScripts + *slot);
+            g_FieldCurrentOpcode = op;
+            if (op != 0) {
+                do {
+                    g_FieldOpcodes[g_FieldCurrentOpcode]();
+                    op2 = *((u8*)g_FieldScripts +
+                            *((u16*)((g_CurrentEntity * 2) +
+                                     (u8*)g_FieldScriptPC)));
+                    g_FieldCurrentOpcode = op2;
+                } while (op2 != 0);
+            }
+            slot2 = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            pc = *slot2;
+            g_CurrentEntity += 1;
+            *slot2 = pc + 1;
+        } while ((u8)g_CurrentEntity < (u8)g_FieldScripts->numEntities);
+        g_CurrentEntity = 0;
+    }
+}
+#endif
 
 /* Enable the loaded field models that correspond to party members, then
  * disable (make non-solid, non-talkable, invisible) every model whose loader
