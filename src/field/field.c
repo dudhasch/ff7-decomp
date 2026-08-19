@@ -2597,7 +2597,219 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiExecute);
 void KawaiSetCustomLightToModelPkts(FieldModelEntry* model, u8* data);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
+extern u8 D_800DF114;
+extern /*?*/s32 D_800DF520;
+
+/* Apply the GTE lighting to each vertex colour of a model's packets: for each
+ * part's polygons run the NormalColorColSingle GTE op and write the result
+ * into the packet's RGB. m2c seed; the residual is the GTE intrinsic codegen
+ * (lwc2/nccs/swc2) and the per-part stride walking. Pinned pending a permuter
+ * pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
+#else
+void KawaiSetVertexColorFromLighting(void* arg0)
+{
+    s32* var_a3;
+    u32 temp_t3;
+    u32 temp_t3_2;
+    u32 temp_t3_3;
+    u32 temp_t3_4;
+    u32 temp_t3_5;
+    u32 temp_t3_6;
+    u32 temp_t3_7;
+    u32 temp_t3_8;
+    u32 temp_t7;
+    u32 temp_t7_2;
+    u32 var_t0;
+    u32 var_t0_2;
+    u32 var_t0_3;
+    u32 var_t0_4;
+    u32 var_t0_5;
+    u32 var_t0_6;
+    u32 var_t0_7;
+    u32 var_t0_8;
+    u32 var_v1;
+    u32 var_v1_2;
+    u32 var_v1_3;
+    u32 var_v1_4;
+    u8* var_a1;
+    u8* var_a1_2;
+    u8* var_a1_3;
+    u8* var_a1_4;
+    u8* var_t2;
+    u8* var_t2_2;
+    u8* var_t2_3;
+    u8* var_t2_4;
+
+    var_a3 = arg0->unk1C;
+    if (D_800DF114 != 0) {
+        var_a3 += arg0->unk16;
+    }
+    temp_t7 = arg0->unk4;
+    temp_t3 = temp_t7 & 0xFF;
+    var_t0 = 0;
+    if (temp_t3 != 0) {
+        var_t2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1 += 1;
+                } while (var_v1 < 4U);
+                *var_t2 = *var_t2;
+            }
+            var_t0 += 1;
+            var_t2 += 0x34;
+            var_a3 += 0x34;
+        } while (var_t0 < temp_t3);
+    }
+    temp_t3_2 = (u32) (temp_t7 & 0xFF00) >> 8;
+    var_t0_2 = 0;
+    if (temp_t3_2 != 0) {
+        var_t2_2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_2 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_2 += 1;
+                } while (var_v1_2 < 3U);
+                *var_t2_2 = *var_t2_2;
+            }
+            var_t0_2 += 1;
+            var_t2_2 += 0x28;
+            var_a3 += 0x28;
+        } while (var_t0_2 < temp_t3_2);
+    }
+    temp_t3_3 = (temp_t7 >> 0x10) & 0xFF;
+    var_t0_3 = 0;
+    if (temp_t3_3 != 0) {
+        var_a1 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1 = *var_a1;
+            }
+            var_t0_3 += 1;
+            var_a1 += 0x28;
+            var_a3 += 0x28;
+        } while (var_t0_3 < temp_t3_3);
+    }
+    temp_t3_4 = temp_t7 >> 0x18;
+    var_t0_4 = 0;
+    if (temp_t3_4 != 0) {
+        var_a1_2 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_2 = *var_a1_2;
+            }
+            var_t0_4 += 1;
+            var_a1_2 += 0x20;
+            var_a3 += 0x20;
+        } while (var_t0_4 < temp_t3_4);
+    }
+    temp_t7_2 = arg0->unk8;
+    temp_t3_5 = temp_t7_2 & 0xFF;
+    var_t0_5 = 0;
+    if (temp_t3_5 != 0) {
+        var_a1_3 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_3 = *var_a1_3;
+            }
+            var_t0_5 += 1;
+            var_a1_3 += 0x14;
+            var_a3 += 0x14;
+        } while (var_t0_5 < temp_t3_5);
+    }
+    temp_t3_6 = (u32) (temp_t7_2 & 0xFF00) >> 8;
+    var_t0_6 = 0;
+    if (temp_t3_6 != 0) {
+        var_a1_4 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
+                M2C_ERROR(/* unknown instruction: nccs */);
+                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
+                *var_a1_4 = *var_a1_4;
+            }
+            var_t0_6 += 1;
+            var_a1_4 += 0x18;
+            var_a3 += 0x18;
+        } while (var_t0_6 < temp_t3_6);
+    }
+    temp_t3_7 = (temp_t7_2 >> 0x10) & 0xFF;
+    var_t0_7 = 0;
+    if (temp_t3_7 != 0) {
+        var_t2_3 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_3 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_3 += 1;
+                } while (var_v1_3 < 3U);
+                *var_t2_3 = *var_t2_3;
+            }
+            var_t0_7 += 1;
+            var_t2_3 += 0x1C;
+            var_a3 += 0x1C;
+        } while (var_t0_7 < temp_t3_7);
+    }
+    temp_t3_8 = temp_t7_2 >> 0x18;
+    var_t0_8 = 0;
+    if (temp_t3_8 != 0) {
+        var_t2_4 = var_a3 + 7;
+        do {
+            if (*var_a3 != 0) {
+                var_v1_4 = 0;
+                do {
+                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
+                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
+                    M2C_ERROR(/* unknown instruction: nccs */);
+                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
+                    var_v1_4 += 1;
+                } while (var_v1_4 < 4U);
+                *var_t2_4 = *var_t2_4;
+            }
+            var_t0_8 += 1;
+            var_t2_4 += 0x24;
+            var_a3 += 0x24;
+        } while (var_t0_8 < temp_t3_8);
+    }
+}
+#endif
 
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetColorToModelPkts);
