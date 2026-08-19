@@ -169,9 +169,67 @@ static void EscapeCaptureScreen(void) {
  * each of `vy`, `vx`, `m` and `c0`, five m/n split patterns for each of the two
  * v-coordinate statements, and every declaration order. It ran to completion
  * and found nothing below the score of this body -- several distinct points tie
- * with it, none beat it. So the remaining twelve rows are not reachable through
- * any of those four axes, and re-running that space is wasted time. The next
- * hypothesis has to come from somewhere else. */
+ * with it, none beat it.
+ *
+ * That space was empty because the knob is not in it. Reading cc1's own RTL
+ * (`-dL`, see CLAUDE.md) settles what the two slots are: the row loop's
+ * `strength_reduce` emits one `(set (reg N) <init>)` per reduced giv into the
+ * preheader, and the slot each giv ends up in follows the order of those new
+ * pseudos -- which is the *reverse* of the order the givs were discovered,
+ * i.e. reverse insn order in the loop body. This body's dump reads
+ *
+ *     (insn 1401 (set (reg:SI 580) (const_int 8)))     <- row * 8 + 8
+ *     (insn 1407 (set (reg:SI 581) (const_int -32)))   <- (row - 16) * 2
+ *
+ * and 580 < 581 is exactly why `row * 8 + 8` holds 40(sp) and `vy` holds
+ * 48(sp) here while the target has them the other way round. `vy` is written
+ * at the top of the row loop, so it is discovered first and numbered last;
+ * `row * 8 + 8` is an inner-loop invariant that scan_loop hoists into the row
+ * head, so it is discovered last and numbered first. To match, `vy`'s defining
+ * insn has to sit *after* the `row * 8 + 8` computation -- and it cannot,
+ * because its use in the Vel.vy store precedes the v-coordinate stores and the
+ * store order is fixed.
+ *
+ * Two ways out of that, both measured, both costing exactly one extra stack
+ * slot for different reasons:
+ *   - Define `vy` late: `vy = -32` before the loop, `vy = (row - 15) * 2` at
+ *     the bottom of either loop. The order does flip -- but the use precedes
+ *     the def, so the giv is not `replaceable` and the original pseudo lives
+ *     on beside it. Six spellings, all 192/114.
+ *   - Hoist `row * 8 + 8` into a row-top local above `vy`. The order flips
+ *     here too, and this is the live branch.
+ *
+ * The hoisted branch, tuned down to what these notes call p2:
+ *
+ *     for (row = 0; row < 21; row++) {
+ *         tv2 = (row + 1) * 8;          <- NOT `row * 8 + 8`
+ *         vy = (row - 16) * 2;
+ *         for (col = 0; col < 40; col++) {
+ *             ...                       <- no `m`, no `c0`
+ *             ...v0 = ...v1 = tv2 - 8;
+ *             ...v2 = ...v3 = tv2;
+ *
+ * `(row + 1) * 8` is the whole trick of that first line: written `row * 8 + 8`
+ * it exposes `row * 8` as a shared subexpression, gcc reduces *that* to a third
+ * giv, and the frame grows. And under the hoist the `m`/`c0` pair is not merely
+ * unnecessary but harmful -- dropping both takes the candidate from 42 to 16
+ * core rows, and every m/n split pattern then scores identically, which is the
+ * clearest evidence yet that those two are scaffolding rather than source.
+ *
+ * p2 puts the two induction variables in the target's slot order, which is what
+ * nothing else has managed. What it still lacks: `row * 8` in its own slot (the
+ * target computes it once per row with `sll`/`sw` and reads it back with `lbu`;
+ * p2 rematerialises `tv2 - 8` at the use), and corner addressing based at
+ * `&EscapeGrid[row][col]` rather than `[col + 1]`. Every attempt to give
+ * `row * 8` its own slot pushes it back into being a giv (`row * 8` or
+ * `row << 3` inline, 36 to 48 core) or collapses onto the long-known 52/46
+ * point (a `tv0` local at the row top, in all three positions), and every
+ * corner form that evaluates `[col]` first costs 18 core rows.
+ *
+ * So this body is still the one to ship at 12 rows, and p2 is a second,
+ * structurally different near-miss whose residue is a different problem. The
+ * two are not on one path: what this body needs is one giv discovered later,
+ * what p2 needs is one invariant kept out of the giv machinery. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else

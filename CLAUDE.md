@@ -273,6 +273,30 @@ a near-miss, in rough order of frequency:
   before the loop, `x += 2` in the body — does not buy you a spill slot: gcc
   treats it as a basic induction variable, gives it a *register*, and spills
   something else instead. There is no way to spell "keep this on the stack" in C.
+* **Two spilled induction variables holding each other's slot: read cc1's RTL,
+  do not guess.** Which stack slot each reduced giv of a loop gets is the order
+  `strength_reduce` creates their new pseudos, and that is the **reverse** of
+  the order it discovers them — reverse insn order in the loop body. You can
+  see it directly rather than inferring it from a diff:
+
+  ```shell
+  mipsel-linux-gnu-cpp <the flags from `ninja -t commands`> src/magic/escape.c \
+    | bin/str | iconv -f UTF-8 -t Shift-JIS > /tmp/e.i
+  bin/cc1-psx-26 -quiet -mcpu=3000 -mgas -O2 -G0 -dumpbase dumps/e.c -dL /tmp/e.i -o /dev/null
+  ```
+
+  The `.loop` dump ends each loop's preheader with one `(set (reg:SI N) <init>)`
+  per reduced giv; `N` ascending is the slot order. (`-dL` is loop, `-dl` is
+  local-alloc — the lowercase one silently gives you the wrong dump. `-dg` adds
+  the post-global-alloc RTL.) The consequence for the C: a value whose defining
+  insn is at the top of the loop is discovered *first* and so numbered *last*.
+  To pull it to a lower slot its def has to sit after the other giv's — which is
+  impossible when its use dominates, and that is what parks `func_801B009C`.
+  Two escapes, each costing one extra slot: defining it late with a pre-loop
+  init keeps the original pseudo alive beside the giv, and hoisting the *other*
+  value into a row-top local works only if you spell it so gcc does not see a
+  shared subexpression — `(row + 1) * 8`, never `row * 8 + 8`, or `row * 8`
+  becomes a third giv of its own.
 * **A value the target keeps in a spill slot wants to be a named local,
   computed early and used late.** gcc 2.6.3 only strength-reduces an expression
   over a loop counter when the value has a live range to speak of. Written
@@ -716,7 +740,7 @@ same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
 `ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` has one function left, `func_801B009C`
 (12 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
-and a hundred and fifty measured rejected phrasings written down. They are the
+and two hundred measured rejected phrasings written down. They are the
 cheapest work in the repo — a few kilobytes each, six or seven functions, no
 `.rodata` entanglement — and the ones near barrier in size are near-clones of it,
 so the matching C is largely a transcription with different field offsets.
@@ -853,8 +877,24 @@ The recipe, start to finish:
    ```
 
    before the diff gives a second number — call it the shape — that moves only
-   when something structural changes. Rank candidates by the shape and confirm
-   with the raw count.
+   when something structural changes.
+
+   Count it a *third* way as soon as candidates change the function's length.
+   An overlay is code followed by its own `.data`, so one extra instruction
+   slides every later byte: each `addiu at,at,14732` becomes `…,14772`, the
+   tail of the next function slides into the dumped address range, and a
+   candidate three instructions away reads as two hundred rows. The shape does
+   not save you — it normalises `N(sp)` and `0x801b…`, but objdump prints those
+   displacements in *decimal*. Collapse them too:
+
+   ```shell
+   core() { norm | sed -e 's/-{0,1}[0-9]{4,}/K/g'; }
+   ```
+
+   Rank candidates by core, sanity-check with the shape, and confirm with the
+   raw count — which stays the only verdict. This is not a nicety: every
+   hoisted variant of `func_801B009C` scored 210 to 244 raw and looked equally
+   hopeless, and the best of them was nine instructions out.
 
    **Sweep phrasings in batches, not one at a time.** `ninja build/us/<ovl>.exe`
    plus the two dumps is about two seconds, so a container invocation that loops
