@@ -1,0 +1,8 @@
+MAGIC_Escape = 0x801B0000; // MAGIC/ESCAPE.BIN entry point
+EscapeBuf = 0x801B0EB8; // size:0x4
+EscapeWobble = 0x801B0EBC; // size:0x4
+EscapeScale = 0x801B0EC0; // size:0x10
+EscapeUnk18 = 0x801B0ED0; // size:0x4
+EscapeGrid = 0x801B0ED4; // size:0x2A48
+EscapeTiles = 0x801B391C; // size:0x1A400
+EscapeBackPrims = 0x801CDD1C; // size:0x30

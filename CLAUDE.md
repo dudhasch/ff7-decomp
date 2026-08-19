@@ -25,7 +25,7 @@ the toolchain lives in a container. Prefix every build command:
 
 On a normally-provisioned Linux host, run the commands directly. Everything below
 is written unprefixed; add the prefix if `mipsel-linux-gnu-as` is not on PATH.
-See [docs/STEAMOS.md](docs/STEAMOS.md).
+See [docs/decomp/STEAMOS.md](docs/decomp/STEAMOS.md).
 
 `gh`-based commands (`make board`) run on the **host**, never in the container —
 it has no credentials.
@@ -136,7 +136,7 @@ Two exits from the budget, both of which must be *earned*, not assumed:
 ### 1. Pick a function
 
 ```shell
-.venv/bin/python3 tools/worklist.py src/field/field.c -o docs/worklist-field.md
+.venv/bin/python3 tools/worklist.py src/field/field.c -o docs/decomp/worklist-field.md
 ```
 
 This is the start of every batch. It intersects the four things that otherwise
@@ -236,6 +236,102 @@ a near-miss, in rough order of frequency:
   When the value *stored* is itself the loop counter, the reduction goes the
   other way — gcc walks a pointer for the address and you have to write that
   pointer by hand (`OpcodeFuncMhmmx`'s first store loop).
+* **One variable across several sequential loops, not one per loop.** Where a
+  function walks the same thing more than once — a grid built, then copied,
+  then transformed — the original usually reuses a single counter, and that is
+  not a style detail. gcc 2.6.3 allocates one pseudo per variable and orders
+  allocation by roughly `refs / live_length`, so merging three loops' counters
+  into one variable sums their reference counts and wins the pseudo a
+  callee-saved register early; writing three variables splits the count three
+  ways and gcc spills the one that loses, adding a `lw`/`addiu`/`sw` to every
+  iteration. `func_801B063C` in `src/magic/escape.c` matched on exactly this:
+  one `row` serving the ripple loop, the corner-copy loop and the tile loop.
+  The tell is a loop counter living on the stack in your build and in a
+  register in the target, while the register counts are otherwise equal.
+* **Put a call first in a sum: `f() + expr`, not `expr + f()`.** Written second,
+  the call forces `expr` to be computed *before* it and to survive it, so the
+  value needs a callee-saved register or a spill slot; written first, `expr` is
+  computed afterwards into a caller-saved temp. Same arithmetic, two
+  instructions apart per statement — `(rand() & 3) + (col - 21) * 2` is what
+  `func_801B009C` needs, twice.
+* **Fill a struct in field order, not in the order the stores come out.** The
+  scheduler moves stores; reading them back out of the `.s` gives you an order
+  no one wrote, and writing that order down reproduces a *different* schedule.
+  `EscapeCaptureScreen` sets two `RECT`s and the target's stores read x, w, h,
+  y — so the C said x, w, h, y and sat 16 rows out. The give-away was a load in
+  the wrong place: the target reads `DispY` *before* the w/h stores, using them
+  to cover its load-delay slot, and fills the earlier slot with the `move
+  a2,zero` that sets up `MoveImage`'s third argument. Written in the order a
+  person would — x, y, w, h — the read lands where the target has it, gcc sinks
+  the y stores past the w/h stores by itself, and the function matches. When a
+  diff is "all scheduling", check whether the source order is one the compiler
+  invented.
+* **Two allocator knobs that do nothing, so stop reaching for them.** Neither
+  the order of local declarations (all five permutations tried on
+  `func_801B009C`) nor `register` on any subset of them changes gcc 2.6.3's
+  allocation by a single instruction. And a hand-carried accumulator — `x = -42`
+  before the loop, `x += 2` in the body — does not buy you a spill slot: gcc
+  treats it as a basic induction variable, gives it a *register*, and spills
+  something else instead. There is no way to spell "keep this on the stack" in C.
+* **Two spilled induction variables holding each other's slot: read cc1's RTL,
+  do not guess.** Which stack slot each reduced giv of a loop gets is the order
+  `strength_reduce` creates their new pseudos, and that is the **reverse** of
+  the order it discovers them — reverse insn order in the loop body. You can
+  see it directly rather than inferring it from a diff:
+
+  ```shell
+  mipsel-linux-gnu-cpp <the flags from `ninja -t commands`> src/magic/escape.c \
+    | bin/str | iconv -f UTF-8 -t Shift-JIS > /tmp/e.i
+  bin/cc1-psx-26 -quiet -mcpu=3000 -mgas -O2 -G0 -dumpbase dumps/e.c -dL /tmp/e.i -o /dev/null
+  ```
+
+  The `.loop` dump ends each loop's preheader with one `(set (reg:SI N) <init>)`
+  per reduced giv; `N` ascending is the slot order. (`-dL` is loop, `-dl` is
+  local-alloc — the lowercase one silently gives you the wrong dump. `-dg` adds
+  the post-global-alloc RTL.) The consequence for the C: a value whose defining
+  insn is at the top of the loop is discovered *first* and so numbered *last*.
+  To pull it to a lower slot its def has to sit after the other giv's — which is
+  impossible when its use dominates, and that is what parks `func_801B009C`.
+  Two escapes, each costing one extra slot: defining it late with a pre-loop
+  init keeps the original pseudo alive beside the giv, and hoisting the *other*
+  value into a row-top local works only if you spell it so gcc does not see a
+  shared subexpression — `(row + 1) * 8`, never `row * 8 + 8`, or `row * 8`
+  becomes a third giv of its own.
+* **A value the target keeps in a spill slot wants to be a named local,
+  computed early and used late.** gcc 2.6.3 only strength-reduces an expression
+  over a loop counter when the value has a live range to speak of. Written
+  inline — `Vel.vx = (rand() & 3) + (col - 21) * 2;` — the product is computed
+  and consumed inside one statement and stays an `addiu`/`sll`/`addu` triple in
+  the loop body, in every spelling. Hoisted to the top of the loop as
+  `vx = (col - 21) * 2;` it becomes an induction variable with its own stack
+  slot: `li t0,-42` in the preheader, `+= 2` at the loop bottom, `lw`/`addu` at
+  the use. That is a two-instruction-per-iteration difference, and it is what
+  `func_801B009C` in `src/magic/escape.c` needs for both `(col - 21) * 2` and
+  `(row - 16) * 2`. This is the opposite of the usual reflex: naming the
+  temporary is what the compiler wanted. It is also not the same thing as the
+  accumulator in the bullet above — an accumulator is a *biv*, gets a register,
+  and lands in a different slot.
+* **Which sibling address expression is evaluated first decides whether gcc
+  reduces any of them.** Four stores of `&EscapeGrid[row][col + d]` for
+  d = 0, 1, 41, 42: with the `d = 0` form evaluated first, gcc builds a giv
+  `&EscapeGrid + col * 12`, spills it and reloads it once per iteration —
+  duplicating the `col * 12` giv it already has and costing a whole extra stack
+  slot. With the `d = 1` form evaluated first no giv forms at all and every
+  corner is computed from the two multiples plus a rematerialised base, which
+  is what the target does. Nothing else moved it: a named `EscapeCell *`,
+  `EscapeGrid[row] + col`, `[row + 0][col + 0]`, a walked `c++` pointer and a
+  flat `EscapeGrid + row * 41 + col` were all measured, and the ones that avoid
+  the giv do it by collapsing the row and column multiples into one flat giv,
+  which costs more than it saves. Evaluate the sibling into a temporary if the
+  *store* order has to stay 0, 1, 2, 3 — the compiler keeps stores in source
+  order, so the temporary is the only way to have both.
+* **`(x & 7) << 5` narrows the loads, `(x & 7) * 32` does not.** With the
+  shift, combine's `force_to_mode` pushes the 3-bit mask back through the
+  `plus` and into the `mem`s, so two `s16` fields load as `lbu`/`lbu` (or
+  `lhu` if an `s16` temp holds the sum). Written as a multiply, the mask never
+  reaches the loads and they stay `lh`/`lh` — which is what the target does in
+  `TearsRenderDrop`'s texture-page index. The two forms are the same
+  arithmetic; only the operator spelling decides the load width.
 * **`x % n` on an `s16` sign-extends the result** — gcc 2.6.3 does the modulo
   in `HImode` and adds a `sll`/`sra` pair to widen it back. Write it as
   `value - quotient * n` with an `s32` quotient. Hoist both the quotient and
@@ -432,7 +528,7 @@ uses the project name (`g_DebugLevel`). Every such reference is a permanent
 5-point penalty, so a byte-identical function can score 50 and `--stop-on-zero`
 never fires. The same tool holds this project's `PERM_*` macro catalogue, which
 turns the search from an unbounded random walk into a finite, exhaustive one;
-see [docs/PERMUTER_MACROS.md](docs/PERMUTER_MACROS.md).
+see [docs/decomp/PERMUTER_MACROS.md](docs/decomp/PERMUTER_MACROS.md).
 
 **The `permuter_strip_asm.py` step is not optional**, and skipping it is not
 obvious from the output — the search just never converges. `import.py`
@@ -488,6 +584,93 @@ per minute than the P-core ones. Scale by core count, not by thread count: with
 SMT enabled, two workers sharing a physical core each run near half speed.
 Memory is not the limit (workers are well under 1 GB each), so the only reason
 to go below `nproc - 2` is wanting the machine responsive for other work.
+
+**In a worktree, the clone has to sit beside the *worktree*.**
+`tools/docker-build.ps1` mounts `$repoRoot/../decomp-permuter` at
+`/decomp-permuter`, and `$repoRoot` is the worktree — so the sibling it looks
+for is `.claude/worktrees/decomp-permuter`, not the one next to the main
+checkout. Copy it there (a few MB; delete the copied `.git`) or `import.py`
+dies with `FileNotFoundError: 'mips-linux-gnu-as'` or is simply missing.
+
+**Do not pipe the run through `tail`.** The permuter's progress line is the
+only sign it is alive, and a pipe buffers it until the process exits — which,
+without `--stop-on-zero` firing, is never. Run it with `python3 -u` and no
+pipe. Either way the durable signal is on disk: every improvement lands in
+`nonmatchings/<fn>/output-<score>-<n>/source.c`, so
+`ls -d nonmatchings/*/output-* | sed 's/.*output-//' | sort -n | head` is the
+score board, and `diff nonmatchings/<fn>/base.c <that>/source.c` is the finding.
+
+**Read the finding, do not paste it — and re-measure it.** The permuter reaches
+for two tricks that are noise rather than insight: rewriting every `a * b` as a
+call to an `inline int inline_fn(a, b) { return a * b; }`, and introducing a
+`new_var = 0` to pass where a literal `0` stood. Both are semantically identical
+to what you wrote. The first is worse than inert: the helper is declared
+`inline`, not `static inline`, so gcc 2.6.3 emits an out-of-line copy of it —
+which on an overlay lands ahead of the function and shifts the whole address
+range, and the scorer reads that as a large improvement. On `func_801B009C` it
+reported 840 against a base of 2400; rewritten as `static inline` so no copy is
+emitted, the same change measures *worse* than doing nothing. Score every
+permuter output against the real overlay before believing it.
+
+What *is* worth taking is a structural change you can restate in ordinary C —
+naming a subexpression, splitting a statement. Even then a find is only true of
+the state it was found in. The permuter's one real result on `ESCAPE.BIN`,
+`n = (x * wave) >> 12;` hoisted out of the store that followed it, was worth 75
+instructions when `.bss` was still one big `EscapeWork` object; after that was
+split into the separate objects the original had, the plain inline expression is
+what the target compiles and the named temporary costs eight rows. Re-derive a
+find after any change to the layout it was measured against.
+
+**Pass `--stack-diffs`, or the search optimises a different function than the
+one you are matching.** The scorer's penalties are
+
+| insertion | deletion | reordering | regalloc | branch | stack |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 100 | 60 | 5 | 1 | 1 |
+
+and the last column is only counted when `--stack-diffs` is given, which is
+**off by default**: without it `src/objdump.py` normalises every `N(sp)` away
+before the diff. A residue that is mostly stack-slot *naming* — two spilled
+values holding each other's slot, so every `sw`/`lw`/`lbu` that touches them
+reads the other offset — is therefore invisible, and the hill-climb spends its
+whole budget on the rest. That is how `func_801B009C` produced a candidate the
+permuter scored at 85 against a base of 250 which measured *worse* against the
+retail overlay: it had traded two insertions (200 points) for one reordering
+(60), while the twelve stack rows it left untouched were worth nothing either
+way. Re-measure every output against the overlay, and pass `--stack-diffs`
+whenever the diff has stack rows in it.
+
+`perm_pad_var_decl` — "inserts an unused variable to adjust stack offsets" — is
+the pass aimed at exactly that residue, and its default weight is 0.5. Raise it
+in the scratch's `settings.toml` when stack layout is what you are hunting;
+`perm_temp_for_expr` is the one that introduces a named local, which is the
+lever behind the giv-versus-inline idiom above.
+
+**A symbol the C reaches through a struct makes score 0 unreachable.** The
+scorer compares relocation *symbols*, not addresses. `src/magic/escape.c`
+writes `D_801518E4[row].D_80151909`, which relocates against
+`D_801518E4 + 0x25`; the target `.s` names the byte directly as `D_80151909`.
+Same address, same bytes, permanent penalty — so `--stop-on-zero` can never
+fire even on a perfect candidate. `permuter_macros.py align` does not catch it,
+because base.c *does* contain the string `D_80151909` — as a field name. Fix it
+in the scratch, never in `asm/`: rewrite the two `%hi`/`%lo` operands in
+`nonmatchings/<fn>/target.s` to the form the C produces and reassemble with the
+`tools/permuter-bin` shim.
+
+```shell
+sed -i -e 's/%hi(D_80151909)/%hi(D_801518E4 + 0x25)/' \
+       -e 's/%lo(D_80151909)/%lo(D_801518E4 + 0x25)/' nonmatchings/<fn>/target.s
+mips-linux-gnu-as -march=vr4300 -mabi=32 nonmatchings/<fn>/target.s \
+    -o nonmatchings/<fn>/target.o
+```
+
+**Drop `-g -gcoff` from the scratch's `compile.sh`.** The project build passes
+both, so `import.py` copies them into the scratch, and cc1 then emits an `LMn`
+line label every few instructions — 162 of them for `func_801B009C`. objdump
+prints each as its own line *and* renders branch targets as `<LM4>` instead of
+`<fn+0x38>`, so the candidate object is 650 lines against the target's 488.
+Removing both flags is codegen-identical (verified instruction-for-instruction)
+and takes that noise out of the comparison.
 
 #### Toolchain overrides
 
@@ -550,6 +733,206 @@ The batch shape that works:
    budget spent → park with a note if spent.
 3. Once at the end: `make build` → `make format` → commit.
 
+## Adding a MAGIC spell overlay
+
+`disks/us/MAGIC/` holds ~300 spell-effect overlays, all of which load into the
+same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
+`BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
+`ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` has one function left, `func_801B009C`
+(12 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
+and two hundred measured rejected phrasings written down. They are the
+cheapest work in the repo — a few kilobytes each, six or seven functions, no
+`.rodata` entanglement — and the ones near barrier in size are near-clones of it,
+so the matching C is largely a transcription with different field offsets.
+
+The recipe, start to finish:
+
+1. **Find the code/data boundary.** There is no header; the file is raw code
+   from `0x801B0000`.
+
+   ```shell
+   mipsel-linux-gnu-objdump -D -b binary -m mips:3000 -EL \
+       --adjust-vma=0x801B0000 disks/us/MAGIC/MABARIA.BIN
+   ```
+
+   The last `jr $ra` plus its delay slot ends the text; everything after is
+   data, and `.bss` starts at the file size. Every `jr $ra`/delay-slot boundary
+   in between is also a function start, which predicts splat's split exactly.
+
+2. **Size `.bss` from the `lui`/`addiu` pairs.** Grep the disassembly for
+   `lui $x, 0x801b` and resolve the following `%lo`. References past the file
+   size are `.bss`; the highest one plus its size is `bss_size`. Watch for the
+   variable that sits *after* a 128 KB primitive buffer — it disassembles as
+   `0x801D....`, which is just `0x801B0000 + 0x20...`, and forgetting it makes
+   `bss_size` short by four.
+
+3. **Add the overlay** to `config/us.yaml` (mirror the `barrier` block: `sha1`
+   of the `.BIN`, `base_path: magic`, `vram_start: 0x801B0000`, and the three
+   `c` / `.data` / `.bss` subsegments), add its name to the `MAGIC` group of the
+   list in `tools/ninja/gen.py`, and create `config/symbols.magic-<name>.us.txt`
+   — the path is read even when there is nothing to name, and `make format`
+   rejects a file that holds only comments, so give it at least one real entry.
+
+4. **Let `make build` run splat once.** It writes `src/magic/<name>.c` full of
+   `INCLUDE_ASM` stubs and the `nonmatchings/*.s`, then fails to link on the
+   `.bss` symbols, which nothing defines yet. That failure is the expected
+   halfway point.
+
+   **Then run `make build` again — not `ninja` — before reading any diff.**
+   `tools/ninja/gen.py` reads the `//!` compiler line out of the `.c` at
+   *build.ninja generation* time, and returns the defaults when the file does
+   not exist yet. On the run that creates it, the overlay is therefore wired up
+   as `cc1-psx-272` + aspsx 2.34, and `ninja <target>` alone never regenerates
+   `build.ninja`, so it stays that way for every later iteration. Nothing in
+   the output says so — you just diff against code from the wrong compiler and
+   chase register-allocation ghosts. `ninja -t commands build/us/src/magic/
+   <name>.c.o | tail -1` prints which `cc1` is really being used; check it the
+   moment a diff looks structurally wrong.
+
+5. **Write the whole file as C in one pass, using `barrier.c` as the
+   template.** Do not try to land the `INCLUDE_ASM` build first: the `.s` files
+   reference the `.bss`/`.data` symbols by their splat names, and the C
+   definitions are `static`, so the intermediate state cannot link without
+   renaming everything twice. The `.data` block is transcribed as
+   `static s32 <name>_a1[] = {...}` from `od -A n -t x4 -v -j <off> -N <len>`,
+   and the descriptor struct at its tail is a `Unk801B0C98`.
+
+   **On an overlay too big for one pass, take the incremental route instead**
+   (`ESCAPE.BIN` did): declare *one* symbol per contiguous region in
+   `config/symbols.magic-<name>.us.txt` with a `// size:` annotation, and one
+   matching global object in the `.c`. splat then renders every interior
+   reference as `SYM+0x…`, so the functions still in `asm/` resolve while the
+   ones you have written are C. Two things bite here. A global declared with no
+   initialiser at all becomes a *common* symbol, which the linker places
+   wherever it likes — give it an explicit initialiser, or fold it into an
+   object that has one, or the whole `.data`/`.bss` slides and every address in
+   the diff is wrong. (`= 0` is enough: cc1-psx-26 emits an explicitly
+   zero-initialised global into `.data` in declaration order, so `EscapeBuf`,
+   `EscapeWobble` and `EscapeUnk18` sit around the non-zero `EscapeScale`
+   exactly where the original put them.) And an `INCLUDE_ASM` function whose
+   *address* you take needs a real declaration: without one gcc substitutes 0
+   for the identifier, emits `move a0,zero`, and the build says nothing (see
+   *A compile error that ninja calls a success*).
+
+   **Collapse the regions back into separate objects before tuning the diff.**
+   One symbol per region is a scaffold for the intermediate state, not the
+   shape the original had, and keeping it costs matches: gcc picks the base for
+   a strength-reduced address from the whole object, so `EscapeWork.Tiles[n]`
+   gives a giv based at `EscapeWork` and every access pays `%lo(EscapeWork +
+   0x2ab8)` where the target pays `0x70(s0)` — plus four instructions per
+   iteration to rebuild `&EscapeWork.Tiles[n]` for the calls that take its
+   address. The tell is in the target: a base register used both with small
+   offsets *and* bare (`move a0,s0`) means that base is its own object. Splitting
+   `EscapeWork` into `EscapeGrid`/`EscapeTiles`/`EscapeBackPrims` took
+   `func_801B009C` from 13695 to 4291 in one step. Splitting is safe — the splat
+   rule is per-overlay (`add_splat_config` in `tools/ninja/gen.py`), so only
+   that overlay's `asm/` is rewritten and no other overlay's `.s` is touched.
+
+6. **The verdict is the overlay's SHA-1**, not `checkfn.py`. Once the file is
+   plain C there are no `.s` files left for `checkfn` to compare against — it
+   reports `no target asm`. `build/us/<name>.exe: OK` in the `make build` tail
+   means every instruction *and* every data byte matched.
+
+   That leaves no per-function signal while you are tuning one, and the three
+   obvious substitutes each lie:
+
+   * `checkfn.py` dies with `Not able to find .o file for function` — its
+     `diff.py` call has no `-f`, so the map lookup never finds an overlay
+     function. Call `diff.py` directly instead:
+     `diff.py -o --format=plain -f build/us/src/magic/<ovl>.c.o <fn>`.
+   * That compares against `expected/build/us/src/magic/<ovl>.c.o`, which is a
+     *committed snapshot*. Rename one symbol and every reference to it reads as
+     a difference for the rest of the session — `func_801B009C` scored 3986
+     against an expected object that still said `EscapeWork`, when the real
+     residue was 54 instructions. Use it for structure, never for a score.
+   * Comparing `build/us/<ovl>.exe` against the retail `.BIN` word by word is
+     ground truth only when the lengths already agree. One inserted instruction
+     shifts the rest of the function and every later word "differs" — the same
+     `func_801B009C` read as 250 differing words when 54 instructions differed.
+
+   The honest measure is a diff of the *instruction sequence*, stripped of
+   addresses and encodings, over the function's address range:
+
+   ```shell
+   dump() { mipsel-linux-gnu-objdump -D -b binary -m mips:3000 -EL \
+       --adjust-vma=0x801B0000 "$1" | sed -n "/$2:/,/$3:/p" \
+       | sed -e 's/^ *//' -e 's/\t/ /g' -e 's/^[0-9a-f]*: [0-9a-f]* //'; }
+   dump disks/us/MAGIC/ESCAPE.BIN 801b063c 801b0dfc > /tmp/w.txt
+   dump build/us/escape.exe       801b063c 801b0dfc > /tmp/g.txt
+   diff -y --suppress-common-lines /tmp/w.txt /tmp/g.txt
+   ```
+
+   Equal line counts on both sides means the length is right; the diff is then
+   the real work left, and it names the registers so the story is readable.
+
+   Count it two ways. The raw diff is the verdict — zero is the only success —
+   but as a *search signal* it lies, because a change of one stack slot moves
+   the frame pointer offset of every `sw`/`lw` in the function and every branch
+   target after it. `func_801B009C`'s residue is 52 instructions; the raw count
+   reads 104 rows, of which more than half are the prologue, the epilogue and
+   the spill traffic all shifted by eight bytes. Normalising
+
+   ```shell
+   norm() { sed -e 's/-\{0,1\}[0-9]\{1,\}(sp)/N(sp)/g' -e 's/0x801b[0-9a-f]*/L/g'; }
+   ```
+
+   before the diff gives a second number — call it the shape — that moves only
+   when something structural changes.
+
+   Count it a *third* way as soon as candidates change the function's length.
+   An overlay is code followed by its own `.data`, so one extra instruction
+   slides every later byte: each `addiu at,at,14732` becomes `…,14772`, the
+   tail of the next function slides into the dumped address range, and a
+   candidate three instructions away reads as two hundred rows. The shape does
+   not save you — it normalises `N(sp)` and `0x801b…`, but objdump prints those
+   displacements in *decimal*. Collapse them too:
+
+   ```shell
+   core() { norm | sed -e 's/-{0,1}[0-9]{4,}/K/g'; }
+   ```
+
+   Rank candidates by core, sanity-check with the shape, and confirm with the
+   raw count — which stays the only verdict. This is not a nicety: every
+   hoisted variant of `func_801B009C` scored 210 to 244 raw and looked equally
+   hopeless, and the best of them was nine instructions out.
+
+   **Sweep phrasings in batches, not one at a time.** `ninja build/us/<ovl>.exe`
+   plus the two dumps is about two seconds, so a container invocation that loops
+   over a directory of candidate `.c` files scores a dozen or more of them in a
+   couple of minutes. Generate the candidates on the host (one `cp` of a pinned
+   base plus a `perl -0pi` edit each — the same discipline `variant_eval.py`
+   enforces for `checkfn`-scored functions), then run the loop inside the
+   container and print `name rows= shape=` per line. Fifty-eight phrasings of
+   `func_801B009C` were scored this way in six batches; the one that helped —
+   `rand()` written as the first operand rather than the second — is not
+   something anyone would have picked out of a list of guesses, and the ones
+   that were worse are now in the park note instead of being re-tried next
+   session. Gate each build on the compile diagnostics (`^src/.*:[0-9]+: `
+   minus warnings), or a variant with a typo scores as "no change".
+
+7. **A parked function's `.s` freezes at the symbol names of the moment it
+   became C.** splat writes `nonmatchings/<fn>.s` only for functions the `.c`
+   still holds as `INCLUDE_ASM`, so once you replace the stub the file stops
+   being maintained. Rename a `.bss` symbol afterwards and the stale `.s` still
+   refers to the old name; park the function again and the link fails with
+   `undefined reference to EscapeWork` naming a symbol nothing defines any more.
+   `touch config/symbols.magic-<name>.us.txt` re-runs splat and rewrites every
+   `.s` in that overlay against the current names.
+
+Naming: keep the entry point `MAGIC_<Spell>` and prefix the statics, since all
+these overlays share the `0x801B0000` address space and `config/
+sym_ovl_export.us.txt` collects them into one namespace. The entry point is not
+always at offset 0 — `GATTAI.BIN` puts its per-frame tick there and the
+`MAGIC_*` entry at `0x801B007C`.
+
+**A `static` in `src/battle/` that a MAGIC overlay calls has to lose the
+`static`.** The overlays link against `config/sym_export_battle.us.txt`, which
+is generated from `battle.elf`'s *global* symbols, so a callee the repo made
+file-local is simply undefined at link time. Dropping `static` changes nothing
+about the emitted code — only the symbol's binding — and `battle.exe` stays
+green; `func_800BBA40`, `func_800C55B8` and `func_800D56A8` were opened up this
+way. Add the declaration to `src/battle/battle.h`, not to the overlay.
+
 ## Rules that prevent wasted work
 
 **Do not use `make build` as the inner-loop signal.** While a function is
@@ -588,7 +971,7 @@ same guess reseeded. Write the near-miss note and take the next function.
 
 **Write the finding down the first time.** Every gcc idiom, every environment
 trap, every "this looked like a match but wasn't" belongs in this file or in
-`docs/PERMUTER_MACROS.md` **in the same change that discovered it** — not at
+`docs/decomp/PERMUTER_MACROS.md` **in the same change that discovered it** — not at
 the end of the session, which does not arrive. The measure of whether this is
 working: across the sessions that built this file, the stale-object trap was
 re-derived 47 times, the permuter-scratch strip 38 times, and the PowerShell
@@ -674,13 +1057,47 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
+| `tools/affected_overlays.py` | Changed files → the overlays CI has to rebuild |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
-| `docs/worklist-*.md` | Generated by `worklist.py` — regenerate per batch, never hand-edit |
+| `docs/decomp/worklist-*.md` | Generated by `worklist.py` — regenerate per batch, never hand-edit |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
 
 Overlays: `main`, `batini`, `battle`, `brom`, `dschange`, `ending`, `field`,
 `bginmenu`, `cnfgmenu`, `savemenu`, `itemmenu`, `world`, `barrier`.
+
+## Building a subset of the overlays
+
+```shell
+make build OVERLAYS=field,world      # split, compile, link and sha1-check these two
+```
+
+The overlays left out are not split, compiled or linked at all. What is left in
+is not a free choice, though — the dependencies are real:
+
+* Every overlay links against `config/sym_export.us.txt`, generated from
+  `main.elf`, so any subset still compiles the whole of `main`.
+* `main` itself links against `config/sym_ovl_export.us.txt`, regenerated from
+  the ELF of *every other* overlay. `OVERLAYS=main` therefore degrades to a full
+  build rather than pretending to narrow anything.
+* `batini` and the magic overlays link against `config/sym_export_battle.us.txt`,
+  so a `battle` change has to be checked against them too.
+
+`.github/workflows/build.yaml` uses this to scope a pull request:
+`tools/affected_overlays.py` maps the PR's changed files onto overlays and the
+build only checks those. The mapping is derived from `config/us.yaml`, not
+hardcoded — `src/menu/` alone feeds four overlays, one per `c` subsegment. It
+answers `full` for anything it does not recognise (a new source file, a change
+under `config/`, `include/` or `tools/`), and `none` for documentation, which
+skips the build job entirely.
+
+Two consequences worth knowing:
+
+* A partial build leaves `config/sym_ovl_export.us.txt` untouched, so CI runs
+  the `git diff --exit-code` on it only after a full build. Every path that can
+  change that file forces `full`, so nothing slips through.
+* `make report` and `make submit` always build everything; the knob is only on
+  `make build`.
 
 ## Progress
 
@@ -691,7 +1108,7 @@ make board      # sync the GitHub Projects board — HOST only, needs gh
 
 The board at <https://github.com/users/dudhasch/projects/5> is **generated** from
 `build/report.json`. Do not hand-edit issue bodies; the next sync overwrites them.
-See [docs/BOARD.md](docs/BOARD.md).
+See [docs/decomp/BOARD.md](docs/decomp/BOARD.md).
 
 ## Working in parallel
 
@@ -718,3 +1135,24 @@ A worktree needs three things the `git worktree add` does not give it:
 
 Cheapest path: keep one bootstrapped worktree around and reuse it rather than
 creating a fresh one per task.
+
+**`asm/` cannot be regenerated from scratch any more — copy it.** splat only
+writes `nonmatchings/<fn>.s` for functions the `.c` still references through
+`INCLUDE_ASM`; it knows nothing about `MASPSX_OVERRIDE`, whose expansion
+`.include`s the same `.s` at assembly time. So on a tree with an empty `asm/`,
+splat emits 83 of `src/field/field.c`'s 260 files and the build dies with a
+wall of
+
+```
+{standard input}:43480: Error: can't open asm/us/field/nonmatchings/field/FieldDebugInitBuffers.s for reading
+```
+
+naming exactly the functions that were converted to `MASPSX_OVERRIDE`. Nothing
+points at splat, and re-running `make build` does not help. `cp -r <bootstrapped
+tree>/asm/. asm/` fixes it; the tree is 24 MB and the files are a pure function
+of the binaries plus `config/us.yaml`, so any bootstrapped worktree will do.
+
+Only the disk files named by a `disk_path:` in `config/us.yaml` are needed, not
+all of `disks/` — that is ~1.4 MB, cheap enough to copy rather than symlink
+(and a Windows symlink into another tree would not resolve inside the build
+container anyway).

@@ -57,6 +57,26 @@ __asm__(".include \"macro.inc\"\n");
 #define MASPSX_OVERRIDE(FOLDER, NAME)
 #endif
 
+/* Opt ONE function into maspsx's $at re-materialisation post-pass: every
+ * access through a global-array base that gcc CSEd into a register is split
+ * back into the standalone `lui $at / addiu $at / addu $at / op` sequence
+ * ASPSX 2.21 emitted per access. File scope, emits zero bytes (a bare `asm`
+ * comment that cc1 passes through to the assembler untouched):
+ *
+ *   MASPSX_AT_REMAT(FieldDebugPageAddPos)
+ *   void FieldDebugPageAddPos(s16 page, s16 x, s16 y) { ... }
+ *
+ * Mutually exclusive with MASPSX_OVERRIDE on the same function: the override
+ * pins the bytes wholesale, this keeps gcc's codegen and repairs the idiom.
+ * Only meaningful for units assembled as aspsx < 2.30 (the addiu_at idiom).
+ * Note: `asm`, not `__asm__` — cc1 2.6.3 rejects a top-level `__asm__` whose
+ * string begins with `#`, but passes a top-level `asm(...)` through. */
+#ifdef USE_INCLUDE_ASM
+#define MASPSX_AT_REMAT(NAME) asm("# maspsx-atremat:" #NAME)
+#else
+#define MASPSX_AT_REMAT(NAME)
+#endif
+
 typedef signed char s8;
 typedef unsigned char u8;
 typedef signed short s16;

@@ -45,7 +45,7 @@ var symbolsAddCmd = &cobra.Command{
 			if err := builder.Clean(""); err != nil {
 				return fmt.Errorf("clean: %w", err)
 			}
-			if err := builder.Build(""); err != nil {
+			if err := builder.Build("", nil); err != nil {
 				return fmt.Errorf("build: %w", err)
 			}
 		}

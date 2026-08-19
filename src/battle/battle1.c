@@ -855,7 +855,7 @@ void func_800BB9FC(s32 arg0) {
 }
 
 // queue sound command 0x20
-static void func_800BBA40(s32 arg0) {
+void func_800BBA40(s32 arg0) {
     s32 param;
 
     D_8009A000[0] = 0x20;
@@ -1336,7 +1336,7 @@ static u_long* func_800C5040(u8 r, u8 g, u8 b, s32 tpage, u_long* ot) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C5170);
 
-static void func_800C55B8(void);
+void func_800C55B8(void);
 static void func_800C5468(u8 arg0) {
     s32 var_v0_2;
     s32 var_v0;
@@ -1365,7 +1365,7 @@ static void func_800C5468(u8 arg0) {
     }
 }
 
-static void func_800C55B8(void) {
+void func_800C55B8(void) {
     if (D_801621F0[D_801590D4].D_801621F4 == 0) {
         D_801621F0[D_801590D4].D_801621F0 = -1;
         return;

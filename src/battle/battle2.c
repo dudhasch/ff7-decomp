@@ -1194,9 +1194,9 @@ void SystemAkaoExecute(void*, s32, s32, void**);
 // Generic AKAO sound-command dispatcher: the first vararg's low 16 bits are
 // the command id, which selects how many trailing u32 params get copied into
 // the D_8009A004 queue before calling SystemAkaoExecute.
-void func_800D55F4(void* arg0, ...) {
+void func_800D55F4(s32 arg0, ...) {
     void** args = &arg0;
-    u32* dst = arg0;
+    u32* dst = (u32*)arg0;
     u32* src;
     s32 cmd = *(u16*)args;
     s32 count;
@@ -1230,7 +1230,7 @@ void func_800D55F4(void* arg0, ...) {
 
 // Project a point through the current view matrix and convert its clamped
 // on-screen X (0..319) into a 0..127 stereo pan value.
-static s32 func_800D56A8(SVECTOR* sv) {
+s32 func_800D56A8(SVECTOR* sv) {
     s16 sxy[2];
     s32 p;
     s32 flag;

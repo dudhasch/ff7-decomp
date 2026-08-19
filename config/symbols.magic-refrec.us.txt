@@ -1,0 +1,1 @@
+MAGIC_Reflect = 0x801B0000; // MAGIC/REFREC.BIN entry point

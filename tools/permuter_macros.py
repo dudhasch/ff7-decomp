@@ -26,7 +26,7 @@ Why bother, when the permuter randomizes on its own?
   * The randomizer's passes are generic. This project's near-misses are not:
     they cluster into a handful of shapes (narrow typed temporaries, stack
     slot order, address forms, store targets) that the recipes below encode
-    directly. See `recipes` for the catalogue and docs/PERMUTER_MACROS.md for
+    directly. See `recipes` for the catalogue and docs/decomp/PERMUTER_MACROS.md for
     the evidence behind each one.
 
 `align` exists because of a trap specific to this repo: the scorer compares
@@ -124,13 +124,23 @@ u8 flags;
 )
 """,
         """
-gcc 2.6.3 assigns stack slots in declaration order, so the only lever is the
-order of the declarations themselves. Keep n <= 6 (720 candidates); beyond that
-split the block and permute the half that owns the differing offsets.
+Run with `--stack-diffs` while chasing this, always: the default scorer ignores
+sp-relative offsets entirely, so without the flag the recipe has no gradient to
+climb, every candidate looks equally good, and -- worse -- the search spends its
+whole budget on the rest of the function while reporting improvements that
+measure worse. That is not hypothetical; it cost a full overnight run on
+func_801B009C.
 
-Run with `--stack-diffs` while chasing this: the default scorer ignores stack
-offset differences entirely, so without the flag this recipe has no gradient to
-climb and every candidate looks equally good.
+Try it, but do not trust it: it is *not* true that gcc 2.6.3 assigns stack
+slots in declaration order. On func_801B009C all five permutations of the
+declaration block, and `register` on every subset of it, changed the allocation
+by not one instruction. Slots are assigned by reload's spill order, which
+follows allocation priority, not source order.
+
+The lever that does move slot assignment is which values become reduced
+induction variables and in what order gcc scans them -- so when this recipe
+comes up flat, the residue is usually reachable through `giv-hoist` or
+`cse-split` instead, and this block is the wrong axis rather than a hard one.
 """,
     ),
     Recipe(
@@ -376,6 +386,126 @@ plus one INS with the same text, not as a real insertion. And read the
 function's own comment block first: on a function this close to matching, the
 mechanism has usually already been worked out and written down, and re-deriving
 it costs a batch for nothing (it did here).
+""",
+    ),
+    Recipe(
+        "giv-hoist",
+        "the target carries a value in a stack slot and increments it (`li "
+        "t0,-42` in the preheader, `+= 2` at the loop bottom) where your build "
+        "recomputes it inline as an `addiu`/`sll`/`addu` triple",
+        "k sites + 1 (inline)",
+        """
+/* One PERM_ONCE key per value, with a site at each candidate hoist point and
+ * the inline form as the last alternative. */
+for (row = 0; row < 21; row++) {
+    PERM_ONCE(vy, vy = (row - 16) * 2;)
+    for (col = 0; col < 40; col++) {
+        PERM_ONCE(vy, vy = (row - 16) * 2;)
+        PERM_ONCE(vx, vx = (col - 21) * 2;)
+        ...
+        PERM_ONCE(vx, vx = (col - 21) * 2;)
+        EscapeTiles[n].Vel.vx = vx + (rand() & 3);
+""",
+        """
+gcc 2.6.3 strength-reduces an expression over a loop counter into an induction
+variable with its own stack slot only when the value is a *named local computed
+early and used late*. Inside one statement -- `(rand() & 3) + (col - 21) * 2`
+-- the product is computed and consumed with nothing in between, and no
+spelling of the arithmetic changes that: `col * 2 - 42`, `(col - 21) << 1`,
+`2 * (col - 21)` and `col + col - 42` all compile to the same triple.
+
+This is the opposite of the usual reflex, so it is easy to skip: naming the
+temporary is what the compiler wanted. It took func_801B009C in
+src/magic/escape.c from 104 rows to 22, for two values at once.
+
+Do not confuse it with a hand-carried accumulator (`vy = -32` before the loop,
+`vy += 2` at the bottom). That is a *biv*, gets a register rather than a slot,
+and takes a low pseudo -- a different slot from the one the target uses. There
+is still no way to spell keep-this-on-the-stack in C.
+
+Hoist position matters and is not guessable, which is why it is a PERM_ONCE
+sweep rather than a fixed rewrite: for the same function, the row-invariant
+value had to go to the top of the outer loop and the column one to the top of
+the inner loop. Moving either one line changed the slot count.
+""",
+    ),
+    Recipe(
+        "addr-eval-order",
+        "one of several sibling `&arr[i][j + k]` addresses becomes a spilled "
+        "giv that duplicates a multiply you already hold in a register, costing "
+        "an extra stack slot and a reload per iteration",
+        "k siblings",
+        """
+/* Which sibling is *evaluated* first is the lever; the temporary keeps the
+ * store order unchanged, so the two are independent. */
+{
+    PERM_GENERAL(EscapeCell* c = &EscapeGrid[row][col + 1];,
+                 EscapeCell* c = &EscapeGrid[row + 1][col];,
+                 EscapeCell* c = &EscapeGrid[row + 1][col + 1];)
+    EscapeTiles[n].Corner[0] = &EscapeGrid[row][col];
+    EscapeTiles[n].Corner[1] = ...;
+}
+""",
+        """
+With `&EscapeGrid[row][col]` -- the zero-offset sibling -- evaluated first, gcc
+builds a giv `&EscapeGrid + col * 12`, spills it, and reloads it once per
+iteration, duplicating the `col * 12` giv it already keeps in a register. With
+`&EscapeGrid[row][col + 1]` first, no giv forms at all and every sibling is
+computed from the two multiples plus a rematerialised base, which is what the
+target does. `[row + 1][col]` and `[row + 1][col + 1]` first both rebuild the
+giv, so the live axis is a constant on the *inner* index, not just "not first".
+
+Nothing else moved it on func_801B009C: a named `EscapeCell *`, a walked `c++`
+pointer, `EscapeGrid[row] + col`, `[row + 0][col + 0]`, and explicit
+`(u8 *)EscapeGrid + row * 492 + col * 12` byte arithmetic were all measured.
+The ones that do avoid the giv do it by collapsing the row and column multiples
+into a single flat giv, which costs more than it saves.
+
+Evaluate into a temporary rather than reordering the assignments: gcc keeps
+stores in source order, so reordering them to control evaluation order also
+reorders the stores, and the target has both -- sibling 1 evaluated first,
+stores still 0, 1, 2, 3.
+""",
+    ),
+    Recipe(
+        "cse-split",
+        "the right instructions with the wrong addressing form: `sb v0,13(s0)` "
+        "where the target has `lui at,%hi(sym + 0xD)` / `addu at,at,s1` / "
+        "`sb v0,0(at)`, or the reverse, for some of several accesses to one "
+        "indexed object",
+        "len(patterns), via PERM_GENERAL over which accesses use the alias",
+        """
+/* A second pseudo holding the same index splits the address CSE, so accesses
+ * through it take the base-register form and the rest keep maspsx's
+ * symbol+offset(index) form. Sweep which accesses use which. */
+    m = n;
+    ...
+    PERM_GENERAL(
+      EscapeTiles[m].prim[0].v0 = EscapeTiles[n].prim[1].v0 =
+          EscapeTiles[n].prim[0].v1 = EscapeTiles[m].prim[1].v1 = row * 8;,
+      EscapeTiles[n].prim[0].v0 = EscapeTiles[m].prim[1].v0 =
+          EscapeTiles[m].prim[0].v1 = EscapeTiles[n].prim[1].v1 = row * 8;)
+""",
+        """
+gcc has two ways to reach `EscapeTiles[n].field`: through a pointer it has
+already computed (`s0 = &EscapeTiles + n * 128`, then a small displacement), or
+by handing maspsx `sym + off(index)` and letting it expand a lui/addiu/addu.
+Which one each access gets is decided by CSE, and a second pseudo holding the
+same index value splits the equivalence class.
+
+Found on func_801B009C, where it is worth 10 of 22 rows -- but note two things
+before reaching for it. It only worked *jointly* with addr-eval-order's
+hoisted pointer: either change alone measured 202 rows against the retail
+overlay, both together 12. And the alias has to be non-uniform; making every
+access use it is as bad as using none (202), and a real pointer
+(`EscapeTile *tp = &EscapeTiles[n];`) in place of the integer alias does not
+work either (210).
+
+That asymmetry is the tell that this is a compiler artefact rather than source.
+Nobody wrote `m = n` and then used it for three of eight stores. Treat a
+cse-split win as evidence that the original reached the same split some other
+way -- a pointer parameter, a differently-shaped loop -- and keep looking for
+that shape. It is a legitimate rung on the ladder, not a place to stop.
 """,
     ),
     Recipe(
@@ -1156,7 +1286,14 @@ def cmd_retarget(args: argparse.Namespace) -> int:
         # `align` may already have rewritten base.c to use this very name --
         # the array-interior case, `(&D_801D252D)[...]`. The two sides then
         # agree, and "correcting" the target would break that agreement.
-        if re.search(r"\b" + re.escape(sym) + r"\b", source):
+        #
+        # A member access is not a reference to the global, though: the C in
+        # src/magic/escape.c reaches the byte at 0x80151909 as
+        # `D_801518E4[row].D_80151909`, so a plain word match sees the name and
+        # skips a rewrite that was needed -- leaving 6 points of pure naming
+        # noise, and with it a floor that `--stop-on-zero` can never reach.
+        # Anything preceded by `.` or `->` is a field, not a symbol.
+        if re.search(r"(?<![.>\w])" + re.escape(sym) + r"\b", source):
             print(f"skip     {sym}: base.c already names it")
             continue
         pattern = r"\b" + re.escape(sym) + r"\b"
@@ -1333,7 +1470,7 @@ def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="See docs/PERMUTER_MACROS.md for the method these serve.",
+        epilog="See docs/decomp/PERMUTER_MACROS.md for the method these serve.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 

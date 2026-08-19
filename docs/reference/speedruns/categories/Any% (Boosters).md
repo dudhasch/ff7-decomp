@@ -1,0 +1,1 @@
+Any% (Boosters), also known as HD Console Any% or Booster%, is the category that allows the use of boosters present on the PlayStation 4, PlayStation 5, Xbox One, and Nintendo Switch versions of the game.

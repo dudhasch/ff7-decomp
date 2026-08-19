@@ -1,0 +1,1 @@
+MAGIC_MBarrier = 0x801B0000; // MAGIC/MABARIA.BIN entry point

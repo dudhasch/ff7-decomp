@@ -220,3 +220,84 @@ overlays:
       - [0, c, barrier]
       - [0xB68, .data, barrier]
       - [0xCC0, .bss, barrier]
+  - name: mabaria
+    disk_path: disks/us/MAGIC/MABARIA.BIN
+    sha1: 9169442d3e1702b7ad4425d95367f52334f84d60
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x2000C
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-mabaria.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, mabaria]
+      - [0x5B4, .data, mabaria]
+      - [0xCA0, .bss, mabaria]
+  - name: refrec
+    disk_path: disks/us/MAGIC/REFREC.BIN
+    sha1: f13cbfffcc3222a493c03ac6ba801102c512e5a2
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x2000C
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-refrec.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, refrec]
+      - [0x584, .data, refrec]
+      - [0xC10, .bss, refrec]
+  - name: gattai
+    disk_path: disks/us/MAGIC/GATTAI.BIN
+    sha1: 1e3c0b5dd198f0a2c8d93bc575adeaed66a3d057
+    base_path: magic
+    vram_start: 0x801B0000
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-gattai.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, gattai]
+  - name: tears
+    disk_path: disks/us/MAGIC/TEARS.BIN
+    sha1: decdeb398bcfb4e8c09d0600bfba9edb4766fe4b
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x20004
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-tears.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, tears]
+      - [0x450, .data, tears]
+      - [0x460, .bss, tears]
+  - name: almighty
+    disk_path: disks/us/MAGIC/ALMIGHTY.BIN
+    sha1: e9659d8ef9e3096975df9ee044394eb9336f8715
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x20008
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-almighty.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, almighty]
+      - [0x574, .data, almighty]
+      - [0x5A8, .bss, almighty]
+  - name: escape
+    disk_path: disks/us/MAGIC/ESCAPE.BIN
+    sha1: 816a4482bc577d60526a848dae84d1c820464d4c
+    base_path: magic
+    vram_start: 0x801B0000
+    bss_size: 0x1CE78
+    symbol_addrs_path:
+      - config/sym_export.us.txt
+      - config/symbols.magic-escape.us.txt
+      - config/sym_export_battle.us.txt
+    segments:
+      - [0, c, escape]
+      - [0xEB8, .data, escape]
+      - [0xED4, .bss, escape]
