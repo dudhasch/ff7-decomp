@@ -592,6 +592,29 @@ a near-miss, in rough order of frequency:
   with `lh`, gives the copy — cse rewrites the redundant load as a register move
   and the HImode pseudo does not coalesce with the SImode one. The last is what
   a lone `move` in a branch delay slot means.
+* **An array's base address in a typed pointer local is rematerialised in
+  every loop that indexes it; as a `u8*` scaled by hand it stays in one
+  register.** `SVECTOR* normals = D_800DF520;` then `&normals[i]` gives gcc a
+  `(plus (reg) (mult (reg) 8))` it is happy to rebuild from the symbol at each
+  loop's preheader — eight `lui`/`addiu` pairs in `KawaiLightingApplyToPolyColor`
+  where the target has one at function entry. `u8* normals = (u8*)D_800DF520;`
+  with `normals + i * 8` keeps a single pseudo live across the whole function
+  and, as a bonus, emits the `addu` base-first the way the target does. Worth 14
+  instructions there. The tell is the same symbol's `%hi`/`%lo` appearing once
+  per loop in your build and once per function in the target.
+* **A base an inner loop indexes off, while the outer loop advances it, wants
+  an explicit snapshot local.** `for (i...) { for (k...) { p[k * 4 + 7] ... }
+  p += stride; }` bases the inner loop's induction variables straight on `p`;
+  the original writes `c = p;` at the top of the outer body and indexes `c`,
+  which is where the target's `move <reg>,<reg>` at each inner-loop preheader
+  comes from. It is not a redundant copy — gcc keeps the snapshot in its own
+  register and the whole allocation follows. `KawaiLightingApplyToPolyColor`
+  went from 87 rows to 43 on this one line.
+* **A pointer bumped once per outer iteration belongs in the `for` increment.**
+  `for (i = 0; i < n; i++, p += stride)` emits `i++` ahead of `p += stride`;
+  written as the body's last statement the two come out in the other order and
+  land in different branch delay slots. Eight rows across four loops, and no
+  other spelling reaches it.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's

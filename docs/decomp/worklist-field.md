@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 3 |
+| remaining `INCLUDE_ASM` | 2 |
 | handwritten — can never match | 0 |
 | blocked on a `.rodata` group | 0 |
-| **actionable** | **3** |
+| **actionable** | **2** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -20,9 +20,8 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `AddBackgroundToRender` | 658 | 0 |  |  |  |  |  |  |
-| 2 | `FieldMainLoop` | 658 | 33 |  |  |  |  |  |  |
-| 3 | `FieldMain` | 786 | 21 |  |  | yes |  |  |  |
+| 1 | `FieldMainLoop` | 658 | 33 |  |  |  |  |  |  |
+| 2 | `FieldMain` | 786 | 21 |  |  | yes |  |  |  |
 
 A `yes` in `jt` is a warning, not a verdict: the function may still be
 stuck on jump-table `.rodata` alignment until this unit is split on its

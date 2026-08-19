@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 15 |
+| remaining `INCLUDE_ASM` | 14 |
 | handwritten — can never match | 13 |
 | blocked on a `.rodata` group | 0 |
-| **actionable** | **2** |
+| **actionable** | **1** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -20,8 +20,7 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
-| 2 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
+| 1 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
 
 ## Handwritten — never attempt
 
