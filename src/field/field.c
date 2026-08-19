@@ -9482,7 +9482,93 @@ s32 OpcodeFuncSplit(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventJoinSet);
+void FieldEventSplitJoinSetMove(s16, s32, s32, s16, s32); // extern
+void FieldEventSplitJoinSetTurn(s16, u8, s32);            // extern
+extern /*?*/s32 D_80081D90;
+
+/* Drive one party member through a JOIN: state 0 starts the turn toward the
+ * leader, state 2 waits for the turn then starts the move, state 1 waits for
+ * the move then marks done, state 3 is done. Returns 1 while a step is in
+ * progress. Twin of FieldEventSplitSet. m2c seed; residual is the g_FieldModels
+ * *0x84 base regalloc and the s16 arg-widening. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventJoinSet);
+#else
+s32 FieldEventJoinSet(u8 arg0, u8 arg1)
+{
+    s32 sp18;
+    s32 sp1C;
+    s32 sp20;
+    s32 sp28;
+    s32 sp2C;
+    s32 sp30;
+    s32 sp38;
+    s32 var_v0;
+    u8 temp_s0;
+    u8 temp_v1;
+    void* temp_v0;
+
+    if (*Savemap.memory_bank_2[9] != 0xFF) {
+        temp_s0 = D_8009AD30[*Savemap.memory_bank_2[9]];
+        if (D_8009D820 & 3) {
+            FieldDebugAddParseValueToPage2("join p0=", (s32) temp_s0, 2);
+            if (D_8009D820 & 3) {
+                FieldDebugAddParseValueToPage2("join p1=", (s32) (s16) arg0, 2);
+            }
+        }
+        if ((temp_s0 != 0xFF) && ((s16) arg0 != 0xFF)) {
+            temp_v1 = *(&D_80081D90 + (s16) arg0);
+            if (temp_v1 != 1) {
+                if ((s32) temp_v1 < 2) {
+                    if (temp_v1 != 0) {
+                        return 0;
+                    }
+                    sp18 = (s32) ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unkC >> 0xC;
+                    sp1C = (s32) ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk10 >> 0xC;
+                    sp20 = (s32) ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk14 >> 0xC;
+                    sp28 = (s32) ((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)->unkC >> 0xC;
+                    sp2C = (s32) ((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)->unk10 >> 0xC;
+                    sp30 = (s32) ((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)->unk14 >> 0xC;
+                    FieldEventSplitJoinSetTurn((s16) arg0, ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk38, FieldEntityDirByVec((VECTOR* ) &sp18, (VECTOR* ) &sp28, &sp38) & 0xFF);
+                    *(&D_80081D90 + (s16) arg0) = 2;
+                    return 0;
+                }
+                if (temp_v1 != 2) {
+                    var_v0 = 1;
+                    if (temp_v1 != 3) {
+                        return 0;
+                    }
+                    // Duplicate return node #21. Try simplifying control flow for better match
+                    return var_v0;
+                }
+                if (FieldEventSplitJoinEndTurn((s16) arg0) != 0) {
+                    temp_v0 = (*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544;
+                    FieldEventSplitJoinSetMove((s16) arg0, (s32) (temp_v0->unkC * 0x10) >> 0x10, (s32) (temp_v0->unk10 * 0x10) >> 0x10, (s16) arg1, 0);
+                    *(&D_80081D90 + (s16) arg0) = 1;
+                    if (D_8009D820 & 3) {
+                        FieldDebugAddParseValueToPage2("end setmove", 0, 0);
+                        return 0;
+                    }
+                }
+                goto block_20;
+            }
+            if (FieldEventSplitJoinEndMove((s16) arg0) != 0) {
+                ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk59 = 1;
+                ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk5B = 1;
+                ((*(&D_8007EB98 + (s16) arg0) * 0x84) + D_8009C544)->unk5C = 0;
+                *(&D_80081D90 + (s16) arg0) = 3;
+                return 1;
+            }
+block_20:
+            var_v0 = 0;
+            return var_v0;
+        }
+        goto block_19;
+    }
+block_19:
+    return 1;
+}
+#endif
 
 /* Drive one party member through a SPLIT: state 0 starts the move, state 1
  * waits for the move then starts the turn, state 2 waits for the turn, state 3
