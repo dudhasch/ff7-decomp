@@ -1958,7 +1958,7 @@ void SystemMessageSetCharName(s16 battleCharId, s16 stringId) {
  * a register. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
  */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugInitBuffers);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugInitBuffers);
 #else
 void FieldDebugInitBuffers(void) {
     s32 i;
@@ -2121,7 +2121,7 @@ void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
  * Codegen pinned via MASPSX_OVERRIDE: the #else body is the verified-correct
  * C, its bytes come from the reference .s (the $at-rematerialisation wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugPageAddPos);
 #else
 void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
     D_8009D824 = 1;
@@ -2132,7 +2132,7 @@ void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
 
 /* Same $at rematerialisation residue as FieldDebugPageAddPos above. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddSize);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugPageAddSize);
 #else
 void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
     D_8009D824 = 1;
@@ -2210,7 +2210,7 @@ void FieldDebugRender(u_long* ot) {
     addPrims(ot, D_800E41C8[g_FieldDebugRb], &D_800E41C8[g_FieldDebugRb][6]);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldDebugRenderPage);
+INCLUDE_ASM("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
 
 extern /*?*/ s32 D_800E1036;
 
@@ -2221,7 +2221,7 @@ extern /*?*/ s32 D_800E1036;
  * dispatch and the OT-link store ordering. Codegen pinned via MASPSX_OVERRIDE
  * pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugRenderString);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderString);
 #else
 void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
     s16 var_t3;
@@ -2327,7 +2327,7 @@ void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
  * rebuilds `&D_800E0754 + page*378` through $at on each access where gcc CSEs
  * it. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddStrNextDebugRow);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", AddStrNextDebugRow);
 #else
 s32 AddStrNextDebugRow(s16 page, const char* str) {
     char* rows = D_800E0758 + page * 378;
@@ -2352,7 +2352,7 @@ s32 AddStrNextDebugRow(s16 page, const char* str) {
  * register. Dropping the `colors` local removed three spurious instructions and
  * fixed the frame size; the address CSE is what is left. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddColorStrNextDebugRow);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", AddColorStrNextDebugRow);
 #else
 s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
     char* rows = D_800E0758 + page * 378;

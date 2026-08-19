@@ -19,7 +19,7 @@
  * overlay carries both phases at once (the file-split residue). Codegen pinned
  * via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollInit);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollInit);
 #else
 extern u8 D_8009AC11;  // scroll mode (jump-table selector)
 extern u8 D_8009AC13;  // scroll state (0 = idle)
@@ -90,7 +90,7 @@ void FieldBGScrollInit(void) {
  * two near-duplicate branches. Codegen pinned via MASPSX_OVERRIDE pending a
  * permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldCalcPointOnLine);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
 void FieldCalcPointOnLine(void* arg0, void* arg1) {
     s16 temp_a2_3;
@@ -200,7 +200,7 @@ extern s16 D_8009C558;
  * residual is the oversized stack frame (dead locals the original declared)
  * plus regalloc. Codegen pinned via MASPSX_OVERRIDE pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBGScrollUpdate);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollUpdate);
 #else
 void FieldBGScrollUpdate(void) {
     s32 sp10;
@@ -269,7 +269,7 @@ void FieldBGScrollUpdate(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldBGUpdateDrawenv);
 
 /////////////////////////////////////////////////
 // Begin of field_entity.c
@@ -368,7 +368,7 @@ void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
  * arm keeps animLastFrame live across the branch to recompute `* 16` in the
  * delay slot where gcc reuses the already-shifted value. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityAnimationUpdate);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityAnimationUpdate);
 #else
 void FieldEntityAnimationUpdate(s32 entityId) {
     FieldModelEntry* model;
@@ -401,7 +401,7 @@ void FieldEntityAnimationUpdate(s32 entityId) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMovementUpdate);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
 
 void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
     D_8009ABF4.eventCmd = EVTCMD_FIELD_MAP_CHANGE;
@@ -417,7 +417,7 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
  * script of the best candidate. Verified C kept as the #else; codegen pinned
  * via MASPSX_OVERRIDE (the walking quality-array pointer regalloc wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityCheckTalk);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
 #else
 void FieldEntityCheckTalk(void) {
     VECTOR from;
@@ -490,7 +490,7 @@ extern u8 D_800DEF88[];
  * divisions and the quadrant branch ladder are the wall; codegen pinned via
  * MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityDirByVec);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityDirByVec);
 #else
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
     s32 dx;
@@ -570,7 +570,7 @@ extern s16 D_801144CC;
  * is the cross-product regalloc and the scratchpad access ordering. Pinned
  * pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityWalkmechCross);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
 s32 FieldEntityWalkmechCross(u16* arg0, void* arg1, void* arg2, void* arg3) {
     s16 var_v0_3;
@@ -726,7 +726,7 @@ s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
            normal[2];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityMove);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldEntityMove);
 
 extern s16 D_8009AC1C;
 
@@ -741,7 +741,7 @@ extern s16 D_8009AC1C;
  * loop, where gcc keeps one register for both and renames the rest downstream.
  */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityCollisionCheck);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCollisionCheck);
 #else
 s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
     s16 i;
@@ -794,7 +794,7 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
  * right; the original accumulates the dot product in v1 and holds y1 in a0,
  * where gcc picks the two the other way round and the swap propagates. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntitySqrDistToLine);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntitySqrDistToLine);
 #else
 s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
     s32 t;
@@ -833,7 +833,7 @@ s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
  * regalloc wall. Codegen pinned via MASPSX_OVERRIDE; the #else is verified C.
  */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityLineCheck);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineCheck);
 #else
 u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     s32* from;
@@ -917,7 +917,7 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
  * round. Neither declaration order, statement order, nor indexing with
  * `line[i]` instead of a walking pointer shifts the tie. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityLineInteract);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineInteract);
 #else
 void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
     s32* from;
@@ -1053,7 +1053,7 @@ typedef struct {
  * original -- so it needs another pass once the file is split. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
-    "asm/us/field/nonmatchings/field", FieldEntityBgTriggerActivate);
+    "asm/us/field/nonmatchings/field2", FieldEntityBgTriggerActivate);
 #else
 s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     s32 changed;
@@ -1098,7 +1098,7 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  * sound effect. Verified C kept as the #else; codegen pinned via
  * MASPSX_OVERRIDE (the dual walking-pointer regalloc wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTriggerCheck);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
 #else
 void FieldEntityTriggerCheck(
     FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
@@ -1203,7 +1203,7 @@ const u32 D_800A00DC[] = {0x00000000};
  * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
  * state. Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelLoadAndInit);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelLoadAndInit);
 #else
 void FieldModelLoadAndInit(void) {
     FieldModelData* data;
@@ -1231,7 +1231,7 @@ void FieldModelLoadAndInit(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", HandleKawaiDataInModel);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 
 // Possable Debug routine. Ran at beginning of every main field loop. (FPS?)
 void DebugRunEveryLoop(void) {}
@@ -1365,7 +1365,7 @@ void FieldRainAddToRender(
 }
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldRainUpdate);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldRainUpdate);
 #else
 
 extern u8 g_RainControl;
@@ -1467,7 +1467,7 @@ extern u8 D_8009C6D8;
  * one triggers. m2c seed; residual is the encounter-table regalloc and the
  * divide scheduling. Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBattleCheck);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
 #else
 void FieldBattleCheck(void) {
     s16 temp_v0;
@@ -1639,7 +1639,7 @@ extern u16 D_8011446C;
  * the OT-link store scheduling and the GTE RotTransPers arg setup. Codegen
  * pinned via MASPSX_OVERRIDE pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldArrowsAddToRender);
 #else
 void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
     u16 sp10;
@@ -1745,7 +1745,7 @@ void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
 // Begin of field_model.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", LoadLocalFieldModelAndInitAll);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
 
 extern u8* FieldModelCreatePktsForPart(u8* part, u8* pkts, s32 arg2, s32 arg3);
 extern void FieldModelScaleModel(FieldModelEntry* model, s16 scale, s32 arg2);
@@ -1766,7 +1766,7 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
     return pkts;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelCreatePktsForPart);
+INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldModelCreatePktsForPart);
 
 /* One texture page inside a BSX model file: where it lives in VRAM and where
  * its pixels sit relative to the start of the file. */
@@ -1827,7 +1827,7 @@ typedef struct {
  * gcc's inlined memcpy expansion (dual lwl/lw form) — a scheduler/expansion
  * coupling. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelBsxTdbModify);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelBsxTdbModify);
 #else
 void FieldModelBsxTdbModify(u8* tdb) {
     FieldTexBlockHeader* block;
@@ -1873,7 +1873,7 @@ void FieldModelBsxTdbModify(u8* tdb) {
 extern s32 D_800E0204;
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelStructInit);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
 #else
 /* 65 rows, ALL pure regalloc/stack-frame: every field offset is correct
  * (verified in diff). Target uses a minimal -0x10 frame with NO callee-saved

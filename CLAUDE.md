@@ -585,6 +585,21 @@ through `JTBL_PHASE_OVERRIDE`. Do not merge the units back together, and do not
 unit of the wrong phase, and the failure is a red `make build` with every
 instruction still diffing perfectly.
 
+**Each unit's `INCLUDE_ASM`/`MASPSX_OVERRIDE` path string has to name its own
+unit.** splat writes `asm/us/field/nonmatchings/<unit>/` from the `c`
+subsegment name, and `tools/checkfn.py` derives the same path from the `.c`
+stem — but the macro's first argument is a free string, so a unit left saying
+`.../field` after a split assembles from a directory splat no longer
+maintains. Nothing fails at the time: the old copies are byte-identical the
+day the split happens, and drift only once a `mako.sh symbols add` or a splat
+change rewrites the live ones. `KawaiExecute` and `OpcodeFuncSpcal` had
+already drifted by an `.align 3` before anyone looked, with `checkfn.py`
+reading the fresh `field4/` copy while the build assembled the stale `field/`
+one. Splitting a unit therefore has a third step after the config and the
+source: repoint every path string, and **move** the `MASPSX_OVERRIDE` `.s`
+files into the new directory by hand — splat never regenerates those, so they
+do not appear there on their own.
+
 Eight of the eleven functions this blocked are now plain matching C: `IfCheck`,
 `If2CheckSigned`, `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`,
 `OpcodeFuncSrchx`, `OpcodeFuncFadew` and `FieldEventRequestRun`. The three that

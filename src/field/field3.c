@@ -6,19 +6,19 @@
  * precedes with `.align 3`
  * -- a base it is congruent to. */
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelLoadBcx);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelLoadBcx);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelPrepareRender);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelPrepareRender);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelAddToRender);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelAddToRender);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelAnimCalcMtrxs);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelAnimCalcMtrxs);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelScaleModel);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelScaleModel);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelScalePartVrtxs);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelScalePartVrtxs);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldModelScaleAnimTranslat);
+INCLUDE_ASM("asm/us/field/nonmatchings/field3", FieldModelScaleAnimTranslat);
 
 /////////////////////////////////////////////////
 // Begin of field_kawai_char_model.c

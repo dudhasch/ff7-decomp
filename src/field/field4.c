@@ -5,9 +5,9 @@
  * 8 -> --phase 4. The large middle run: 20 of the overlay's jump tables, all 4
  * mod 8. */
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiExecute);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiExecute);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetCustomLightToModelPkts);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetCustomLightToModelPkts);
 
 extern u8 D_800DF114;
 extern /*?*/ s32 D_800DF520;
@@ -19,7 +19,7 @@ extern /*?*/ s32 D_800DF520;
  * pass. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
-    "asm/us/field/nonmatchings/field", KawaiSetVertexColorFromLighting);
+    "asm/us/field/nonmatchings/field4", KawaiSetVertexColorFromLighting);
 #else
 void KawaiSetVertexColorFromLighting(void* arg0) {
     s32* var_a3;
@@ -274,7 +274,7 @@ s32 KawaiSetColorToModelPkts(FieldModelEntry* model, u8* data) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPkts);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPartPkts);
 
 /* Load this model's animated eye/mouth textures into VRAM. The face selector
  * (arg1) is four bytes: two mouth frames, one eye frame, and a "has animation"
@@ -287,7 +287,8 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPkts);
  * #else. The target keeps the table base in a callee-saved register and
  * strength-reduces faceId*7 / faceId*3; gcc picks different registers. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiLoadEyesMouthTexToVram);
+MASPSX_OVERRIDE(
+    "asm/us/field/nonmatchings/field4", KawaiLoadEyesMouthTexToVram);
 #else
 extern u8 D_800DFCA4[]; /* mouth texture index table, stride 7 per face */
 extern u8 D_800DFD94[]; /* eye texture index table, stride 3 per face */
@@ -339,7 +340,7 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
 
@@ -350,7 +351,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
  * dual walking-pointer tag/base induction are the wall; codegen pinned via
  * MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiSetModelTransparency);
 #else
 s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
     u8* parts;
@@ -487,9 +488,10 @@ s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPktsBelowLvl);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPktsBelowLvl);
+INCLUDE_ASM(
+    "asm/us/field/nonmatchings/field4", KawaiSetColorToPartPktsBelowLvl);
 
 /* Per-KAWAI-slot colour fade record (16 slots, 0x3C each; only the first 0x14
  * bytes are used by KawaiFadeModelColor). */
@@ -517,7 +519,7 @@ extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
  * remat and the slot*0x3C strength reduction are the wall; codegen pinned via
  * MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiFadeModelColor);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiFadeModelColor);
 #else
 s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
     KawaiColorFadeSlot* slot;
@@ -600,7 +602,7 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
  * (the scratch-quad $at remat wall, same as KawaiFadeModelColor); codegen
  * pinned via MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetCustomLighting);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiSetCustomLighting);
 #else
 s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
     u8* slot;
@@ -681,7 +683,7 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
  * (same as KawaiFadeModelColor); codegen pinned via MASPSX_OVERRIDE, #else is
  * the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiColorFadeBelowLvl);
 #else
 typedef struct {
     /* 0x00 */ u16 cur0;
@@ -790,11 +792,11 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToModelPkts);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetLightingToModelPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToPartPkts);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetLightingToPartPkts);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetSplashToPktsBelowLvl);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetSplashToPktsBelowLvl);
 
 extern s32 D_800E0200;
 
@@ -806,7 +808,7 @@ extern s32 D_800E0200;
  * scheduler/strength-reduction coupling gcc cannot reproduce from C. Codegen
  * pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiInitSplashPkts);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiInitSplashPkts);
 #else
 void KawaiInitSplashPkts(void* arg0, s32 arg1) {
     s16 clut;
@@ -872,15 +874,15 @@ s32 KawaiSetPartAttribute(FieldModelEntry* model, u8* data) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiApplyBoneTransform);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiApplyBoneTransform);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiRenderClippedPart);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiRenderClippedPart);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiDirectionalColorGradient);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiDirectionalColorGradient);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiGradientColor);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiGradientColor);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiAnimatedPointLight);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiAnimatedPointLight);
 
 /////////////////////////////////////////////////
 // Begin of field_event.c
@@ -996,7 +998,7 @@ extern s8 D_8009AD38;
  * the wide store scheduling.
  * Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
 #else
 void FieldInitDefaultValues(void) {
     /* m2c could not infer these three; u8* is a placeholder chosen so the
@@ -1272,7 +1274,7 @@ void FieldInitDefaultValues(void) {
  * pointer, a conserved-pair the permuter plateaus on (best 1075 after the
  * override-strip fix, iter 55k). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRunInit);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
 void FieldEventRunInit(void) {
     s16 numExtras;
@@ -1336,7 +1338,7 @@ void FieldEventRunInit(void) {
  * the verified-correct C; its bytes come from the reference .s (the
  * s16-walking-counter strength-reduction wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEnablePartyModels);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEnablePartyModels);
 #else
 void FieldEnablePartyModels(void) {
     s16 i;
@@ -1541,7 +1543,7 @@ extern /*?*/ s32 D_8009C6DC;
  * and wrap/transition at the last frame. m2c seed; residual is regalloc across
  * the switch and the per-model address CSE. Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldUpdateAnimationState);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldUpdateAnimationState);
 #else
 void FieldUpdateAnimationState(void) {
     FieldModelEntry* temp_v0;
@@ -1820,7 +1822,7 @@ extern /*?*/ s32 D_800E4919;
  * its colour over time. m2c seed; residual is the packet-field store ordering.
  * Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", DrawFieldExitArrow);
 #else
 void DrawFieldExitArrow(s32* arg0) {
     POLY_FT4* temp_v1_5;
@@ -1912,7 +1914,7 @@ void DrawFieldExitArrow(s32* arg0) {
 // Begin of field_event_debug.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", DebugUpdateActor);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", DebugUpdateActor);
 
 /* Traces one field-script opcode to debug page 3 and/or the on-screen window:
  * the mnemonic first, then one "arg<n>=<byte>" line per operand read straight
@@ -1989,7 +1991,7 @@ void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
 /////////////////////////////////////////////////
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventReadMemoryU8);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventReadMemoryU8);
 #else
 u8 FieldEventReadMemoryU8(s16 mb_half, s16 offset) {
     s32 indx;
@@ -2088,7 +2090,7 @@ u8 FieldEventReadMemoryU8(s16 mb_half, s16 offset) {
 #endif
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventWriteMemoryU8);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventWriteMemoryU8);
 #else
 void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value) {
     u8 bankId;
@@ -2179,7 +2181,7 @@ void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value) {
 #endif
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventReadMemoryS16);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventReadMemoryS16);
 #else
 s16 FieldEventReadMemoryS16(s16 bank_id, s16 offset) {
     u8 bankId;
@@ -2326,7 +2328,7 @@ s16 FieldEventReadMemoryS16(s16 bank_id, s16 offset) {
 #endif
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventWriteMemoryS16);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventWriteMemoryS16);
 #else
 void FieldEventWriteMemoryS16(s16 arg0, s16 arg1, s16 value) {
     u8 bankId;
@@ -3341,7 +3343,7 @@ s32 OpcodeFuncPrqew(void) {
 
 // Depends on decomp of DebugUpdateActor due to shared string.
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRequest);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRequest);
 #else
 s32 FieldEventRequest(s16 type, u8 target, u8 priority, u8 scriptId) {
     s32 scriptOffset;
@@ -3670,7 +3672,7 @@ s32 OpcodeFuncLskip(void) {
 }
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMjump);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMjump);
 #else
 s32 OpcodeFuncMjump(void) {
     if (g_DebugLevel & 3) {
@@ -3951,7 +3953,7 @@ s32 OpcodeFuncFmusc(void) {
  * once the menu reports MOVCMD_DONE, clear the command and advance past the
  * operand. Verified C is the #else; codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTutor);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTutor);
 #else
 extern u8* D_800E48E0;
 
@@ -4321,7 +4323,7 @@ s32 OpcodeFuncAnimEx(void) {
  * seed; residual is the per-model address CSE and the divide scheduling.
  * Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanim);
 #else
 s32 OpcodeFuncCanim(void) {
     FieldModelEntry* temp_v1_5;
@@ -4409,7 +4411,7 @@ block_15:
  * drives the if-else chain. m2c seed; residual is the per-model address CSE
  * and the divide scheduling. Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanmEx);
 #else
 s32 OpcodeFuncCanmEx(void) {
     FieldModelEntry* temp_v1_4;
@@ -4541,7 +4543,7 @@ s32 OpcodeFuncAnimb(void) {
  * residual is the full-expression g_FieldModels[...] address CSE. Pinned
  * pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMove);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else
 s32 OpcodeFuncMove(void) {
     FieldModelEntry* temp_v0;
@@ -4623,7 +4625,7 @@ block_17:
  * Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE (the
  * g_FieldModels *0x84 base regalloc wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFmove);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFmove);
 #else
 s32 OpcodeFuncFmove(void) {
     if (g_DebugLevel & 3) {
@@ -4664,7 +4666,7 @@ s32 OpcodeFuncFmove(void) {
  * per-frame. The g_FieldModels *0x84 base regalloc is the wall; codegen pinned
  * via MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCmove);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCmove);
 #else
 s32 OpcodeFuncCmove(void) {
     if (g_DebugLevel & 3) {
@@ -4720,7 +4722,7 @@ s32 OpcodeFuncFcfix(void) {
  * (the original rematerialises the address). Codegen pinned via
  * MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncJump);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncJump);
 #else
 s32 OpcodeFuncJump(void) {
     if (g_DebugLevel & 3) {
@@ -4871,7 +4873,7 @@ void OpcodeFuncMova(void) {
  * $at remat wall); codegen pinned via MASPSX_OVERRIDE, #else is the verified
  * C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldMoveToEntityUpdate);
 #else
 s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
     FieldEntity* cur;
@@ -4974,7 +4976,7 @@ void OpcodeFuncPdira(void) {
  * either entity has no model. The g_FieldModels *0x84 base regalloc is the
  * wall; codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSetDirByActorId);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSetDirByActorId);
 #else
 void FieldEventSetDirByActorId(u8 actorId) {
     VECTOR from;
@@ -5032,7 +5034,7 @@ void OpcodeFuncPtura(void) {
  * is the per-model address CSE and the turn-delta sign logic. Pinned pending a
  * permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEntityTurnToEntity);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEntityTurnToEntity);
 #else
 void FieldEntityTurnToEntity(u8 actorId) {
     s32 sp10;
@@ -5169,7 +5171,7 @@ extern u8 D_8009D820;
  * or copies the ends into the starts (mode==0). Residual is the
  * full-expression g_FieldModels[...] address CSE; pinned pending permuter. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncOfstd);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncOfstd);
 #else
 s32 OpcodeFuncOfstd(void) {
     s8* var_a0;
@@ -5267,7 +5269,7 @@ s32 OpcodeFuncOfstw(void) {
  * tail out twice stops it cross-jumping at all (9 extra instructions), and
  * inverting the test to an early return flips the branch to `bne`. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurnw);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnw);
 #else
 s32 OpcodeFuncTurnw(void) {
     FieldEntity* model;
@@ -5298,7 +5300,7 @@ s32 OpcodeFuncTurnw(void) {
  * #else; codegen pinned via MASPSX_OVERRIDE (the g_FieldModels *0x84 base
  * regalloc wall). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurn);
 #else
 s32 OpcodeFuncTurn(void) {
     s16 dir;
@@ -5347,7 +5349,7 @@ s32 OpcodeFuncTurn(void) {
  * seed; residual is the per-model address CSE and the turn-delta sign logic.
  * Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnr);
 #else
 s32 OpcodeFuncTurnr(void) {
     s16 temp_v0_2;
@@ -7189,7 +7191,7 @@ s32 OpcodeFuncStpal(void) {
  * decomp-permuter got 265 -> 185 and no further in 13k iterations, and its one
  * find was retyping the extern to short, which is not the same address. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncStpls);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncStpls);
 #else
 s32 OpcodeFuncStpls(void) {
     RECT rect;
@@ -7229,7 +7231,7 @@ s32 OpcodeFuncLdpal(void) {
 /* LDPAL with a start entry; same address-grouping residue as OpcodeFuncStpls
  * above, and the same phrasings have been tried against it. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncLdpls);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncLdpls);
 #else
 s32 OpcodeFuncLdpls(void) {
     RECT rect;
@@ -7277,7 +7279,7 @@ void FieldEventRectClear(s16* arg0) {
  * The two are a .rodata unit -- OpcodeFuncCppal owns the "cppal" string that
  * OpcodeFuncCppal2 prints -- so neither can land without the other. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCppal);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCppal);
 #else
 s32 OpcodeFuncCppal(void) {
     s16 count;
@@ -7309,7 +7311,7 @@ s32 OpcodeFuncCppal(void) {
  * between the scaled index and the base address. Reversing the operand order in
  * the C does not move it. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCppal2);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCppal2);
 #else
 s32 OpcodeFuncCppal2(void) {
     s16 count;
@@ -7357,7 +7359,7 @@ s32 OpcodeFuncCppal2(void) {
  * ADPALs below need. The third row is the loop body swapping $a0 and $v1
  * between the two scaled indices, which is downstream of the same choice. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncRtpal);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncRtpal);
 #else
 s32 OpcodeFuncRtpal(void) {
     s16 count;
@@ -7404,7 +7406,7 @@ s32 OpcodeFuncRtpal(void) {
  * palettes come from the script here rather than from event memory, so there
  * is no `andi` to straddle in the second preheader and only one row is left. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncRtpal2);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncRtpal2);
 #else
 s32 OpcodeFuncRtpal2(void) {
     s16 end;
@@ -7484,7 +7486,7 @@ s32 OpcodeFuncRtpal2(void) {
  * the `#else` body and cannot tell that MASPSX_OVERRIDE means the .s still
  * supplies the literal.) */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncAdpal);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncAdpal);
 #else
 s32 OpcodeFuncAdpal(void) {
     s16 count;
@@ -7566,7 +7568,7 @@ s32 OpcodeFuncAdpal(void) {
  * `addiu` to straddle -- which is precisely why this one matches and its
  * sibling does not. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncAdpal2);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncAdpal2);
 #else
 s32 OpcodeFuncAdpal2(void) {
     s16 count;
@@ -7665,7 +7667,7 @@ s32 OpcodeFuncAdpal2(void) {
  * two channels from the truncated copy, which is the same inconsistency seen
  * from the other end. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMppal2);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal2);
 #else
 s32 OpcodeFuncMppal2(void) {
     u16 count;
@@ -7725,7 +7727,7 @@ s32 OpcodeFuncMppal2(void) {
  * Two rows, both &D_80095DE0's placement. Same channel extraction as
  * OpcodeFuncMppal2 above; read that note before touching this one. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMppal);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal);
 #else
 s32 OpcodeFuncMppal(void) {
     s16 count;
@@ -8181,7 +8183,7 @@ s32 OpcodeFuncSolid(void) {
  * shared PC_INC(7) tail, where the original keeps the
  * &g_FieldScriptPC[g_CurrentEntity] computation duplicated in both arms. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncVwoft);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
 s32 OpcodeFuncVwoft(void) {
     if (g_DebugLevel & 3) {
@@ -8213,7 +8215,7 @@ s32 OpcodeFuncVwoft(void) {
 s32 FieldEventJoinSet(u8, u8); // extern
 
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncJoin);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncJoin);
 #else
 /* 25 rows: gcc hoists the 0xFF constant into a saved reg ($s1) for the two
  * memory_bank_2[10]/[11] compares and reuses it across both FieldEventJoinSet
@@ -8277,7 +8279,7 @@ s32 OpcodeFuncJoin(void) {
 
 s32 FieldEventSplitSet(u8, s16, s16, s32, s32); // extern
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncSplit);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncSplit);
 #else
 /* 25 rows: same $s1 0xFF-constant hoist as OpcodeFuncJoin (twin function).
  * if==0xFF polarity matches target; the != form regressed to 39. g_FieldModels
@@ -8350,7 +8352,7 @@ extern /*?*/ s32 D_80081D90;
  * *0x84 base regalloc and the s16 arg-widening. Pinned pending a permuter pass.
  */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventJoinSet);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventJoinSet);
 #else
 s32 FieldEventJoinSet(u8 arg0, u8 arg1) {
     s32 sp18;
@@ -8457,7 +8459,7 @@ block_19:
  * *0x84 base regalloc and the s16 arg-widening (<<0x10/>>0x10) are the wall;
  * codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitSet);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitSet);
 #else
 s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
     if (g_DebugLevel & 3) {
@@ -8637,7 +8639,7 @@ s32 FieldEventSplitJoinEndMove(s16 entityId) {
  * MASPSX_OVERRIDE: the #else body is the verified-correct C; its bytes come
  * from the reference .s (the g_FieldModels *0x84 base register allocation). */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetTurn);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitJoinSetTurn);
 #else
 void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
     FieldEntity* model;
@@ -8702,7 +8704,7 @@ s32 FieldEventSplitJoinEndTurn(s16 entityId) {
  * .rodata phase wall (jump table). Verified C kept as the #else; codegen pinned
  * via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFade);
 #else
 s32 OpcodeFuncFade(void) {
     if (g_DebugLevel & 3) {
@@ -8787,7 +8789,7 @@ s32 OpcodeFuncNfade(void) {
  * (advancing the PC) once done. Jump-table fadeType dispatch; the .rodata phase
  * wall. Codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
 #ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFadew);
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFadew);
 #else
 s32 OpcodeFuncFadew(void) {
     if (g_DebugLevel & 3) {
@@ -9026,4 +9028,4 @@ s32 OpcodeFuncCkitm(void) {
 // Begin of field_opcode_special.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncSpcal);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", OpcodeFuncSpcal);
