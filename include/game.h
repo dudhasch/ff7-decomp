@@ -570,7 +570,7 @@ typedef struct {
 
 typedef struct {
     /* 0x00 */ u8 flags;     // initialized to 1, later cleared
-    /* 0x01 */ u8 kawaiType; // KAWAI second byte
+    /* 0x01 */ s8 kawaiType; // KAWAI second byte (read with lb)
     /* 0x02 */ u8 boneCount;
     /* 0x03 */ u8 partCount;
     /* 0x04 */ u8 animationCount;
@@ -821,7 +821,7 @@ extern FieldEntity g_FieldEntity[];
 extern u8 D_800756E8[]; // per-model flags, indexed by field model id
 extern s32 D_800756F8[];
 extern Unk80075D00* D_80075D00;
-extern int D_80075DEC;           // buffer index, either 0 or 1
+extern volatile u16 D_80075DEC;  // buffer index, either 0 or 1
 extern u8 g_FieldMapVars[256];   // map-local memory bank for field scripts
 extern s8 D_80077F64[2][0x3400]; // polygon buffer
 extern u8* g_FieldText;

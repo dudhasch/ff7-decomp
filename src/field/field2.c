@@ -1231,7 +1231,200 @@ void FieldModelLoadAndInit(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
+s32 FieldCalcWorldToScreenPos(SVECTOR* worldPos, long* screenPos);
+void FieldModelAnimCalcMtrxs(
+    FieldModelEntry* model, MATRIX* mtx, u8 animId, s32 frame);
+void FieldModelPrepareRender(FieldModelEntry* model);
+s32 KawaiExecute(FieldModelEntry* model, u8* kawaiData, u8 index, MATRIX* mtx);
+s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel);
+
+extern s8 D_800DF114;
+extern struct FieldRenderData* D_800DF118;
+extern u8 D_801144D8; // blink RNG cursor
+
+/* Per-frame KAWAI pass over every field entity, in four sweeps. First place
+ * each model at its entity's position plus offset and, for the model types the
+ * KAWAI script drives (4, 8, 9, 11, 12), build the animation matrices into a
+ * scratch matrix and copy the current view matrix into the model's part
+ * matrices -- everything else animates straight into the view matrix. Then
+ * queue every visible model for rendering, run its KAWAI script, and finally
+ * push the eye/mouth texture for the frame, blinking on a random countdown.
+ *
+ * 2 rows out, and both are the same row: the fourth loop's preheader loads the
+ * two eye-state constants in the other order -- target `li s4,1` then
+ * `li s6,2`, ours `li s6,2` then `li s4,1`. Everything else, including the
+ * frame size, the nine saved registers and every hard-register assignment,
+ * matches.
+ *
+ * The `blinkClosed = 2;` at the top of that loop is not decoration: gcc 2.6.3
+ * hoists a loop-invariant constant only when its defining insn is on the
+ * loop's always-executed path, so the literal 2 written inside the
+ * `KawaiA == 0` arm stays in the loop (`li v0,2` in a branch delay slot) while
+ * the 1, whose first use is the unconditional `BlinkOn == 1` compare, is
+ * hoisted into a callee-saved register. That costs the whole function a saved
+ * register and renames every s-register -- 55 rows. Assigning the 2 to a local
+ * at the top of the body makes it hoistable and takes the diff to 2.
+ *
+ * move_movables emits the hoists in insn order, so the loop-top assignment is
+ * always emitted first, and the only way to reverse it is for the 1's movable
+ * to come first -- which needs it to be a local too. Written that way
+ * (`blinkOpen = 1; blinkClosed = 2;`) the two `li`s come out in the target's
+ * order, but the allocator then gives `blinkClosed` s5 and `faceSel` s6 where
+ * the target has them the other way round: 13 rows. Measured both ways at s32
+ * and u8; the type changes nothing except that a u8 `blinkOpen` folds back
+ * into the compare and disappears. Declaration order is inert, as ever. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
+#else
+void HandleKawaiDataInModel(struct FieldRenderData* buf) {
+    SVECTOR pos;
+    long screenPos;
+    FieldModelLoaderData* models;
+    FieldModelEntry* model;
+    u8* faceSel;
+    s32* dst;
+    s32* src;
+    s16 kawaiOp;
+    s32 blink;
+    u8 blinkClosed;
+    s32 i;
+
+    faceSel = (u8*)0x1F800000;
+    D_800DF114 = D_80075DEC;
+    D_800DF118 = buf;
+    models = ((FieldModelFileDesc*)D_8007E770)->models;
+
+    for (i = 0; i < D_8009AC1C; i++) {
+        s8 kawaiType;
+
+        if (models[i].modelEntryIndex == 0xFF) {
+            continue;
+        }
+        pos.vx = (g_FieldEntity[i].PosX >> 12) + g_FieldEntity[i].OffsetX;
+        pos.vy = (g_FieldEntity[i].PosY >> 12) + g_FieldEntity[i].OffsetY;
+        pos.vz =
+            ((g_FieldEntity[i].PosZ >> 12) + g_FieldEntity[i].OffsetZ) - 10;
+        g_FieldModelData->modelEntries[models[i].modelEntryIndex].translationX =
+            pos.vx;
+        g_FieldModelData->modelEntries[models[i].modelEntryIndex].translationY =
+            pos.vy;
+        g_FieldModelData->modelEntries[models[i].modelEntryIndex].translationZ =
+            pos.vz;
+        if (FieldCalcWorldToScreenPos(&pos, &screenPos) < 0xF00) {
+            g_FieldModelData->modelEntries[models[i].modelEntryIndex]
+                .rotationZ = g_FieldEntity[i].Dir;
+            kawaiType =
+                g_FieldModelData->modelEntries[models[i].modelEntryIndex]
+                    .kawaiType;
+            if (kawaiType == 4 || kawaiType == 8 || kawaiType == 9 ||
+                kawaiType == 11 || kawaiType == 12) {
+                MATRIX mtx;
+
+                mtx.m[0][0] = mtx.m[1][1] = mtx.m[2][2] = 0x1000;
+                mtx.t[0] = mtx.t[1] = mtx.t[2] = 0;
+                mtx.m[0][1] = mtx.m[0][2] = mtx.m[1][0] = mtx.m[1][2] =
+                    mtx.m[2][0] = mtx.m[2][1] = 0;
+                *(s32*)0x1F800000 = 3;
+                FieldModelAnimCalcMtrxs(
+                    &g_FieldModelData->modelEntries[models[i].modelEntryIndex],
+                    &mtx, g_FieldEntity[i].activeAnimId,
+                    g_FieldEntity[i].animCurrentFrame >> 4);
+                dst = (s32*)g_FieldModelData
+                          ->modelEntries[models[i].modelEntryIndex]
+                          .partMatrices;
+                src = (s32*)D_80071E40;
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+                dst[3] = src[3];
+                dst[4] = src[4];
+                dst[5] = src[5];
+                dst[6] = src[6];
+                dst[7] = src[7];
+            } else {
+                *(s32*)0x1F800000 = 3;
+                FieldModelAnimCalcMtrxs(
+                    &g_FieldModelData->modelEntries[models[i].modelEntryIndex],
+                    D_80071E40, g_FieldEntity[i].activeAnimId,
+                    g_FieldEntity[i].animCurrentFrame >> 4);
+            }
+        }
+    }
+
+    for (i = 0; i < D_8009AC1C; i++) {
+        s8 kawaiType;
+
+        if (models[i].modelEntryIndex == 0xFF) {
+            continue;
+        }
+        pos.vx = g_FieldEntity[i].PosX >> 12;
+        pos.vy = g_FieldEntity[i].PosY >> 12;
+        pos.vz = (g_FieldEntity[i].PosZ >> 12) - 10;
+        if (FieldCalcWorldToScreenPos(&pos, &screenPos) < 0xF00) {
+            model = &g_FieldModelData->modelEntries[models[i].modelEntryIndex];
+            kawaiType = model->kawaiType;
+            if (kawaiType == 4 || kawaiType == 8 || kawaiType == 9 ||
+                kawaiType == 11 || kawaiType == 12) {
+                FieldModelPrepareRender(
+                    &g_FieldModelData->modelEntries[models[i].modelEntryIndex]);
+            } else {
+                model->kawaiType = -1;
+                FieldModelPrepareRender(
+                    &g_FieldModelData->modelEntries[models[i].modelEntryIndex]);
+                g_FieldModelData->modelEntries[models[i].modelEntryIndex]
+                    .kawaiType = kawaiType;
+            }
+        }
+    }
+
+    for (i = 0; i < D_8009AC1C; i++) {
+        if (models[i].modelEntryIndex == 0xFF) {
+            continue;
+        }
+        kawaiOp = g_FieldEntity[i].KawaiOp1;
+        if (kawaiOp != 1) {
+            continue;
+        }
+        pos.vx = g_FieldEntity[i].PosX >> 12;
+        pos.vy = g_FieldEntity[i].PosY >> 12;
+        pos.vz = (g_FieldEntity[i].PosZ >> 12) - 10;
+        if (FieldCalcWorldToScreenPos(&pos, &screenPos) < 0xF00) {
+            if (KawaiExecute(
+                    &g_FieldModelData->modelEntries[models[i].modelEntryIndex],
+                    g_FieldEntity[i].KawaiDataOffset, models[i].modelEntryIndex,
+                    D_80071E40) == kawaiOp) {
+                g_FieldEntity[i].KawaiOp1 = 2;
+            }
+        }
+    }
+
+    for (i = 0; i < D_8009AC1C; i++) {
+        blinkClosed = 2;
+        if (models[i].modelEntryIndex == 0xFF) {
+            continue;
+        }
+        if (g_FieldEntity[i].BlinkOn == 1) {
+            continue;
+        }
+        if (g_FieldEntity[i].KawaiA == 0) {
+            faceSel[0] = blinkClosed;
+            faceSel[1] = blinkClosed;
+            faceSel[2] = 0;
+            faceSel[3] = i;
+            blink = (g_RandomTable[D_801144D8++] & 0x1F) + 0x40;
+        } else {
+            faceSel[0] = 1;
+            faceSel[1] = 1;
+            faceSel[2] = 0;
+            faceSel[3] = i;
+            blink = g_FieldEntity[i].KawaiA - 1;
+        }
+        g_FieldEntity[i].KawaiA = blink;
+        KawaiLoadEyesMouthTexToVram(
+            &g_FieldModelData->modelEntries[i], faceSel);
+    }
+}
+#endif
 
 // Possable Debug routine. Ran at beginning of every main field loop. (FPS?)
 void DebugRunEveryLoop(void) {}
