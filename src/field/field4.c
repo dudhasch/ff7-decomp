@@ -7259,17 +7259,443 @@ s32 OpcodeFuncCppal2(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncRtpal);
+/* Rotate a palette: the run of colours ending at `count` is written back
+ * starting `start` entries along, and the tail that falls off the end wraps
+ * around to entry 0. Two passes, both walking the same pair of indices -- `i`
+ * the source entry, `j` the destination one.
+ *
+ * Three rows, no extra instructions -- all three are the same choice. The
+ * target materialises &D_80095DE0 between the `andi` that widens the palette
+ * id and the `sll` that scales it; gcc emits the `sll` first. That is the
+ * residue OpcodeFuncCppal and OpcodeFuncStpls above are parked on, and it
+ * costs one row per loop preheader here, so two. Naming the base in a local
+ * (`u8* pal = D_80095DE0;` inside the loop) moves the pair to *before* the
+ * `andi` rather than between -- one row off in the other direction, measured
+ * here at 27 rows against 13 for the plain form, though it is what the two
+ * ADPALs below need. The third row is the loop body swapping $a0 and $v1
+ * between the two scaled indices, which is downstream of the same choice. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncRtpal);
+#else
+s32 OpcodeFuncRtpal(void) {
+    s16 count;
+    u8 src;
+    u8 dst;
+    s16 start;
+    s16 i;
+    s16 j;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncRtpal2);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("rtpal", 6);
+    }
+    count = GET_PARAM_U8(6) + 1;
+    src = FieldEventReadMemoryU8(1, 3);
+    dst = FieldEventReadMemoryU8(2, 4);
+    start = FieldEventReadMemoryU8(4, 5);
+    i = 0;
+    for (j = start; j <= count; j++) {
+        u16* to = (u16*)(D_80095DE0 + dst * 32);
+        u16* from = (u16*)(D_80095DE0 + src * 32);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAdpal);
+        to[j] = from[i];
+        i++;
+    }
+    j = 0;
+    for (i = count - start; i <= count; i++) {
+        u16* to = (u16*)(D_80095DE0 + dst * 32);
+        u16* from = (u16*)(D_80095DE0 + src * 32);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncAdpal2);
+        to[j] = from[i];
+        j++;
+    }
+    PC_INC(7);
+    return 0;
+}
+#endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMppal2);
+/* As RTPAL, but source and destination each get their own start entry, so the
+ * rotation can move a run between two palettes as well as within one.
+ *
+ * One row, the same &D_80095DE0 placement as OpcodeFuncRtpal above. Here the
+ * named-base spelling is the better of the two (11 rows against 23) and is
+ * kept, so the pair lands one slot early rather than one slot late. Both
+ * palettes come from the script here rather than from event memory, so there
+ * is no `andi` to straddle in the second preheader and only one row is left. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncRtpal2);
+#else
+s32 OpcodeFuncRtpal2(void) {
+    s16 end;
+    u8 src;
+    u8 dst;
+    s16 srcStart;
+    s16 dstStart;
+    s16 i;
+    s16 j;
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMppal);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("rtpal", 7);
+    }
+    end = FieldEventReadMemoryU8(4, 7) + 1;
+    src = GET_PARAM_U8(3);
+    dst = GET_PARAM_U8(4);
+    srcStart = FieldEventReadMemoryU8(1, 5);
+    dstStart = FieldEventReadMemoryU8(2, 6);
+    end += srcStart;
+    i = srcStart;
+    for (j = dstStart; j <= end; j++) {
+        u8* pal = D_80095DE0;
+        u16* to = (u16*)(pal + dst * 32);
+        u16* from = (u16*)(pal + src * 32);
+
+        to[j] = from[i];
+        i++;
+    }
+    j = srcStart;
+    for (i = end - dstStart; i <= end; i++) {
+        u8* pal = D_80095DE0;
+        u16* to = (u16*)(pal + dst * 32);
+        u16* from = (u16*)(pal + src * 32);
+
+        to[j] = from[i];
+        j++;
+    }
+    PC_INC(8);
+    return 0;
+}
+#endif
+
+/* Add a signed per-channel delta to every colour of a palette. The three
+ * deltas arrive as bytes, so a set sign bit is widened by hand -- `x ^= 0xFF00`
+ * on a value already known to have bit 7 set is the original's sign extension.
+ * Each channel is clamped to 0..0x1F on its own, and a colour that lands on
+ * zero but did not start there is forced to 0x8000, since an all-zero entry is
+ * the PS1's transparent pixel rather than black.
+ *
+ * ONE row from matching, and it is the documented one: the target puts the
+ * `lui`/`addiu` of &D_80095DE0 between the `andi` that widens srcPal and the
+ * `sll` that scales it, gcc puts the `sll` first. Every other instruction and
+ * every register in the function is identical.
+ *
+ * Three things got it here, each measured:
+ *   - `count` as s16, not u16. The s16->int widening collapses to exactly the
+ *     `move a0,s4` the target has ahead of the zero-trip guard, and makes that
+ *     guard `beqz` rather than `blez`. u16 folds the copy away and loses two
+ *     rows. OpcodeFuncMppal2 below has the same loop shape and wants u16 --
+ *     it has no such copy -- so this is not a house style, check each one.
+ *   - `from` declared before `to` inside the loop; that is the order the
+ *     target computes the two bases in, and it is worth 14 rows. RTPAL and
+ *     RTPAL2 above compute the store base first and want the opposite order.
+ *   - no named local for the base. `u8* pal = D_80095DE0;` puts the pair
+ *     before the `andi` instead of between: one row, but in the other
+ *     direction, and it drags the $v0/$v1 and $s2/$s3 assignments with it.
+ * Rejected, both measured: hoisting the two pointers above the loop (3 rows),
+ * and widening srcPal into its own local inside the loop, which gcc folds
+ * straight back out and which changes nothing at all.
+ *
+ * This one row is what parks OpcodeFuncAdpal2 below, which *does* match
+ * byte-for-byte: the two share the "adpal" literal, so a lone C copy of it
+ * emits a second string and shifts every later .rodata offset. Verified --
+ * with ADPAL2 alone as C, `make build` reports `field.exe: FAILED` while
+ * every function still diffs clean. Land this one and ADPAL2 lands with it.
+ * (`rodata_owner.py` says SHARES for the pair, which is wrong here: it reads
+ * the `#else` body and cannot tell that MASPSX_OVERRIDE means the .s still
+ * supplies the literal.) */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncAdpal);
+#else
+s32 OpcodeFuncAdpal(void) {
+    s16 count;
+    u8 srcPal;
+    u8 dstPal;
+    s16 addB;
+    s16 addG;
+    s16 addR;
+    s16 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("adpal", 8);
+    }
+    count = GET_PARAM_U8(9) + 1;
+    srcPal = FieldEventReadMemoryU8(1, 4);
+    dstPal = FieldEventReadMemoryU8(2, 5);
+    addB = FieldEventReadMemoryU8(3, 6);
+    addG = FieldEventReadMemoryU8(4, 7);
+    addR = FieldEventReadMemoryU8(5, 8);
+    if (addB & 0x80) {
+        addB ^= 0xFF00;
+    }
+    if (addG & 0x80) {
+        addG ^= 0xFF00;
+    }
+    if (addR & 0x80) {
+        addR ^= 0xFF00;
+    }
+    for (i = 0; i < count; i++) {
+        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        u16 color = from[i];
+        s16 r;
+        s16 g;
+        s16 b;
+
+        r = (color & 0x1F) + addR;
+        if (r >= 0x20) {
+            r = 0x1F;
+        }
+        if (r < 0) {
+            r = 0;
+        }
+        g = ((color >> 5) & 0x1F) + addG;
+        if (g >= 0x20) {
+            g = 0x1F;
+        }
+        if (g < 0) {
+            g = 0;
+        }
+        b = ((color >> 10) & 0x1F) + addB;
+        if (b >= 0x20) {
+            b = 0x1F;
+        }
+        if (b < 0) {
+            b = 0;
+        }
+        to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+        if (to[i] == 0 && color != 0) {
+            to[i] = 0x8000;
+        }
+    }
+    PC_INC(0xA);
+    return 0;
+}
+#endif
+
+/* ADPAL over a sub-range: the run starts `start` entries in and the two
+ * palettes come from the script rather than from event memory.
+ *
+ * This body MATCHES -- `checkfn.py` reports MATCH on it, zero rows. It is
+ * parked anyway because it cannot be compiled alone: it prints the "adpal"
+ * that OpcodeFuncAdpal above owns, and with ADPAL still pinned the literal
+ * would exist twice and shift the rest of .rodata. Unpin both together the
+ * moment ADPAL's last row falls; nothing here needs to change.
+ *
+ * Both palette ids arrive by `lbu` from the script rather than through
+ * FieldEventReadMemoryU8, so there is no `andi` for &D_80095DE0's `lui`/
+ * `addiu` to straddle -- which is precisely why this one matches and its
+ * sibling does not. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncAdpal2);
+#else
+s32 OpcodeFuncAdpal2(void) {
+    s16 count;
+    u8 srcPal;
+    u8 dstPal;
+    s16 start;
+    s16 addB;
+    s16 addG;
+    s16 addR;
+    s16 i;
+    s16 end;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("adpal", 8);
+    }
+    count = FieldEventReadMemoryU8(6, 0xA) + 1;
+    srcPal = GET_PARAM_U8(4);
+    dstPal = GET_PARAM_U8(5);
+    start = FieldEventReadMemoryU8(1, 6);
+    addB = FieldEventReadMemoryU8(2, 7);
+    addG = FieldEventReadMemoryU8(3, 8);
+    addR = FieldEventReadMemoryU8(4, 9);
+    if (addB & 0x80) {
+        addB ^= 0xFF00;
+    }
+    if (addG & 0x80) {
+        addG ^= 0xFF00;
+    }
+    if (addR & 0x80) {
+        addR ^= 0xFF00;
+    }
+    end = start + count;
+    for (i = start; i < end; i++) {
+        u8* pal = D_80095DE0;
+        u16* from = (u16*)(pal + srcPal * 32);
+        u16* to = (u16*)(pal + dstPal * 32);
+        u16 color = from[i];
+        s16 r;
+        s16 g;
+        s16 b;
+
+        r = (color & 0x1F) + addR;
+        if (r >= 0x20) {
+            r = 0x1F;
+        }
+        if (r < 0) {
+            r = 0;
+        }
+        g = ((color >> 5) & 0x1F) + addG;
+        if (g >= 0x20) {
+            g = 0x1F;
+        }
+        if (g < 0) {
+            g = 0;
+        }
+        b = ((color >> 10) & 0x1F) + addB;
+        if (b >= 0x20) {
+            b = 0x1F;
+        }
+        if (b < 0) {
+            b = 0;
+        }
+        to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+        if (to[i] == 0 && color != 0) {
+            to[i] = 0x8000;
+        }
+    }
+    PC_INC(0xB);
+    return 0;
+}
+#endif
+
+/* Scale every colour of a palette per channel. The factor is a 1.7 fixed-point
+ * byte, so the channel is doubled before the multiply and the product shifted
+ * back down by 7. A transparent entry stays transparent -- the whole body is
+ * skipped -- and one that scales down to zero is forced to 0x8000.
+ *
+ * Read the channel extraction off the target, do not derive it: all three are
+ * "shift, then mask six bits", so the doubling is folded into the shift and
+ * the mask keeps the neighbouring low bit. Red is `(color << 1) & 0x3E`, not
+ * `(color & 0x1F) << 1` -- the same two instructions in the other order, and
+ * two rows. Green and blue are `(color >> 4) & 0x3F` and `(color >> 9) & 0x3F`,
+ * not `>> 5`/`>> 10` masked to 0x1F: those are genuinely different values, one
+ * bit wider at the bottom. And the factor is the *left* operand of the
+ * multiply. Writing the doubling as `* 2` anywhere in the expression lets gcc
+ * reassociate it onto the loop-invariant factor and hoist `factor * 2` out of
+ * the loop, which is three rows on its own; `<< 1` does not reassociate.
+ *
+ * Three rows left. Two are &D_80095DE0's placement, as in the RTPALs above.
+ * The third is not source-addressable: the target converts mulR and mulG to
+ * u16 in the preheader (`andi t3,a0,0xffff`) but uses mulB straight out of
+ * $s4, and the three are read identically from the same call. gcc is being
+ * inconsistent with itself there, so no single declared type reproduces it --
+ * u16 for all three gets the first two right and the third wrong. Related:
+ * the target extracts red from the *untruncated* $a3 while taking the other
+ * two channels from the truncated copy, which is the same inconsistency seen
+ * from the other end. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMppal2);
+#else
+s32 OpcodeFuncMppal2(void) {
+    u16 count;
+    u8 srcPal;
+    u8 dstPal;
+    u16 mulB;
+    u16 mulG;
+    u16 mulR;
+    s16 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mppal", 8);
+    }
+    count = GET_PARAM_U8(9) + 1;
+    srcPal = FieldEventReadMemoryU8(1, 4);
+    dstPal = FieldEventReadMemoryU8(2, 5);
+    mulB = FieldEventReadMemoryU8(3, 6);
+    mulG = FieldEventReadMemoryU8(4, 7);
+    mulR = FieldEventReadMemoryU8(5, 8);
+    for (i = 0; i < count; i++) {
+        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        u16 color = from[i];
+
+        if (color != 0) {
+            s32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
+            s32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
+            s32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+
+            if (b >= 0x20) {
+                b = 0x1F;
+            }
+            if (g >= 0x20) {
+                g = 0x1F;
+            }
+            if (r >= 0x20) {
+                r = 0x1F;
+            }
+            to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+            if (to[i] == 0) {
+                to[i] = 0x8000;
+            }
+        }
+    }
+    PC_INC(0xA);
+    return 0;
+}
+#endif
+
+/* MPPAL over a sub-range; the two palettes come from the script.
+ *
+ * Note the pair is named the wrong way round against the ADPAL and RTPAL
+ * pairs: OpcodeFuncMppal2 above is the plain form and comes first in the
+ * overlay, and this one -- the sub-range form -- is second. The addresses say
+ * so, and so does the fact that MPPAL2 owns the "mppal" literal this prints.
+ *
+ * Two rows, both &D_80095DE0's placement. Same channel extraction as
+ * OpcodeFuncMppal2 above; read that note before touching this one. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMppal);
+#else
+s32 OpcodeFuncMppal(void) {
+    s16 count;
+    u8 srcPal;
+    u8 dstPal;
+    s16 start;
+    u16 mulB;
+    u16 mulG;
+    u16 mulR;
+    s16 i;
+    s16 end;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("mppal", 8);
+    }
+    count = FieldEventReadMemoryU8(6, 0xA) + 1;
+    srcPal = GET_PARAM_U8(4);
+    dstPal = GET_PARAM_U8(5);
+    start = FieldEventReadMemoryU8(1, 6);
+    mulB = FieldEventReadMemoryU8(2, 7);
+    mulG = FieldEventReadMemoryU8(3, 8);
+    mulR = FieldEventReadMemoryU8(4, 9);
+    end = start + count;
+    for (i = start; i < end; i++) {
+        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        u16 color = from[i];
+
+        if (color != 0) {
+            s32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
+            s32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
+            s32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+
+            if (b >= 0x20) {
+                b = 0x1F;
+            }
+            if (g >= 0x20) {
+                g = 0x1F;
+            }
+            if (r >= 0x20) {
+                r = 0x1F;
+            }
+            to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+            if (to[i] == 0) {
+                to[i] = 0x8000;
+            }
+        }
+    }
+    PC_INC(0xB);
+    return 0;
+}
+#endif
 
 static void SetPcModel(void) {
     if (Savemap.memory_bank_2[9] != 0xFF &&
