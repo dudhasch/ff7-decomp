@@ -139,6 +139,10 @@ Two exits from the budget, both of which must be *earned*, not assumed:
 .venv/bin/python3 tools/worklist.py src/field/field.c -o docs/decomp/worklist-field.md
 ```
 
+One list per `.c`, and the field overlay is five of them — `field.c`,
+`field2.c` … `field5.c`. Regenerate all five, or you will keep re-picking a
+function that lives in a unit you did not look at.
+
 This is the start of every batch. It intersects the four things that otherwise
 get re-derived by hand — and re-derived again after every compaction:
 
@@ -381,6 +385,13 @@ The usual way to trip this is a symbol declared only inside a
 of `src/field/field.c` are not compiled in the matching build. Declare the
 symbol in the real extern block instead.
 
+The mirror-image trap, moving a parked body between the field units: an
+`extern` whose type comes from a `typedef struct` declared just above it has to
+travel with that typedef. Left behind, gcc 2.6.3 does not stop at the unknown
+type name — it makes the object a tentative definition in `.bss`, and the only
+complaint is a `multiple definition` at link time against the real symbol in
+the data segment.
+
 **A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
 truncates silently: on a longer function the tail simply never enters the
 comparison, so it can differ freely while the visible rows look perfect.
@@ -460,17 +471,38 @@ is itself 4 mod 8. Only jump tables are touched; `.align 3` before a `double`
 is left alone. This is what makes `func_800E5FB4` in `src/battle/battle3.c`
 match.
 
-**The residue is a file-split problem, not an alignment one.** The original
-build compiled many small `.c` files, each with its own object and its own
-`.rodata` base, and splat merges them into one unit. `src/field/field.c` is
-several original files glued together — its own comments mark the seams
-(`// Begin of field_event_memory_bank.c`) — so its `.rodata` carries *both*
-phases at once: `jtbl_800A052C` is 4 mod 8 while the tables of already-matched
-functions are 0 mod 8. One `--phase` setting cannot satisfy both, so these stay
-`INCLUDE_ASM` until the file is split on the original boundaries: `IfCheck`,
+**The residue was a file-split problem, not an alignment one, and the split has
+happened.** The original build compiled many small `.c` files, each with its own
+object and its own `.rodata` base, and splat merged them into one unit.
+`src/field/field.c` was several original files glued together, so its `.rodata`
+carried *both* phases at once: `jtbl_800A052C` is 4 mod 8 while the tables of
+already-matched functions are 0 mod 8, and one `--phase` setting cannot satisfy
+both.
+
+It is now five units — `field.c`, `field2.c` … `field5.c`, sharing
+`src/field/field_private.h` — with five `c` and five `.rodata` subsegments in
+`config/us.yaml`. **The cut is on jump-table phase, not on the original module
+boundaries**: the bases alternate 0/4/0/4/0 mod 8 so that every table sits in a
+unit congruent to it, and `tools/ninja/gen.py` pins the two ambiguous ones
+through `JTBL_PHASE_OVERRIDE`. Do not merge the units back together, and do not
+"tidy" a boundary — moving one function across a seam can move a table into a
+unit of the wrong phase, and the failure is a red `make build` with every
+instruction still diffing perfectly.
+
+Eight of the eleven functions this blocked are now plain matching C: `IfCheck`,
 `If2CheckSigned`, `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`,
-`OpcodeFuncSrchx`, `OpcodeFuncFade`, `OpcodeFuncFadew`, `OpcodeFuncSpcal`,
-`FieldEventWriteMemoryU8` and `FieldEventRequestRun`.
+`OpcodeFuncSrchx`, `OpcodeFuncFadew` and `FieldEventRequestRun`. The three that
+remain — `OpcodeFuncFade`, `OpcodeFuncSpcal`, `FieldEventWriteMemoryU8` — are
+stuck on ordinary codegen, not on alignment; treat them as normal work.
+
+The seam comments the old single file carried (`// Begin of
+field_event_memory_bank.c`) name the *original* translation units, of which
+there were 33, not 5. They are still a useful map of what belongs together, and
+the real boundaries are recoverable without a build: every `.rodata` symbol's
+address orders identically to its owning function's `.text` address, so
+scanning the overlay for `lui`/`%lo` pairs into `0x800A0000..0x800A1368` and
+bucketing by owner reproduces the per-unit rodata ranges exactly. If a future
+change needs a finer split, derive it that way rather than by guessing.
 
 The tell is `tools/checkfn.py` reporting a `.rodata` offset rather than an
 instruction — `want: .rodata+0x294 / got: .rodata+0x298`. Every instruction can
@@ -536,7 +568,7 @@ preprocesses the `.c`, so every `INCLUDE_ASM` has already expanded into a
 `__maspsx_include_asm_hack_*` function holding `.include "<fn>.s"`, and those
 land in `base.c` as `#pragma _permuter b64literal` blobs. The permuter decodes
 them into every candidate, so each candidate object carries the whole overlay's
-assembly — ~44,000 instructions for `src/field/field.c` — while `target.o` holds
+assembly — ~44,000 instructions for the field overlay — while `target.o` holds
 only the function being permuted. The score is then almost entirely code the
 permuter cannot affect.
 
@@ -1140,7 +1172,7 @@ creating a fresh one per task.
 writes `nonmatchings/<fn>.s` for functions the `.c` still references through
 `INCLUDE_ASM`; it knows nothing about `MASPSX_OVERRIDE`, whose expansion
 `.include`s the same `.s` at assembly time. So on a tree with an empty `asm/`,
-splat emits 83 of `src/field/field.c`'s 260 files and the build dies with a
+splat emits 83 of the field overlay's 260 files and the build dies with a
 wall of
 
 ```
