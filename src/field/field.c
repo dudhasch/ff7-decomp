@@ -3308,7 +3308,111 @@ done:
     FieldUpdateAnimationState();
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldUpdateAnimationState);
+extern /*?*/s32 D_80074F02;
+extern void* D_8009C6E0;
+extern u8 D_8007EB98[];
+extern s32 D_8009C544;
+extern /*?*/s32 D_8009C6DC;
+
+/* Per-frame animation state machine for every loaded model: dispatch on the
+ * model's animation state, advance the current frame by the playback speed,
+ * and wrap/transition at the last frame. m2c seed; residual is regalloc across
+ * the switch and the per-model address CSE. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldUpdateAnimationState);
+#else
+void FieldUpdateAnimationState(void)
+{
+    FieldModelEntry* temp_v0;
+    FieldModelEntry* temp_v0_2;
+    s32 temp_a3;
+    s32 temp_v1_4;
+    s32 var_t2;
+    s32* var_t0;
+    u8 temp_a0;
+    u8 temp_a0_2;
+    u8 temp_a0_3;
+    u8 temp_a0_4;
+    u8 temp_a0_5;
+    u8 temp_a0_6;
+    u8 temp_v1;
+    u8 temp_v1_2;
+    u8 temp_v1_3;
+    void* temp_a2;
+    void* temp_v1_5;
+    void* temp_v1_6;
+    void* temp_v1_7;
+    void* temp_v1_8;
+    void* var_a0;
+
+    var_t2 = 0;
+    if ((s32) D_8009C6DC->unk2 > 0) {
+        var_t0 = &D_8007EB98;
+        do {
+            temp_a0 = *var_t0;
+            if ((temp_a0 != 0xFF) && ((D_8009C6E0->unk2A != temp_a0) || (D_8009C6E0->unk32 != 0))) {
+                temp_v1 = D_800756E8[temp_a0];
+                switch (temp_v1) {
+                    case 0:
+                        temp_a0_2 = *var_t0;
+                        temp_a3 = temp_a0_2 * 0x84;
+                        temp_a2 = temp_a3 + D_8009C544;
+                        temp_v1_2 = D_8008325C[temp_a0_2];
+                        if (temp_a2->unk5E != temp_v1_2) {
+                            temp_a2->unk5E = temp_v1_2;
+                            temp_v1_3 = *var_t0;
+                            ((temp_v1_3 * 0x84) + D_8009C544)->unk60 = (u16) D_80082248[temp_v1_3];
+                            ((*var_t0 * 0x84) + D_8009C544)->unk62 = 0;
+                            temp_a0_3 = *var_t0;
+                            temp_v0 = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a0_3].modelEntryIndex];
+                            temp_v1_4 = temp_a0_3 * 0x84;
+                            (temp_v1_4 + D_8009C544)->unk64 = (s16) (*((*(&D_80074F02 + temp_v1_4) * 0x10) + &temp_v0->modelData[temp_v0->animationOffset]) - 1);
+                        } else {
+                            temp_v0_2 = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a0_2].modelEntryIndex];
+                            temp_a2->unk64 = (s16) (*((*(&D_80074F02 + temp_a3) * 0x10) + &temp_v0_2->modelData[temp_v0_2->animationOffset]) - 1);
+                            var_a0 = (*var_t0 * 0x84) + D_8009C544;
+block_11:
+                            if (((s32) (var_a0->unk62 << 0x10) >> 0x14) >= var_a0->unk64) {
+                                var_a0->unk62 = 0U;
+                            }
+                        }
+                        break;
+                    case 1:
+                        var_a0 = (*var_t0 * 0x84) + D_8009C544;
+                        goto block_11;
+                    case 2:
+                        temp_a0_4 = *var_t0;
+                        temp_v1_5 = (temp_a0_4 * 0x84) + D_8009C544;
+                        if (((s32) (temp_v1_5->unk62 << 0x10) >> 0x14) >= temp_v1_5->unk64) {
+                            D_800756E8[temp_a0_4] = 4;
+                        case 3:
+                        case 4:
+                            temp_v1_6 = (*var_t0 * 0x84) + D_8009C544;
+                            temp_v1_6->unk62 = (s16) (temp_v1_6->unk64 * 0x10);
+                        }
+                        break;
+                    case 5:
+                        temp_a0_5 = *var_t0;
+                        temp_v1_7 = (temp_a0_5 * 0x84) + D_8009C544;
+                        if (((s32) (temp_v1_7->unk62 << 0x10) >> 0x14) >= temp_v1_7->unk64) {
+                            D_800756E8[temp_a0_5] = 0;
+                        }
+                        break;
+                    case 6:
+                        temp_a0_6 = *var_t0;
+                        temp_v1_8 = (temp_a0_6 * 0x84) + D_8009C544;
+                        if (((s32) (temp_v1_8->unk62 << 0x10) >> 0x14) >= temp_v1_8->unk64) {
+                            D_800756E8[temp_a0_6] = 3;
+                        }
+                        break;
+                }
+            }
+            var_t2 += 1;
+            var_t0 += 1;
+        } while (var_t2 < (s32) D_8009C6DC->unk2);
+    }
+}
+#endif
 
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldEventRequestRun);
