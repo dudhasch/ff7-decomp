@@ -2178,7 +2178,149 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToPolyColor);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+/* Set the semi-transparency/shade bits of every packet of every part of one
+ * model. Walks each part's double-buffered packet area (the two ordering-table
+ * copies) and toggles the ABE and shade bits of each primitive's tag byte. The
+ * 8 unrolled primitive-type blocks (strides 34/28/28/20/14/18/1C/24) and the
+ * dual walking-pointer tag/base induction are the wall; codegen pinned via
+ * MASPSX_OVERRIDE, #else is the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiSetModelTransparency);
+#else
+s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
+    u8* parts;
+    u8* part;
+    u8* base;
+    u8* tag;
+    u32 partCount;
+    u32 enable;
+    u32 i;
+    u32 ot;
+    u32 j;
+    u32 n;
+
+    parts = model->modelData + model->partsOffset;
+    partCount = model->partCount;
+    enable = data[0];
+    if (partCount == 0) {
+        return 1;
+    }
+    part = parts;
+    for (i = 0; i < partCount; i++, part += 0x20) {
+        for (ot = 0; ot < 2; ot++) {
+            base = *(u8**)(part + 0x1C);
+            if (ot != 0) {
+                base += *(u16*)(part + 0x16);
+            }
+            n = part[4];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x34, base += 0x34) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[5];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[6];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[7];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x20, base += 0x20) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[8];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x14, base += 0x14) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[9];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x18, base += 0x18) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[10];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x1C, base += 0x1C) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+            n = part[11];
+            for (j = 0, tag = base + 7; j < n; j++, tag += 0x24, base += 0x24) {
+                if (enable) {
+                    *tag |= 2;
+                } else {
+                    *tag &= ~2;
+                }
+                if (enable) {
+                    *tag |= 1;
+                } else {
+                    *tag &= ~1;
+                }
+            }
+        }
+    }
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
 
