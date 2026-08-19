@@ -89,79 +89,79 @@ static void EscapeCaptureScreen(void) {
 // the texture window it samples (the captured screen is split across two
 // texture pages, at u 0x300 and 0x280), the four corners it spans, and a
 // random velocity and spin.
-/* 22 of 361 instructions, and both remaining clusters are register-allocation
- * tie-breaks rather than anything about the C. Two levers found this pass took
- * the residue from 104 rows to 22, and both generalise:
+/* 12 of 361 instructions. The residue is one register-allocation tie-break:
+ * the two row-level induction variables hold each other's stack slot. The
+ * target has `row * 2 - 32` at 40(sp) and `row * 8 + 8` at 48(sp); we have them
+ * the other way round, so the two `li`s in the preheader, the `lbu` reload at
+ * the row head, the `lw` in the Vel.vy term and the two increments at the row
+ * bottom all name the other slot. Everything else -- frame size, slot count,
+ * instruction count, every giv, every address -- agrees with the target.
  *
- *   1. gcc reduces a value to an induction variable with its own spill slot
- *      only when it is a *user variable computed early and used late*. Written
- *      inline -- in every spelling, listed below -- `(col - 21) * 2` is
- *      computed and consumed inside one statement and stays an
- *      `addiu`/`sll`/`addu` triple in the loop body. Hoisted to the top of the
- *      loop it becomes a giv with a slot, which is what the target has:
- *      `li t0,-42` at the row head and `+= 2` at the inner bottom. Same for
- *      `(row - 16) * 2` hoisted to the top of the row loop. This is the
- *      opposite of the usual advice -- here naming the temporary is what the
- *      compiler wanted.
+ * Four levers got here from a 104-row body, and the first two generalise:
  *
- *   2. Which of the four `&EscapeGrid[...]` corner addresses is *evaluated*
- *      first decides whether gcc strength-reduces the corner address at all.
- *      With `&EscapeGrid[row][col]` first -- in every phrasing tried, including
- *      a named `EscapeCell *`, `EscapeGrid[row] + col` and `[row + 0][col + 0]`
- *      -- gcc builds a giv `&EscapeGrid + col * 12`, spills it and reloads it
- *      once per tile, duplicating the `col * 12` giv already in s3 and costing
- *      a sixth stack slot. With `&EscapeGrid[row][col + 1]` evaluated first the
- *      giv never forms and all four corners come from s3, s5 and a
- *      rematerialised base, as the target does. Evaluating it into a temporary
- *      keeps the *store* order 0,1,2,3, which the target also has.
+ *   1. gcc 2.6.3 reduces an expression over a loop counter to an induction
+ *      variable with its own spill slot only when the value is a *named local
+ *      computed early and used late*. Inline, `(rand() & 3) + (col - 21) * 2`
+ *      computes and consumes the product inside one statement and stays an
+ *      `addiu`/`sll`/`addu` triple. Hoisted to the top of the loop as `vx` it
+ *      becomes a giv: `li t0,-42` in the preheader, `+= 2` at the bottom,
+ *      `lw`/`addu` at the use -- what the target has, for both `(col - 21) * 2`
+ *      and `(row - 16) * 2`.
  *
- * What is left:
+ *   2. Which sibling address expression is *evaluated* first decides whether
+ *      gcc reduces any of them. With `&EscapeGrid[row][col]` first, it builds a
+ *      giv `&EscapeGrid + col * 12`, spills it and reloads it once per tile,
+ *      duplicating the `col * 12` giv already in s3 and costing a sixth slot.
+ *      With `&EscapeGrid[row][col + 1]` first the giv never forms. Evaluating
+ *      it into `c1` keeps the *store* order 0,1,2,3, which the target has too.
  *
- *   - 12 rows: the two row-level givs swap slots. The target has `row * 2 - 32`
- *     at 40(sp) and `row * 8 + 8` at 48(sp); we have them the other way round,
- *     so the two `li`s in the preheader, the `lbu` reload at the row head, the
- *     `lw` in the Vel.vy term and the two increments at the row bottom all name
- *     the other slot. gcc numbers reduced-giv pseudos in reverse of the order
- * it scans them and assigns slots in pseudo order, so the target's `row * 2 -
- * 32` is scanned *after* `row * 8 + 8` -- hoisted out of the inner loop by gcc
- * rather than by hand. Every way of arranging that either drops `row * 8 + 8`
- * back into a register (4 slots, 8 instructions short) or reorders three slots
- * instead of two.
+ *   3. `c0`, holding `&EscapeGrid[row][col]`, assigned before the corner block.
  *
- *   - 10 rows: the shared grid base is `EscapeGrid + 12` where the target has
- *     `EscapeGrid`, so the corners are derived with -12/0/+480 rather than
- *     0/+12/+492. gcc materialises whichever base the *first* evaluated corner
- *     needs, and by (2) that corner has to be `[row][col + 1]`. The two
- *     constraints conflict, so one of them has a mechanism not yet understood.
+ *   4. `m = n`, with three of the eight v-coordinate stores indexed through `m`
+ *      instead of `n`.
  *
- * Measured and rejected this pass, on top of the ninety-six phrasings the
- * earlier note listed (rows/shape against the retail overlay; this body is
- * 22/18):
+ * 3 and 4 only work together -- either alone is 202/142, both is 12/8 -- and
+ * they are the one part of this body nobody would have written. They came out
+ * of the permuter, and what they do is split the address CSE for those three
+ * stores, so they use the `base + n * 128` register form while the rest use
+ * maspsx's `symbol + offset(index)` form. That mix is what the target has. It
+ * is reproducible and measured, but it is a compiler artefact rather than
+ * source: the original reached the same split some other way. Finding that way
+ * is the next move, not another phrasing of the arithmetic. Making the alias
+ * uniform breaks it (202/142); a `EscapeTile *` pointer in place of the integer
+ * alias breaks it (210/142); the sixteen *other* aliased accesses the permuter
+ * also produced are inert and were removed.
+ *
+ * Measured and rejected, as rows/shape against the retail overlay (this body is
+ * 12/8), on top of the ninety-six phrasings recorded before this pass:
  *   - hoisting positions for the two products: both at the inner top 228/162,
  *     vy at the inner top with vx inline 238/178, vy immediately before its use
  *     228/162, either one hand-carried as an accumulator 32/22 to 44/26 -- an
  *     accumulator is a biv, gets a low pseudo and lands at 24(sp).
+ *   - for the slot tie-break specifically: hand-hoisting `row * 8 + 8` and/or
+ *     `row * 8` to the row top in every order (52/46 to 224/174), letting gcc
+ *     hoist `(row - 16) * 2` out of the inner loop in six spellings (188/130,
+ *     and it then takes a register rather than a slot), separate loop variables
+ *     for the tile loop (264/204) or either earlier loop (30/26, 38/34).
  *   - corner evaluation orders 2,0,1,3 and 3,0,1,2 rebuild the giv (206/144,
  *     212/148); 1,2,0,3 avoids it but stores in the wrong order (30/26); a
- *     walked `c++` pointer, `c - 1`/`c + 40`/`c + 41` off one temp, and
- *     `(EscapeCell *)EscapeGrid + row * 41 + col` all collapse s5 into a single
- *     flat giv and lose 5 to 12 instructions.
- *   - `(row + 1) * 8` for the v coordinate 224/174; `row * 8` and/or
- *     `row * 8 + 8` hoisted to the row top in every order 52/46 to 176/152.
- *   - declaration order and position of the two locals, and reusing the
- *     distance loop's x/y: no effect on the slot order (22/18), or they flatten
- *     the corner addressing (90/84).
+ *     walked `c++` pointer, `c - 1`/`c + 40`/`c + 41` off one temp, explicit
+ *     `(u8 *)EscapeGrid + row * 492 + col * 12` byte arithmetic and
+ *     `EscapeGrid[row] + col` all collapse s5 and s3 into one flat giv and lose
+ *     5 to 12 instructions.
+ *   - declaration order and position of the locals, `register` on any subset,
+ *     and reusing the distance loop's x/y: no effect, or they flatten the
+ *     corner addressing (90/84).
  *
  * The permuter needs three corrections before its score means anything here,
- * all now in CLAUDE.md: `--stack-diffs` (off by default, so the twelve stack
- * rows above are invisible and the search optimises only the corner residue),
+ * all now in CLAUDE.md: `--stack-diffs` (off by default, so the stack residue
+ * above is invisible and the search optimises only the corner one),
  * `D_80151909` rewritten in the scratch's target.s to the `D_801518E4 + 0x25`
  * form this C relocates against (otherwise a perfect candidate still scores 6
  * and `--stop-on-zero` never fires), and `-g -gcoff` dropped from the scratch's
- * compile.sh. Uncorrected it reported 85 against a base of 250 for a candidate
- * that measures 28/24 -- worse than this body -- by trading two insertions for
- * one reordering. Corrected, the base is 256, of which 6 is the stack residue
- * and 250 the corner one. Re-measure every output against the overlay. */
+ * compile.sh. Uncorrected, it reported 85 against a base of 250 for a candidate
+ * measuring 28/24 -- worse than the body it started from. Corrected, it found
+ * 3 and 4 in 2.8M iterations. Re-measure every output against the overlay. */
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
@@ -173,6 +173,8 @@ void func_801B009C(void) {
     s32 y;
     s32 vx;
     s32 vy;
+    s32 m;
+    EscapeCell* c0;
 
     for (row = 0; row < 10; row++) {
         D_801518E4[row].D_80151909 = (D_801518E4[row].D_80151909 & 0x7F) | 2;
@@ -191,6 +193,7 @@ void func_801B009C(void) {
     for (row = 0; row < 21; row++) {
         vy = (row - 16) * 2;
         for (col = 0; col < 40; col++) {
+            m = n;
             vx = (col - 21) * 2;
             EscapeTiles[n].Rot.vx = EscapeTiles[n].Rot.vy =
                 EscapeTiles[n].Rot.vz = 0;
@@ -229,15 +232,16 @@ void func_801B009C(void) {
                 EscapeTiles[n].prim[1].tpage = GetTPage(2, 0, 0x280, 0x100);
             }
 
-            EscapeTiles[n].prim[0].v0 = EscapeTiles[n].prim[1].v0 =
-                EscapeTiles[n].prim[0].v1 = EscapeTiles[n].prim[1].v1 = row * 8;
+            EscapeTiles[m].prim[0].v0 = EscapeTiles[n].prim[1].v0 =
+                EscapeTiles[n].prim[0].v1 = EscapeTiles[m].prim[1].v1 = row * 8;
             EscapeTiles[n].prim[0].v2 = EscapeTiles[n].prim[1].v2 =
-                EscapeTiles[n].prim[0].v3 = EscapeTiles[n].prim[1].v3 =
+                EscapeTiles[m].prim[0].v3 = EscapeTiles[n].prim[1].v3 =
                     row * 8 + 8;
 
+            c0 = &EscapeGrid[row][col];
             {
                 EscapeCell* c1 = &EscapeGrid[row][col + 1];
-                EscapeTiles[n].Corner[0] = &EscapeGrid[row][col];
+                EscapeTiles[n].Corner[0] = c0;
                 EscapeTiles[n].Corner[1] = c1;
                 EscapeTiles[n].Corner[2] = &EscapeGrid[row + 1][col];
                 EscapeTiles[n].Corner[3] = &EscapeGrid[row + 1][col + 1];
