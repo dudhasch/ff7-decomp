@@ -591,6 +591,62 @@ consumed the macro at import time. It only ever appeared to help by accident,
 when an import ran while `make report` had left `build.ninja` in its SKIP_ASM
 configuration.
 
+**Stripping is not enough on its own: check that the prune happened.** Even with
+the blobs gone, `base.c` still holds every *matching C* function in the unit,
+and the permuter compiles all of them into every candidate. `import.py` is
+supposed to prevent that — it parses the preprocessed source with pycparser and
+reduces it to the target function alone — but a syntax error anywhere in the
+file makes it print
+
+```
+Syntax error in base.c.
+before: ? at approximately line 2466, column 5
+Proceeding anyway, but expect errors when permuting!
+```
+
+and skip the prune. Nothing downstream complains. `DrawFieldExitArrow`'s scratch
+carried 107,120 bytes of `.text` against a 1,368-byte `target.o` — 98.7% of the
+score was code the permuter cannot influence — and sixteen such runs spent three
+to eight hours each hill-climbing that noise, one of them writing 12,113
+"improvements", none converging.
+
+Two things in this repo's own sources trigger it, both of which the matching
+build never sees because they sit in `#else NON_MATCHINGS` arms:
+
+* **a cast to a type declared later in the file, or in another unit.**
+  `(FieldModelFileDesc*)` was used in `field2.c` 666 lines before its own
+  `typedef`, and again from `field4.c`, which never saw it. Shared types belong
+  in `src/field/field_private.h`.
+* **raw m2c output that is not C.** `? *var_t0;` — m2c's placeholder for a type
+  it could not infer — is a syntax error, and one of them blocks pruning for
+  every function in the unit.
+
+The cheap check is a size comparison, not a reading of the log:
+
+```shell
+mipsel-linux-gnu-size nonmatchings/<fn>/base.o nonmatchings/<fn>/target.o
+```
+
+A correctly pruned scratch has the two `.text` figures within a few percent of
+each other — the whole object *is* the function under test. Anything else means
+the prune did not happen, whatever the log said.
+
+**A parked body that does not compile is not permuter input.** 23 of the field
+overlay's 72 `MASPSX_OVERRIDE` bodies are m2c seeds that gcc rejects — mostly
+`request for member 'unkN' in something not a structure or union`, from
+dereferencing a `void*` parameter. gcc 2.6.3 reports it and generates code
+anyway, so the scratch builds and the run looks healthy; the base score is what
+gives it away (`FieldCalcPointOnLine` scores 13,500 against neighbours in the
+low hundreds). Fix the types first, or pick a different function. The check:
+
+```shell
+mipsel-linux-gnu-cpp -Iinclude -Iinclude/psxsdk -DNON_MATCHINGS -DFF7_STR \
+    -lang-c -undef -fno-builtin src/field/field4.c | bin/str \
+  | iconv -f UTF-8 -t Shift-JIS \
+  | bin/cc1-psx-26 -quiet -mcpu=3000 -mgas -O2 -G0 -o /dev/null 2>&1 \
+  | grep -v warning:
+```
+
 `import.py` takes `<c_file> <asm_file|func_name>` — there is no `-o` flag. The
 `func_name` form only works if the function still has a `GLOBAL_ASM` stub, which
 this repo does not use (it uses `INCLUDE_ASM`), so pass the target `.s` path
