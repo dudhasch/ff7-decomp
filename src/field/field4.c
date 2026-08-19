@@ -8494,7 +8494,124 @@ s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEventSplitJoinSetMove);
+/* Start one party member walking to (x, y) as part of a SPLIT or JOIN.
+ *
+ * The follower is made solid and visible again, optionally snapped onto the
+ * party leader's position first, and given a move speed scaled so the walk
+ * takes `steps` frames. Anything faster than 0x601 switches the model to the
+ * run animation, anything slower to the walk one; the animation clock is only
+ * reset when the animation actually changes.
+ *
+ * Zero instructions out. The residue is ten rows of register naming, all of
+ * them in the animation-reset block: the target keeps the model index in $a0
+ * and &g_FieldModelData in $v1, gcc the other way round. The identical block
+ * in OpcodeFuncLader above, written the same way, matches -- here it appears
+ * in both arms of the speed test and gcc cross-jumps them, which is what
+ * changes the allocation.
+ *
+ * Two things did land it here from 23 rows, both worth knowing:
+ *   - `leaderId` is s16, not u8. A u8 local is masked at the point of *use*
+ *     (`andi a2,s1,0xff` before indexing); an s16 one assigned from a `lbu`
+ *     needs no conversion at either end, which is the target's plain `move`.
+ *   - Fill each VECTOR in field order -- from.vx/vy/vz then to.vx/vy/vz --
+ *     not in the order the stores come out of the target. m2c reconstructs
+ *     the schedule (vx, vy, vx, vy, vz, vz) and writing that down reproduces
+ *     a different one. See the EscapeCaptureScreen note in CLAUDE.md.
+ * Measured and rejected: modelIdx as s16 rather than u8, and dropping the
+ * modelIdx local for the inlined `g_EntityToModel[entityId]` -- gcc CSEs it
+ * to the same thing and neither changes a single instruction. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitJoinSetMove);
+#else
+void FieldEventSplitJoinSetMove(
+    s16 entityId, s16 x, s16 y, s16 steps, u16 snapToLeader) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    s16 leaderId;
+    u8 modelIdx;
+    FieldModelEntry* entry;
+    u8* anims;
+
+    if (D_8009D391[0] != 0xFF) {
+        leaderId = D_8009AD30[D_8009D391[0]];
+        if (leaderId != 0xFF) {
+            if (g_DebugLevel & 3) {
+                FieldDebugAddParseValueToPage2("set move x=", x, 4);
+            }
+            if (g_DebugLevel & 3) {
+                FieldDebugAddParseValueToPage2("set move y=", y, 4);
+            }
+            g_FieldModels[g_EntityToModel[entityId]].visible = 1;
+            g_FieldModels[g_EntityToModel[entityId]].SolidOff = 1;
+            g_FieldModels[g_EntityToModel[entityId]].TalkOff = 1;
+            if (snapToLeader != 0) {
+                g_FieldModels[g_EntityToModel[entityId]].PosX =
+                    g_FieldModels[g_EntityToModel[leaderId]].PosX;
+                g_FieldModels[g_EntityToModel[entityId]].PosY =
+                    g_FieldModels[g_EntityToModel[leaderId]].PosY;
+                g_FieldModels[g_EntityToModel[entityId]].PosZ =
+                    g_FieldModels[g_EntityToModel[leaderId]].PosZ;
+                g_FieldModels[g_EntityToModel[entityId]].PosI =
+                    g_FieldModels[g_EntityToModel[leaderId]].PosI;
+            }
+            g_FieldModels[g_EntityToModel[entityId]].ActionArg = 0;
+            g_FieldModels[g_EntityToModel[entityId]].DirLock = 0;
+            g_FieldModels[g_EntityToModel[entityId]].MoveEndX = x << 12;
+            g_FieldModels[g_EntityToModel[entityId]].MoveEndY = y << 12;
+            modelIdx = g_EntityToModel[entityId];
+            D_800E42A8[modelIdx] = g_FieldModels[modelIdx].MoveSpeed;
+            from.vx = g_FieldModels[g_EntityToModel[entityId]].PosX >> 12;
+            from.vy = g_FieldModels[g_EntityToModel[entityId]].PosY >> 12;
+            from.vz = g_FieldModels[g_EntityToModel[entityId]].PosZ >> 12;
+            to.vx = x;
+            to.vy = y;
+            to.vz = g_FieldModels[g_EntityToModel[entityId]].PosZ >> 12;
+            FieldEntityDirByVec(&from, &to, &sqrDist);
+            g_FieldModels[g_EntityToModel[entityId]].MoveSpeed =
+                (sqrDist << 8) / steps;
+            if (g_FieldModels[g_EntityToModel[entityId]].MoveSpeed >= 0x601) {
+                if (g_FieldModels[g_EntityToModel[entityId]].activeAnimId !=
+                    2) {
+                    g_FieldModels[g_EntityToModel[entityId]].activeAnimId = 2;
+                    g_FieldModels[g_EntityToModel[entityId]].animSpeed = 0x10;
+                    g_FieldModels[g_EntityToModel[entityId]].animCurrentFrame =
+                        0;
+                    modelIdx = g_EntityToModel[entityId];
+                    entry =
+                        &g_FieldModelData->modelEntries
+                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                    anims = entry->modelData + entry->animationOffset;
+                    g_FieldModels[modelIdx].animLastFrame =
+                        *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId *
+                                      16] -
+                        1;
+                }
+            } else {
+                if (g_FieldModels[g_EntityToModel[entityId]].activeAnimId !=
+                    1) {
+                    g_FieldModels[g_EntityToModel[entityId]].activeAnimId = 1;
+                    g_FieldModels[g_EntityToModel[entityId]].animSpeed = 0x10;
+                    g_FieldModels[g_EntityToModel[entityId]].animCurrentFrame =
+                        0;
+                    modelIdx = g_EntityToModel[entityId];
+                    entry =
+                        &g_FieldModelData->modelEntries
+                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                    anims = entry->modelData + entry->animationOffset;
+                    g_FieldModels[modelIdx].animLastFrame =
+                        *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId *
+                                      16] -
+                        1;
+                }
+            }
+            D_800756E8[g_EntityToModel[entityId]] = 1;
+            g_FieldModels[g_EntityToModel[entityId]].scriptedMoveMode = 1;
+            g_FieldModels[g_EntityToModel[entityId]].ActionState = 0;
+        }
+    }
+}
+#endif
 
 /* Poll one party member's walk during a SPLIT or JOIN. ActionState 2 means the
  * move just finished, so release the scripted-move lock and restore the
