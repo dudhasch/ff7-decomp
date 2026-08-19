@@ -10,7 +10,6 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiExecute);
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetCustomLightToModelPkts);
 
 extern u8 D_800DF114;
-extern /*?*/ s32 D_800DF520;
 
 /* Apply the GTE lighting to each vertex colour of a model's packets: for each
  * part's polygons run the NormalColorColSingle GTE op and write the result
@@ -342,7 +341,188 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
+/* One model part's polygon groups, as LoadLocalFieldModelAndInitAll splices
+ * them: eight per-primitive-kind counts packed two words to a record, an
+ * offset to the polygon block and the relocated pointer to the model data the
+ * offset is measured from. */
+typedef struct {
+    /* 0x00 */ u32 unk0;
+    /* 0x04 */ u32
+        polyCounts0; // gouraud quad, gouraud tri, then two flat quads
+    /* 0x08 */ u32 polyCounts1; // two flat tris, then a gouraud tri and quad
+    /* 0x0C */ u16 unkC;
+    /* 0x0E */ u16 polyOffset;
+    /* 0x10 */ u16 unk10;
+    /* 0x12 */ u16 unk12;
+    /* 0x14 */ u16 unk14;
+    /* 0x16 */ u16 unk16;
+    /* 0x18 */ u8* data;
+    /* 0x1C */ u8* unk1C;
+} FieldModelPart;
+
+extern SVECTOR D_800DF520[]; // light normals, indexed by a colour's code byte
+
+/* Light one model part in place. Every polygon colour word carries the index
+ * of its vertex normal in the byte the GPU would read as `code`, so each is
+ * fed to NormalColorColSingle and the result written back over the same three
+ * bytes. The eight groups differ only in the primitive's stride and how many
+ * colour words it carries. Bit 1 of the part's data header marks it lit;
+ * `redo` forces the pass to run again.
+ *
+ * The first function in the repo to use inline GTE ops -- gte_ldrgb, gte_nccs
+ * and gte_strgb were added to include/psxsdk/libgte.h for it, in the style of
+ * the ones already there. Three findings are folded in and each has a CLAUDE.md
+ * bullet:
+ *   - the normal table's base is a `u8*` scaled by hand, not an `SVECTOR*`
+ *     indexed with []; as a typed pointer gcc rebuilds its %hi/%lo in all eight
+ *     loop preheaders instead of keeping one register for the function;
+ *   - `c = poly` snapshots the base the inner loop indexes off, which is what
+ *     the target's `move t3,t0` at each inner preheader is;
+ *   - the per-polygon bump lives in the `for` increment, so `i++` is emitted
+ *     ahead of `poly += stride` as the target has it.
+ *
+ * Instruction for instruction identical bar one register-allocation decision:
+ * the target puts the loop count in t2 and the snapshot in t3, this build the
+ * other way round, which is every one of the 32 remaining rows. The snapshot
+ * wins because it is referenced at loop depth 2 and the count at depth 1, and
+ * nothing that changes their reference counts moves it -- measured: the count
+ * inlined into the loop condition (77 rows), a u8 count (77), eight separate
+ * count variables (34, gcc coalesces them), and the snapshot narrowed to the
+ * gte_ldrgb address alone or widened to all eight loops (34 each). The other
+ * two rows are the prologue: the target fills the delay slot of the part-data
+ * load with the normal table's address, this build with a nop and the address
+ * after; neither statement order reproduces it. A permuter candidate.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE(
+    "asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
+#else
+void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
+    u8* scratch;
+    u8* normals;
+    u8* data;
+    u8* poly;
+    u8* c;
+    u32 counts;
+    u32 count;
+    u32 i;
+    u32 k;
+
+    scratch = (u8*)0x1F800000;
+    data = part->data;
+    normals = (u8*)D_800DF520;
+    if ((*(u32*)data & 2) && redo == 0) {
+        return;
+    }
+
+    poly = (u8*)(part->polyOffset + (u32)data);
+    counts = part->polyCounts0;
+
+    count = counts & 0xFF;
+    for (i = 0; i < count; i++, poly += 0x18) {
+        c = poly;
+        for (k = 0; k < 4; k++) {
+            gte_ldv0(normals + c[k * 4 + 7] * 8);
+            gte_ldrgb(&c[k * 4 + 4]);
+            gte_nccs();
+            gte_strgb(scratch);
+            c[k * 4 + 4] = scratch[0];
+            c[k * 4 + 5] = scratch[1];
+            c[k * 4 + 6] = scratch[2];
+        }
+    }
+
+    count = (counts & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, poly += 0x14) {
+        c = poly;
+        for (k = 0; k < 3; k++) {
+            gte_ldv0(normals + c[k * 4 + 7] * 8);
+            gte_ldrgb(&c[k * 4 + 4]);
+            gte_nccs();
+            gte_strgb(scratch);
+            c[k * 4 + 4] = scratch[0];
+            c[k * 4 + 5] = scratch[1];
+            c[k * 4 + 6] = scratch[2];
+        }
+    }
+
+    count = (counts >> 16) & 0xFF;
+    for (i = 0; i < count; i++, poly += 0xC) {
+        gte_ldv0(normals + poly[7] * 8);
+        gte_ldrgb(&poly[4]);
+        gte_nccs();
+        gte_strgb(scratch);
+        poly[4] = scratch[0];
+        poly[5] = scratch[1];
+        poly[6] = scratch[2];
+    }
+
+    count = counts >> 24;
+    for (i = 0; i < count; i++, poly += 0xC) {
+        gte_ldv0(normals + poly[7] * 8);
+        gte_ldrgb(&poly[4]);
+        gte_nccs();
+        gte_strgb(scratch);
+        poly[4] = scratch[0];
+        poly[5] = scratch[1];
+        poly[6] = scratch[2];
+    }
+
+    counts = part->polyCounts1;
+
+    count = counts & 0xFF;
+    for (i = 0; i < count; i++, poly += 8) {
+        gte_ldv0(normals + poly[7] * 8);
+        gte_ldrgb(&poly[4]);
+        gte_nccs();
+        gte_strgb(scratch);
+        poly[4] = scratch[0];
+        poly[5] = scratch[1];
+        poly[6] = scratch[2];
+    }
+
+    count = (counts & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, poly += 8) {
+        gte_ldv0(normals + poly[7] * 8);
+        gte_ldrgb(&poly[4]);
+        gte_nccs();
+        gte_strgb(scratch);
+        poly[4] = scratch[0];
+        poly[5] = scratch[1];
+        poly[6] = scratch[2];
+    }
+
+    count = (counts >> 16) & 0xFF;
+    for (i = 0; i < count; i++, poly += 0x10) {
+        c = poly;
+        for (k = 0; k < 3; k++) {
+            gte_ldv0(normals + c[k * 4 + 7] * 8);
+            gte_ldrgb(&c[k * 4 + 4]);
+            gte_nccs();
+            gte_strgb(scratch);
+            c[k * 4 + 4] = scratch[0];
+            c[k * 4 + 5] = scratch[1];
+            c[k * 4 + 6] = scratch[2];
+        }
+    }
+
+    count = counts >> 24;
+    for (i = 0; i < count; i++, poly += 0x14) {
+        c = poly;
+        for (k = 0; k < 4; k++) {
+            gte_ldv0(normals + c[k * 4 + 7] * 8);
+            gte_ldrgb(&c[k * 4 + 4]);
+            gte_nccs();
+            gte_strgb(scratch);
+            c[k * 4 + 4] = scratch[0];
+            c[k * 4 + 5] = scratch[1];
+            c[k * 4 + 6] = scratch[2];
+        }
+    }
+
+    *(u32*)part->data |= 2;
+}
+#endif
 
 /* Set the semi-transparency/shade bits of every packet of every part of one
  * model. Walks each part's double-buffered packet area (the two ordering-table
