@@ -47,6 +47,14 @@ typedef enum {
     IF_NOT_BIT
 } IfOps;
 
+/* The two bytes FieldBackgroundInitPackets copies out of each layer 2/3/4
+ * tile. A sprite is linked into the OT only when the named entity's
+ * background-trigger byte still has this bit set. */
+typedef struct {
+    /* 0x00 */ u8 entity; // low 6 bits index g_FieldEntityBgTrigger
+    /* 0x01 */ u8 mask;   // bit tested against that entity's byte
+} FieldBgAnimPair;
+
 typedef struct FieldRenderData {
     OT_TYPE ot[0x1000];   // 0x00000: Main scene ordering table
     SPRT_16 Arrows[0x18]; // 0x04000: Field arrow sprite packets
@@ -68,8 +76,8 @@ typedef struct FieldRenderData {
     SPRT_16 Bg1[0x9c4]; // 0x04914: Background layer 1/2 sprites
     SPRT Bg2[0x200];    // 0x0e554: Background layer 3/4 sprites
 
-    u16 BgAnim[0xbc4];   // 0x10d54: Background animation data
-    DR_MODE BgDm[0x6a4]; // 0x124dc: Background draw mode packets
+    FieldBgAnimPair BgAnim[0xbc4]; // 0x10d54: Per-sprite animation gate
+    DR_MODE BgDm[0x6a4];           // 0x124dc: Background draw mode packets
 
     OT_TYPE OtUi;       // 0x1748c: UI ordering table
     DR_MODE RainDm;     // 0x17490: Rain draw mode

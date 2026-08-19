@@ -269,9 +269,9 @@ void FieldButtonsUpdate(void) {
 
 extern FieldBgData** D_8009D848;
 extern FieldBgTile3* D_8007EBD4;
-extern u16 D_8011448C;
-extern u16 D_801144C8;
-extern u16 D_801144D0;
+extern s16 D_8011448C;
+extern s16 D_801144C8;
+extern s16 D_801144D0;
 
 /* Build the sprite packets for the field background's four layers. Layers 1
  * and 2 are 16x16 sprites, layers 3 and 4 are 32x32; each layer walks the run
@@ -486,7 +486,256 @@ layer4:
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", AddBackgroundToRender);
+/* Background layer wrap distances, in the field's trigger block. Layers 3 and
+ * 4 scroll on their own and a tile that leaves the camera window is moved a
+ * whole layer width or height rather than being redrawn. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0x18];
+    /* 0x18 */ u16 wrapX3;
+    /* 0x1A */ u16 wrapY3;
+    /* 0x1C */ u16 wrapX4;
+    /* 0x1E */ u16 wrapY4;
+} FieldBgWrap;
+
+/* Right and bottom edge of the camera window, one entry per scrolling group:
+ * [0] layers 1 and 2, [1] layer 3, [2] layer 4. Reading these through the
+ * array is what keeps them out of a register across the tile loops -- as a
+ * plain scalar gcc decides they cannot alias the struct stores and hoists the
+ * load, where the original reloads the bound every iteration. */
+typedef struct {
+    /* 0x00 */ s16 x;
+    /* 0x02 */ s16 y;
+} FieldBgCamera;
+
+extern FieldBgCamera D_80071A48[3];
+/* The ordering-table slots layers 3 and 4 link their sprites into. Read
+ * through the struct for the same reason as FieldBgCamera above: as scalars
+ * gcc hoists the load out of the walk and keeps the slot in a register. */
+typedef struct {
+    /* 0x00 */ u16 layer4;
+    /* 0x02 */ u16 layer3;
+} FieldBgOtSlot;
+
+extern FieldBgOtSlot D_8009ACA2;
+
+/* Link this frame's visible background tiles into the field's ordering table.
+ * The four layers share one run list -- the same one FieldBackgroundInitPackets
+ * walked to build the packets -- with a 0x7FFF word between them, so each layer
+ * starts where the previous one stopped. A 0x7FFE run is a texture-page change
+ * and contributes only its DR_MODE.
+ *
+ * Layers 1 and 2 are static: a run is skipped whole when its row is off the
+ * camera, and each tile is culled again on x. Layer 2 additionally carries the
+ * OT slot inside the sprite's own r0/g0 bytes and links a DR_MODE behind every
+ * tile. Layers 3 and 4 scroll independently, so a tile that has left the
+ * window is wrapped in place, and both are bracketed by their own draw
+ * environments.
+ *
+ * Four findings are folded in above and are worth more than this function --
+ * see CLAUDE.md, where each has its own bullet:
+ *   - the camera bounds, the two OT slots and the animation pairs are read
+ *     through an array or a struct, not as scalars, so their loads stay inside
+ *     the tile loops instead of being hoisted (MEM_IN_STRUCT_P aliasing);
+ *   - the four walks are `for (;;)` loops left by `goto`, which keeps the
+ *     invariant hoisting a backward goto would lose without paying for
+ *     duplicate_loop_exit_test's rotation;
+ *   - the globals are read directly rather than through locals, so their loads
+ *     join the other movables in each phase's preheader;
+ *   - the wrap test is an `||` of two `<=`, not `!(a && b)`; gcc 2.6.3 does not
+ *     apply De Morgan and the two spellings schedule differently.
+ *
+ * 1 instruction out and 211 rows of register naming. What is left is delay
+ * slots: the target wastes a slot after each of the four wrap tests' camera
+ * loads (it evaluates the sprite coordinate first, which no spelling of the
+ * comparison reproduced -- five were measured), and fills the entity-check
+ * branch in layer 3 with the join block's `sll` where this build emits a nop
+ * and the `sll` after the join. Being those four instructions short shifts
+ * every later branch immediate, and the temporaries all sit one register off:
+ * the target puts `sprite` in t3 and the run walk in t7, this build t0 and t5.
+ * The other giveaway is the second induction variable -- the target reduces
+ * &run[2] and reaches run[1] at -2, this build reduces &run[1]; the reference
+ * counts say run[1] should win, so something in the original references run[2]
+ * more than `count = run[2]` does. Measured and rejected: goto loops (434 rows,
+ * no hoisting at all), `break` out of the loops (396), s32 wrap temporaries
+ * (frame 0x30, 320 rows), a separate s32 temporary loaded before the wrap test
+ * (278), locals for D_8011448C/D_801144C8/g_FieldTriggers (305), and both
+ * `!(a && b)` and `a > lo && a < hi` for the wrap test (251).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddBackgroundToRender);
+#else
+void AddBackgroundToRender(struct FieldRenderData* buf) {
+    FieldBgData* data;
+    s16* run;
+    s16 count;
+    s16 sprite;
+    s16 x;
+    s16 y;
+    s32 otSlot;
+    u8 entity;
+
+    data = *D_8009D848;
+    run = data->runs;
+
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            run++;
+            goto layer2;
+        }
+        if (run[0] == 0x7FFE) {
+            addPrim(&buf->ot[0xFFF], &buf->BgDm[run[1]]);
+        } else if (
+            D_80071A48[0].y - 0x100 < run[0] && run[0] < D_80071A48[0].y) {
+            sprite = run[1];
+            count = run[2];
+            if (count != 0) {
+                do {
+                    if (D_80071A48[0].x - 0x150 < buf->Bg1[sprite].x0 &&
+                        buf->Bg1[sprite].x0 < D_80071A48[0].x) {
+                        addPrim(&buf->ot[0xFFF], &buf->Bg1[sprite]);
+                    }
+                    sprite++;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
+    }
+
+layer2:
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            run++;
+            goto layer3;
+        }
+        if (D_80071A48[0].y - 0x100 < run[0] && run[0] < D_80071A48[0].y) {
+            sprite = run[1];
+            count = run[2];
+            if (count != 0) {
+                do {
+                    if (D_80071A48[0].x - 0x150 < buf->Bg1[sprite].x0 &&
+                        buf->Bg1[sprite].x0 < D_80071A48[0].x) {
+                        entity = buf->BgAnim[sprite].entity & 0x3F;
+                        if (entity == 0 || (buf->BgAnim[sprite].mask &
+                                            g_FieldEntityBgTrigger[entity])) {
+                            otSlot = buf->Bg1[sprite].r0 +
+                                     (buf->Bg1[sprite].g0 << 8);
+                            addPrim(&buf->ot[otSlot], &buf->Bg1[sprite]);
+                            addPrim(&buf->ot[otSlot],
+                                    &buf->BgDm[sprite - D_8011448C]);
+                        }
+                    }
+                    sprite++;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
+    }
+
+layer3:
+    addPrim(&buf->ot[D_8009ACA2.layer3], &buf->BgDrenv3E);
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            addPrim(&buf->ot[D_8009ACA2.layer3], &buf->BgDrenv3S);
+            run++;
+            goto layer4;
+        }
+        if (run[0] == 0x7FFE) {
+            addPrim(
+                &buf->ot[D_8009ACA2.layer3], &buf->BgDm[run[1] + D_801144D0]);
+        } else {
+            sprite = run[1];
+            count = run[2];
+            if (count != 0) {
+                do {
+                    if (buf->Bg2[sprite].x0 <= D_80071A48[1].x - 0x160 ||
+                        D_80071A48[1].x <= buf->Bg2[sprite].x0) {
+                        x = buf->Bg2[sprite].x0;
+                        if (x < D_80071A48[1].x - 0xA0) {
+                            buf->Bg2[sprite].x0 =
+                                x + ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
+                        } else {
+                            buf->Bg2[sprite].x0 =
+                                x - ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
+                        }
+                    }
+                    if (buf->Bg2[sprite].y0 <= D_80071A48[1].y - 0x100 ||
+                        D_80071A48[1].y <= buf->Bg2[sprite].y0) {
+                        y = buf->Bg2[sprite].y0;
+                        if (y < D_80071A48[1].y - 0x70) {
+                            buf->Bg2[sprite].y0 =
+                                y + ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
+                        } else {
+                            buf->Bg2[sprite].y0 =
+                                y - ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
+                        }
+                    }
+                    entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
+                    if (entity == 0 || (buf->BgAnim[sprite + D_801144C8].mask &
+                                        g_FieldEntityBgTrigger[entity])) {
+                        addPrim(&buf->ot[D_8009ACA2.layer3], &buf->Bg2[sprite]);
+                    }
+                    sprite++;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
+    }
+
+layer4:
+    addPrim(&buf->ot[D_8009ACA2.layer4], &buf->BgDrenv4E);
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            addPrim(&buf->ot[D_8009ACA2.layer4], &buf->BgDrenv4S);
+            return;
+        }
+        if (run[0] == 0x7FFE) {
+            addPrim(
+                &buf->ot[D_8009ACA2.layer4], &buf->BgDm[run[1] + D_801144D0]);
+        } else {
+            sprite = run[1];
+            count = run[2];
+            if (count != 0) {
+                do {
+                    if (buf->Bg2[sprite].x0 <= D_80071A48[2].x - 0x160 ||
+                        D_80071A48[2].x <= buf->Bg2[sprite].x0) {
+                        x = buf->Bg2[sprite].x0;
+                        if (x < D_80071A48[2].x - 0xA0) {
+                            buf->Bg2[sprite].x0 =
+                                x + ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
+                        } else {
+                            buf->Bg2[sprite].x0 =
+                                x - ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
+                        }
+                    }
+                    if (buf->Bg2[sprite].y0 <= D_80071A48[2].y - 0x100 ||
+                        D_80071A48[2].y <= buf->Bg2[sprite].y0) {
+                        y = buf->Bg2[sprite].y0;
+                        if (y < D_80071A48[2].y - 0x70) {
+                            buf->Bg2[sprite].y0 =
+                                y + ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
+                        } else {
+                            buf->Bg2[sprite].y0 =
+                                y - ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
+                        }
+                    }
+                    if (D_80071A48[2].x - 0x160 < buf->Bg2[sprite].x0 &&
+                        buf->Bg2[sprite].x0 < D_80071A48[2].x) {
+                        entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
+                        if (entity == 0 ||
+                            (buf->BgAnim[sprite + D_801144C8].mask &
+                             g_FieldEntityBgTrigger[entity])) {
+                            addPrim(
+                                &buf->ot[D_8009ACA2.layer4], &buf->Bg2[sprite]);
+                        }
+                    }
+                    sprite++;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
+    }
+}
+#endif
 
 s32 FieldCalcLinearStep(s32 start, s32 target, s32 duration, s32 step) {
     s32 delta = target - start;
