@@ -234,7 +234,7 @@ void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
 void func_80025800(s32 partyId, s32 amount);
 void func_80025988(s32 partyId, s32 amount);
 void FieldEventSetDirByActorId(u8 actorId);
-void FieldMoveToEntityUpdate(u8 actorId);
+s32 FieldMoveToEntityUpdate(s32 actorId);
 void FieldEntityTurnToEntity(u8 actorId);
 void func_80020058(s16 partyId);
 void func_8001786C(s16 partyId);
@@ -5867,7 +5867,87 @@ void OpcodeFuncMova(void) {
     FieldMoveToEntityUpdate(GET_PARAM_U8(1));
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+/* Set up (or finish) a scripted move of the current entity toward a target
+ * entity: the current entity's move destination becomes the target's current
+ * position. Returns 1 while a move is being set up / is in progress, 0 when it
+ * just finished or when either entity has no model. Every global access
+ * re-materialises the g_EntityToModel / g_FieldModels bases through $at (the
+ * $at remat wall); codegen pinned via MASPSX_OVERRIDE, #else is the verified
+ * C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMoveToEntityUpdate);
+#else
+s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
+    FieldEntity* cur;
+    FieldEntity* target;
+    FieldModelEntry* entry;
+    u8 curModel;
+    u8 targetModel;
+    u8 animCount;
+
+    curModel = g_EntityToModel[g_CurrentEntity];
+    if (curModel == 0xFF) {
+        goto advance;
+    }
+    targetModel = g_EntityToModel[targetEntityId & 0xFF];
+    if (targetModel == 0xFF) {
+        goto advance;
+    }
+    cur = &g_FieldModels[curModel];
+    target = &g_FieldModels[targetModel];
+    cur->MoveEndI = target->SolidRange;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+    cur->MoveEndX = target->PosX;
+    cur->MoveEndY = target->PosY;
+    cur = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (cur->scriptedMoveMode != 1) {
+        goto setmode;
+    }
+    if (cur->ActionState == 1) {
+        if (g_FieldState->currentMovieFrame * 3 < cur->MoveSpeed) {
+            if (cur->activeAnimId == 2) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 2;
+        } else {
+            if (cur->activeAnimId == 1) {
+                goto done_anim;
+            }
+            cur->activeAnimId = 1;
+        }
+        cur->animSpeed = 0x10;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+        curModel = g_EntityToModel[g_CurrentEntity];
+        entry = &g_FieldModelLoaderData[curModel];
+        animCount = D_80074F02[curModel];
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
+            *(u16*)(g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .animationOffset +
+                    g_FieldModelData->modelEntries[entry->modelEntryIndex]
+                        .modelData +
+                    animCount * 0x10) -
+            1;
+    done_anim:
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
+        return 1;
+    }
+    if (cur->ActionState == 2) {
+        cur->scriptedMoveMode = 0;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+        goto advance;
+    }
+    goto out;
+setmode:
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+    goto out;
+advance:
+    g_FieldScriptPC[g_CurrentEntity] += 2;
+    return 0;
+out:
+    return 0;
+}
+#endif
 
 void OpcodeFuncDira(void) {
     if (g_DebugLevel & 3) {
