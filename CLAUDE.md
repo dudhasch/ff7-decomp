@@ -499,6 +499,20 @@ a near-miss, in rough order of frequency:
   always lifted *before* a constant the compiler found later in the body, and
   making the other constant a local too fixes the order but hands the allocator
   a different register.
+
+  The rule is not about constants: a global's `%hi`/`%lo` address is a movable
+  too, so a global written only inside a conditional arm gets its address
+  rebuilt at every use. `LoadLocalFieldModelAndInitAll` toggles `D_800DF114`
+  twice inside an `if` in its third loop; taking `flip = &D_800DF114;` before
+  the loop and writing `*flip ^= 1;` hoists the address the way the target has
+  it, and is worth 19 rows.
+* **One pointer per copy loop, even when the loops are far apart.** Reusing a
+  `u32* s` / `u32* d` pair for two unrelated copies in the same function
+  stretches both live ranges across everything between them, and the allocator
+  pays for it elsewhere — in `LoadLocalFieldModelAndInitAll` the second copy
+  came out with two base registers instead of one, 20 rows. This is the
+  opposite of the counter-merging idiom above: merge *loop counters* that
+  describe the same walk, split *pointers* that describe different ones.
 * **A chained assignment stores right to left.** `m[0][0] = m[1][1] =
   m[2][2] = 0x1000;` is `m[0][0] = (m[1][1] = (m[2][2] = 0x1000))`, so the
   stores come out `m[2][2]`, `m[1][1]`, `m[0][0]` — descending. A target that
