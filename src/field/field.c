@@ -5608,7 +5608,54 @@ s32 OpcodeFuncTurnw(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+/* TURN (0xB5): turn the current entity to a target direction over a number of
+ * steps. If the previous turn finished (TurnType 3) clear it and advance. If an
+ * identical turn is already in flight, keep waiting. Otherwise (re)arm the
+ * turn: TurnStart = current Dir, TurnEnd = target. Verified C kept as the
+ * #else; codegen pinned via MASPSX_OVERRIDE (the g_FieldModels *0x84 base
+ * regalloc wall). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurn);
+#else
+s32 OpcodeFuncTurn(void) {
+    s16 dir;
+    FieldEntity* model;
+    u8 turnType;
+    u8 turnSteps;
+
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
+    }
+    turnSteps = GET_PARAM_U8(4);
+    turnType = GET_PARAM_U8(5);
+    if (g_DebugLevel & 3) {
+        if (turnType == 1) {
+            DebugPrintOpcode("turn", 5);
+        } else if (turnType == 2) {
+            DebugPrintOpcode("turnc", 5);
+        }
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->TurnType == 3) {
+        model->TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        PC_INC(6);
+        return 0;
+    }
+    dir = FieldEventReadMemoryS16(2, 2);
+    if (model->TurnStep != 0 && (s16)dir == model->TurnEnd &&
+        model->TurnType == turnType && model->TurnSteps == turnSteps) {
+        return 1;
+    }
+    model->TurnStart = g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = turnType;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = turnSteps;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd = dir;
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
 
