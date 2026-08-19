@@ -1880,7 +1880,115 @@ void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
     SetDrawMode(dm, 0, 1, GetTPage(0, 0, 0x3C0, 0x100), NULL);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
+extern u16 D_8011446C;
+
+/* Project the field-exit-arrow marker positions (the per-trigger 3D points)
+ * through the camera and add a sprite packet for each visible one to the OT,
+ * in both the trigger-arrow and the field-exit sets. m2c seed; the residual is
+ * the OT-link store scheduling and the GTE RotTransPers arg setup. Codegen
+ * pinned via MASPSX_OVERRIDE pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldArrowsAddToRender);
+#else
+void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
+    u16 sp10;
+    u16 sp12;
+    u16 sp14;
+    s32 sp18;
+    s32 sp1C;
+    s16 var_s4;
+    s16 var_s4_2;
+    s16 var_v0;
+    s16 var_v0_3;
+    s32 temp_a0_2;
+    s32 temp_a1;
+    s32 temp_a2;
+    s32 temp_s0;
+    s32 temp_s0_2;
+    s32 temp_s3;
+    s32 var_v0_2;
+    s32 var_v1;
+    void* temp_a0;
+    void* temp_a1_2;
+    void* temp_s0_3;
+    void* temp_s1;
+    void* temp_v1;
+
+    if (((*g_FieldExitArrowState == 1) && (g_FieldAnimLock == 0)) ||
+        (*g_FieldExitArrowState == 2)) {
+        var_s4 = 0;
+        PushMatrix();
+        SetRotMatrix(arg1);
+        SetTransMatrix(arg1);
+        var_v1 = 0 << 0x10;
+        do {
+            temp_s0 = var_v1 >> 0x10;
+            var_v0 = var_s4 + 1;
+            if (((g_FieldTriggers + temp_s0)->unk218 == 1) &&
+                ((temp_a0 = (temp_s0 * 0x18) + arg2,
+                  temp_a1 = (s32)(temp_a0->unk0 + temp_a0->unk6) / 2,
+                  sp10 = (u16)temp_a1,
+                  temp_a2 = (s32)(temp_a0->unk2 + temp_a0->unk8) / 2,
+                  sp12 = (u16)temp_a2,
+                  sp14 = (u16)((s32)(temp_a0->unk4 + temp_a0->unkA) / 2),
+                  ((temp_a1 << 0x10) != 0)) ||
+                 (var_v0 = var_s4 + 1, ((temp_a2 << 0x10) != 0)))) {
+                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
+                temp_a0_2 = temp_s0 * 0x10;
+                temp_a1_2 = temp_a0_2 + arg0;
+                temp_a1_2->unk400D = 0xD0;
+                temp_a1_2->unk400C = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
+                temp_a1_2->unk4008 = (s16)(sp10 - 7);
+                temp_a1_2->unk400A = (s16)(sp12 - 8);
+                temp_a1_2->unk4000 = (s32)((temp_a1_2->unk4000 & 0xFF000000) |
+                                           (arg0->unk0 & 0xFFFFFF));
+                arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
+                                   ((arg0 + (temp_a0_2 + 0x4000)) & 0xFFFFFF));
+                var_v0 = var_s4 + 1;
+            }
+            var_s4 = var_v0;
+            var_v1 = var_s4 << 0x10;
+        } while (var_v0 < 0xC);
+        var_s4_2 = 0;
+        var_v0_2 = 0 << 0x10;
+        do {
+            temp_s0_2 = var_v0_2 >> 0x10;
+            temp_s3 = temp_s0_2 * 0x10;
+            temp_v1 = g_FieldTriggers + temp_s3;
+            var_v0_3 = var_s4_2 + 1;
+            if (temp_v1->unk230 != 0) {
+                sp10 = temp_v1->unk224;
+                sp12 = temp_v1->unk228;
+                sp14 = temp_v1->unk22C;
+                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
+                temp_s1 = temp_s3 + arg0;
+                temp_s1->unk40CD = 0xD0;
+                temp_s1->unk40CC = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
+                temp_s0_3 = arg0 + ((temp_s0_2 + 0xC) * 0x10);
+                temp_s0_3->unk4008 = (s16)(sp10 - 7);
+                temp_s0_3->unk400A = (s16)(sp12 - 8);
+                if ((g_FieldTriggers + temp_s3)->unk230 == 2) {
+                    temp_s0_3->unk400E = GetClut(0x100, 0x1E8);
+                }
+                temp_s1->unk40C0 = (s32)((temp_s1->unk40C0 & 0xFF000000) |
+                                         (arg0->unk0 & 0xFFFFFF));
+                arg0->unk0 =
+                    (s32)((arg0->unk0 & 0xFF000000) |
+                          ((s32)(arg0 + (temp_s3 + 0x40C0)) & 0xFFFFFF));
+                var_v0_3 = var_s4_2 + 1;
+            }
+            var_s4_2 = var_v0_3;
+            var_v0_2 = var_s4_2 << 0x10;
+        } while (var_v0_3 < 0xC);
+        PopMatrix();
+        arg0->unk4180 =
+            (s32)((arg0->unk4180 & 0xFF000000) | (arg0->unk0 & 0xFFFFFF));
+        arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
+                           ((s32)(arg0 + 0x4180) & 0xFFFFFF));
+        D_8011446C += 1;
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_model.c
