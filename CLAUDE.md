@@ -461,6 +461,27 @@ a near-miss, in rough order of frequency:
   in SImode and the constant as a plain `ori`. A `u16` local does **not** work
   — it is the same HImode trap. `OpcodeFuncSpcal`'s two inventory loops need
   this, and it was worth four rows and the whole frame layout.
+* **A loop whose exit test is duplicated at the bottom wants to be a backward
+  `goto`.** `loop.c`'s `duplicate_loop_exit_test` copies the loop's first
+  conditional jump to the end, turning a top-test loop into a rotated one — so
+  your build has the test twice (once in the preheader, once on the back edge)
+  where the target reaches a single top test through a plain `j`. Both `while
+  (cond) { ... }` and `for (;;) { if (cond) break; ... }` get rotated; a
+  backward `goto` does not, because gcc emits no NOTE_INSN_LOOP_BEG for it and
+  `loop_optimize` never sees a loop there. The cost is two rows per loop plus
+  whatever the changed register pressure does downstream —
+  `FieldBackgroundInitPackets`' four run walks measured 43 rows as `while`, 38
+  as `for (;;)` and 25 as `goto`. The same absence of a loop note also means no
+  invariant hoisting and no strength reduction inside that loop, so check the
+  inner loops still look right after the change; here the real loops are the
+  inner `do`/`while`s and only the outer walks are gotos.
+* **`f(x, cond ? 1 : 0)` folds to a shift; the target's branch means two
+  calls.** `SetSemiTrans(p, (tile->flags & 0x80) ? 1 : 0)` compiles to
+  `srl a1,a1,0x7` — one instruction, no branch. Where the target tests the bit
+  and branches, the source called the function twice from an `if`/`else` and
+  cross-jumping merged the two `jal`s into one, leaving only the two argument
+  setups. The tell is a pair of blocks that each load the same `a0` and a
+  different `a1` before a shared call.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
