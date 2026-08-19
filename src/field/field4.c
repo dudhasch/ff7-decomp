@@ -9028,4 +9028,155 @@ s32 OpcodeFuncCkitm(void) {
 // Begin of field_opcode_special.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field4", OpcodeFuncSpcal);
+extern u8 D_8009D7D0;
+void func_80033A90(void);
+void SystemMessageSetCharName(u8 charId, u8 nameId);
+
+/* The "special" opcode: one byte of sub-opcode selects among eleven unrelated
+ * jobs, from clearing the item/materia inventories to writing a character's
+ * name into the message name buffer. Sub-opcodes run 0xF5..0xFF, which is what
+ * the jump table's `(u32)(sub - 0xF5) < 0xB` guard checks. */
+/* One instruction out, and it is a scheduling choice, not a semantic one: for
+ * the smspd sub-opcode the target computes `nor v0,zero,v0` into the load-delay
+ * slot of the `lbu` that PC_INC needs for g_CurrentEntity, and stores to
+ * D_8009D7D0 before materialising &g_FieldScriptPC. This build emits the `nor`
+ * into a1 immediately after the call and sinks the store past the PC address.
+ * Everything else -- all eleven sub-opcodes, the 13 .rodata literals and the
+ * jump table at .rodata+0xde0 -- is byte-exact.
+ *
+ * Three findings got it this far, all of them costly to re-derive:
+ *   - `itemId` must be an s32 local. Passing `i | 0xC600` straight to
+ *     func_80025288(u16) lets combine narrow the ior to HImode, where the
+ *     constant becomes -0x3a00 and can no longer be an `ori` immediate; gcc
+ *     then hoists it into a callee-saved register and the frame grows to
+ *     -0x38. A u16 local does not help -- it has to be s32.
+ *   - the name copy walks (`*name++`), it does not index (`name[i]`). Indexing
+ *     makes gcc build a separate giv and copy the base into it.
+ *   - `len` is read before the switch. Reading it after, or folding it and the
+ *     switch index into one variable, both cost ~13 rows.
+ * Measured and rejected: a u8 temp for the FieldEventReadMemoryU8 result
+ * (no change), a u16 itemId (no change). Permuter scratch imported at base
+ * score 475. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncSpcal);
+#else
+s32 OpcodeFuncSpcal(void) {
+    u8* name;
+    s32 itemId;
+    u16 offset;
+    u16 len;
+    s32 i;
+
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("spcal", 8);
+    }
+    switch (GET_PARAM_U8(1)) {
+    case 0xFF:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("clitm", 8);
+        }
+        for (i = 0; i < 0x200; i++) {
+            itemId = i | 0xC600;
+            func_80025288(itemId);
+        }
+        PC_INC(2);
+        return 0;
+    case 0xFE:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("rsglb", 8);
+        }
+        func_80033A90();
+        PC_INC(2);
+        return 0;
+    case 0xFD:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("spcnm", 8);
+        }
+        SystemMessageSetCharName(GET_PARAM_U8(2), GET_PARAM_U8(3));
+        PC_INC(4);
+        return 0;
+    case 0xFC:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("mvlck", 2);
+        }
+        D_800716CC = GET_PARAM_U8(2);
+        PC_INC(3);
+        return 0;
+    case 0xFB:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("btlck", 2);
+        }
+        D_80071E30 = GET_PARAM_U8(2);
+        PC_INC(3);
+        return 0;
+    case 0xFA:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("flitm", 8);
+        }
+        for (i = 0; i < 0x200; i++) {
+            itemId = i | 0xC600;
+            func_80025380(itemId);
+        }
+        PC_INC(2);
+        return 0;
+    case 0xF9:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("flmat", 8);
+        }
+        for (i = 0; i < 0x50; i++) {
+            func_8002542C(i);
+        }
+        PC_INC(2);
+        return 0;
+    case 0xF8:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("smspd", 3);
+        }
+        D_8009D7D0 = ~FieldEventReadMemoryU8(4, 3);
+        PC_INC(4);
+        return 0;
+    case 0xF7:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("gmspd", 3);
+        }
+        FieldEventWriteMemoryU8(4, 3, ~D_8009D7D0);
+        PC_INC(4);
+        return 0;
+    case 0xF6:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("pname", 8);
+        }
+        name = GetCharacterName(FieldEventReadMemoryU8(3, 3));
+        offset = 0;
+        len = GET_PARAM_U8(5);
+        switch (GET_PARAM_U8(2) & 0xF) {
+        case 15:
+            offset += 0x100;
+        case 13:
+            offset += 0x100;
+        case 11:
+            offset += 0x100;
+        case 3:
+            offset += 0x100;
+        }
+        for (i = 0; i < len; i++) {
+            ((u8*)D_8009D288)[offset + i] = *name++;
+        }
+        ((u8*)D_8009D288)[offset + i] = 0xFF;
+        PC_INC(6);
+        return 0;
+    case 0xF5:
+        if (g_DebugLevel & 3) {
+            DebugPrintOpcode("arrow", 8);
+        }
+        g_FieldMovieOpcodeActive = GET_PARAM_U8(2);
+        PC_INC(3);
+        return 0;
+    }
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("?????", 8);
+    }
+    PC_INC(2);
+    return 0;
+}
+#endif
