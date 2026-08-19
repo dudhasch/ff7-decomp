@@ -341,6 +341,24 @@ a near-miss, in rough order of frequency:
   `value - quotient * n` with an `s32` quotient. Hoist both the quotient and
   the remainder into locals ahead of an `if`/`else` that uses them, or gcc
   duplicates the division into both arms (`OpcodeFuncIdlck`).
+* **Before blaming register allocation, read the target's opcodes for the
+  types.** Three of them are declarations in disguise, and each is worth tens
+  of rows that all look like allocation noise:
+  * `lw` on a symbol where you wrote `addiu` means the symbol is a **pointer
+    to** the thing, not the thing. `D_800E4274` in `src/field/field2.c` is a
+    `s16*` holding the walk mesh address; declaring it `s16[]` cost 27
+    instructions and a 64-byte frame overrun before the `lw` gave it away.
+  * `lhu` against your `lh` on a struct field means the field is unsigned
+    (`lbu`/`lb` likewise). `FieldEntity.PosI` was declared `s16` and every
+    read in the target is `lhu`.
+  * `blez` on a loop guard cannot come from an unsigned bound, and `beqz`
+    cannot come from a plainly signed one — so the guard alone types the
+    bound. `FieldState.modelCount` was declared `u16` and the target's guard
+    is `blez`.
+  Fix the declaration, not the expression: a cast at the use site produces
+  `lh` plus an `andi`, which is a third wrong answer. Check who else uses the
+  field first — both of the above had few enough users to retype outright,
+  and `make build` is the arbiter.
 * **A loop bound as `s16` buys a `move` that `u16` folds away.** For
   `for (i = 0; i < count; i++)` with `count` assigned from a `lbu` plus a
   constant, gcc knows the value is small and non-negative, so the widening to
