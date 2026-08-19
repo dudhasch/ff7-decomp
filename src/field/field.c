@@ -11072,9 +11072,11 @@ void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
 }
 
 /* gcc hoists the array's %hi/%lo into a register because the same address is
- * read and written; the original rematerialises it through $at each time.
- * Codegen pinned via MASPSX_OVERRIDE: the #else body is the verified-correct
- * C, its bytes come from the reference .s (the $at-rematerialisation wall). */
+ * read and written; the original rematerialises it through $at each time. The
+ * MASPSX_AT_REMAT pass splits the CSEd base correctly, but gcc also sinks the
+ * D_8009D824=1 store below the array accesses — a separate store-ordering gap
+ * the pass does not (yet) cover, so this stays pinned until it does. Codegen
+ * pinned via MASPSX_OVERRIDE: the #else body is the verified-correct C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldDebugPageAddPos);
 #else
