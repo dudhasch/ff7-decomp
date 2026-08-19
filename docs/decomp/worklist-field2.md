@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 7 |
+| remaining `INCLUDE_ASM` | 6 |
 | handwritten — can never match | 0 |
 | blocked on a `.rodata` group | 0 |
-| **actionable** | **7** |
+| **actionable** | **6** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -20,11 +20,10 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `FieldEntityInitPos` | 234 | 2 |  |  |  |  |  |  |
-| 2 | `HandleKawaiDataInModel` | 482 | 5 |  |  |  |  |  |  |
-| 3 | `LoadLocalFieldModelAndInitAll` | 529 | 11 |  |  |  |  |  |  |
-| 4 | `FieldModelCreatePktsForPart` | 727 | 1 |  |  |  |  |  |  |
-| 5 | `FieldEntityMove` | 759 | 10 |  | 2 |  |  |  |  |
-| 6 | `FieldBGUpdateDrawenv` | 1266 | 7 |  | 12 |  |  |  |  |
-| 7 | `FieldEntityMovementUpdate` | 1855 | 11 |  | 1 |  |  |  |  |
+| 1 | `HandleKawaiDataInModel` | 482 | 5 |  |  |  |  |  |  |
+| 2 | `LoadLocalFieldModelAndInitAll` | 529 | 11 |  |  |  |  |  |  |
+| 3 | `FieldModelCreatePktsForPart` | 727 | 1 |  |  |  |  |  |  |
+| 4 | `FieldEntityMove` | 759 | 10 |  | 2 |  |  |  |  |
+| 5 | `FieldBGUpdateDrawenv` | 1266 | 7 |  | 12 |  |  |  |  |
+| 6 | `FieldEntityMovementUpdate` | 1855 | 11 |  | 1 |  |  |  |  |
 

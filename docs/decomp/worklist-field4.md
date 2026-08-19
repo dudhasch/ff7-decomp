@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 25 |
+| remaining `INCLUDE_ASM` | 17 |
 | handwritten — can never match | 14 |
-| blocked on a `.rodata` group | 6 |
-| **actionable** | **5** |
+| blocked on a `.rodata` group | 0 |
+| **actionable** | **3** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -21,26 +21,13 @@ the `.c` — those are the cheapest wins left, finish them first.
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `KawaiLightingApplyToPolyColor` | 282 | 0 |  |  |  |  |  |  |
-| 2 | `OpcodeFuncLader` | 403 | 2 |  | 1 |  |  |  |  |
-| 3 | `FieldEventSplitJoinSetMove` | 429 | 2 |  | 1 |  |  |  |  |
-| 4 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
-| 5 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
+| 2 | `OpcodeFuncSpcal` | 396 | 9 |  |  | yes |  |  |  |
+| 3 | `DebugUpdateActor` | 2102 | 9 |  |  |  |  |  |  |
 
 A `yes` in `jt` is a warning, not a verdict: the function may still be
 stuck on jump-table `.rodata` alignment until this unit is split on its
 original translation-unit boundaries. Read CLAUDE.md "Jump table
 alignment" before spending a budget on one.
-
-## Blocked — decompile the whole `.rodata` group or skip
-
-| function | i | verdict | why |
-| --- | --- | --- | --- |
-| `OpcodeFuncRtpal2` | 112 | BORROWS | D_800A0C70 owned by OpcodeFuncRtpal |
-| `OpcodeFuncRtpal` | 114 | LENDS | D_800A0C70 needed by OpcodeFuncRtpal2 |
-| `OpcodeFuncMppal2` | 132 | LENDS | D_800A0C80 needed by OpcodeFuncMppal |
-| `OpcodeFuncMppal` | 135 | BORROWS | D_800A0C80 owned by OpcodeFuncMppal2 |
-| `OpcodeFuncAdpal` | 155 | LENDS | D_800A0C78 needed by OpcodeFuncAdpal2 |
-| `OpcodeFuncAdpal2` | 157 | BORROWS | D_800A0C78 owned by OpcodeFuncAdpal |
 
 ## Handwritten — never attempt
 
