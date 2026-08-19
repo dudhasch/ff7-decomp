@@ -275,7 +275,8 @@ void func_801D069C(void) {
 // written for this function; print it with
 //   .venv/bin/python3 tools/permuter_macros.py recipe delay-slot-swap
 //
-// Scratch setup (docs/decomp/PERMUTER_MACROS.md, plus tools/permuter_externise.py):
+// Scratch setup (docs/decomp/PERMUTER_MACROS.md, plus
+// tools/permuter_externise.py):
 //   import.py -> permuter_strip_asm.py -> permuter_macros.py align --strings
 //   -> permuter_externise.py <scratch>/base.c
 //
