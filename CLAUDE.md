@@ -359,6 +359,30 @@ a near-miss, in rough order of frequency:
   `lh` plus an `andi`, which is a third wrong answer. Check who else uses the
   field first — both of the above had few enough users to retype outright,
   and `make build` is the arbiter.
+* **A range test written with `&&` is folded; nested `if`s are not.**
+  `x < 6 && x >= 4` becomes `(unsigned)(x - 4) < 2` — one instruction where
+  the target has two `slti` against the same register. `fold_range_test` only
+  fires on the `TRUTH_ANDIF` node, so writing the two comparisons as nested
+  `if`s with a shared fallthrough produces the target's pair. The tell is a
+  lone `addiu <reg>,<reg>,-N` feeding an `sltiu` where the target compares
+  twice. `OpcodeFuncLader` in `src/field/field4.c` needs this.
+* **A `u8` field compared inline gives `sltiu`; through an `s32` local it
+  gives `slti`.** Read into the comparison directly, combine folds the
+  `zero_extend` into the compare, proves the sign bit clear, and switches to
+  the unsigned opcode. Assign it to a signed local first and the extension
+  sits in its own insn, so the comparison stays signed. Same load (`lbu`
+  either way), same constant, different opcode — so when the only rows left
+  are `slti` against `sltiu`, the fix is a local, not a cast. A cast changes
+  the load instead and makes it worse.
+* **A block reached by both a failed test and a `switch` default is a
+  fallthrough, not an `else`.** When every arm of the switch returns, the
+  `else` form looks equivalent and reads better, but it inverts the guard
+  branch ahead of it and gcc lays the blocks out in the other order —
+  `OpcodeFuncLader` measured ten instructions apart on this alone. Follow the
+  target's branch polarity: `bne` to the body means the guard is spelled as
+  an early `return`, `beq` means an `if` wrapping everything. Duplicated tail
+  statements after such a guard are fine; cross-jumping merges them, which is
+  what the target's shared `j` into the common epilogue already shows.
 * **A loop bound as `s16` buys a `move` that `u16` folds away.** For
   `for (i = 0; i < count; i++)` with `count` assigned from a `lbu` plus a
   constant, gcc knows the value is small and non-negative, so the widening to
