@@ -342,4 +342,16 @@ extern u8 g_RainControl;
 extern u8 g_RainForce;
 extern u8 g_RandomTable[];
 
+/* Header of the field's model-loader file (FieldModelStructInit parses it,
+ * FieldEnablePartyModels reads its count). Shared: defined in field2.c,
+ * used from field4.c, and the units must all see it before first use --
+ * pycparser cannot prune a permuter scratch past a cast to an unknown type,
+ * which is what silently leaves the whole unit in base.c. */
+typedef struct {
+    /* 0x00 */ u8 unk0;
+    /* 0x01 */ u8 unk1;
+    /* 0x02 */ u16 count;
+    /* 0x04 */ FieldModelLoaderData models[0]; // variable length
+} FieldModelFileDesc;
+
 #endif /* FIELD_PRIVATE_H */

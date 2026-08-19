@@ -1803,13 +1803,6 @@ void FieldModelBsxTdbModify(u8* tdb) {
 
 extern s32 D_800E0204;
 
-typedef struct {
-    /* 0x00 */ u8 unk0;
-    /* 0x01 */ u8 unk1;
-    /* 0x02 */ u16 count;
-    /* 0x04 */ FieldModelLoaderData models[0]; // variable length
-} FieldModelFileDesc;
-
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldModelStructInit);
 #else
