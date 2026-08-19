@@ -2032,7 +2032,159 @@ u8 FieldGetNextRandomU8(void) {
     return g_RandomTable[D_80071C20];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBattleCheck);
+extern s8 D_800716D0;
+extern u16 D_8007173C;
+extern /*?*/s32 D_80074F14;
+extern s16 D_8007E774;
+extern s8 D_8007EBC8;
+extern s8 D_8009ABF5;
+extern s16 D_8009ABF6;
+extern u8 D_8009AC30;
+extern u8 D_8009C6D8;
+
+/* Check for a random or scripted battle this frame: roll the encounter, pick
+ * the battle from the field's encounter table, and kick off the transition if
+ * one triggers. m2c seed; residual is the encounter-table regalloc and the
+ * divide scheduling. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBattleCheck);
+#else
+void FieldBattleCheck(void)
+{
+    s16 temp_v0;
+    s16 var_v0;
+    s32 temp_s0;
+    s32 temp_v1;
+    s32 var_a0;
+    s32 var_a0_2;
+    s32 var_a1;
+    s32 var_a1_2;
+    s32 var_s0;
+    s32 var_s0_2;
+    s32 var_s0_3;
+    s32 var_s1;
+    s32 var_v0_2;
+    s32 var_v0_3;
+    u16 temp_a0;
+    u16 temp_a1;
+    u16 temp_v1_2;
+    u16 temp_v1_3;
+    u32 temp_a0_2;
+    u32 temp_a2;
+    u32 temp_a2_2;
+    u32 temp_a2_3;
+
+    if (D_8009AC30 == 0) {
+        var_s1 = g_FieldEncounters;
+    } else {
+        var_s1 = g_FieldEncounters + 0x18;
+    }
+    D_8009C6D8 += 0x20;
+    if (D_8009C6D8 == 0) {
+        func_800262D8();
+        Savemap.memory_bank_4[6].unk0 = (u8) (Savemap.memory_bank_4[6].unk0 + 1);
+        if ((Savemap.memory_bank_4[6].unk0 == 0) && (Savemap.memory_bank_4[6].unk1 != 0xFF)) {
+            Savemap.memory_bank_4[6].unk1 = (u8) (Savemap.memory_bank_4[6].unk1 + 1);
+        }
+        temp_a0 = var_s1->unk0;
+        if ((temp_a0 & 1) && (g_FieldMovieStreamActive == 0) && (D_8009AC2F == 0)) {
+            D_8007173C += (s32) *(&D_80074F14 + (g_PlayerModelId * 0x84)) / (s32) (temp_a0 >> 8);
+            if ((u32) (FieldGetRandomU8FromList() & 0xFF) < (u32) (D_80062F1B & 0x7F)) {
+                D_800716D0 = 4;
+            } else {
+                D_800716D0 = 0;
+            }
+            if ((u32) (FieldGetRandomU8FromList() & 0xFF) < (u32) ((u32) (D_8007173C * D_80062F19) >> 0xC)) {
+                StopFieldMapPreload();
+                D_8009ABF5 = 2;
+                D_8007EBC8 = 1;
+                temp_a0_2 = (u32) (FieldGetNextRandomU8() & 0xFF) >> 2;
+                if (!(D_80062F1B & 0x80)) {
+                    var_s0 = (s32) (var_s1->unkE << 0x10) >> 0x1A;
+                } else {
+                    var_s0 = (s32) (var_s1->unkE << 0x10) >> 0x1B;
+                }
+                if ((u32) (temp_a0_2 & 0xFF) < (u32) (var_s0 & 0xFF)) {
+                    D_800716D0 = 0;
+                    var_v0 = var_s1->unkE & 0x3FF;
+                    goto block_31;
+                }
+                if (!(D_80062F1B & 0x80)) {
+                    var_v0_2 = (s32) (var_s1->unk10 << 0x10) >> 0x1A;
+                } else {
+                    var_v0_2 = (s32) (var_s1->unk10 << 0x10) >> 0x1B;
+                }
+                temp_s0 = var_s0 + var_v0_2;
+                temp_a2 = temp_a0_2 & 0xFF;
+                if (temp_a2 < (u32) (temp_s0 & 0xFF)) {
+                    D_800716D0 = 0;
+                    var_v0 = var_s1->unk10 & 0x3FF;
+                    goto block_31;
+                }
+                temp_a1 = var_s1->unk12;
+                temp_v1 = temp_s0 + ((s32) (temp_a1 << 0x10) >> 0x1A);
+                if (temp_a2 < (u32) (temp_v1 & 0xFF)) {
+                    D_8009ABF6 = temp_a1 & 0x3FF;
+                    return;
+                }
+                if (!(D_80062F1B & 0x80)) {
+                    var_v0_3 = (s32) (var_s1->unk14 << 0x10) >> 0x1A;
+                } else {
+                    var_v0_3 = (s32) (var_s1->unk14 << 0x10) >> 0x1B;
+                }
+                if ((u32) (temp_a0_2 & 0xFF) < (u32) ((temp_v1 + var_v0_3) & 0xFF)) {
+                    var_v0 = var_s1->unk14 & 0x3FF;
+block_31:
+                    D_8009ABF6 = var_v0;
+                    return;
+                }
+                var_s0_2 = 0;
+                var_a0 = 0;
+                temp_a2_2 = (u32) (FieldGetNextRandomU8() & 0xFF) >> 2;
+                var_a1 = var_s1;
+                D_8009ABF6 = var_s1->unkC & 0x3FF;
+loop_34:
+                temp_v1_2 = var_a1->unk2;
+                var_s0_2 += (s32) (temp_v1_2 << 0x10) >> 0x1A;
+                if (temp_a2_2 >= (u32) (var_s0_2 & 0xFF)) {
+                    var_a0 += 1;
+                    var_a1 += 2;
+                    if (var_a0 < 5) {
+                        goto loop_34;
+                    }
+                } else {
+                    D_8009ABF6 = temp_v1_2 & 0x3FF;
+                }
+                if (D_8009ABF6 != D_8007E774) {
+                    D_8007E774 = D_8009ABF6;
+                    return;
+                }
+                var_s0_3 = 0;
+                var_a0_2 = 0;
+                temp_a2_3 = (u32) (FieldGetNextRandomU8() & 0xFF) >> 2;
+                var_a1_2 = var_s1;
+                D_8009ABF6 = var_s1->unkC & 0x3FF;
+loop_40:
+                temp_v1_3 = var_a1_2->unk2;
+                var_s0_3 += (s32) (temp_v1_3 << 0x10) >> 0x1A;
+                var_a0_2 += 1;
+                if (temp_a2_3 >= (u32) (var_s0_3 & 0xFF)) {
+                    var_a1_2 += 2;
+                    if (var_a0_2 >= 5) {
+
+                    } else {
+                        goto loop_40;
+                    }
+                } else {
+                    temp_v0 = temp_v1_3 & 0x3FF;
+                    D_8009ABF6 = temp_v0;
+                    D_8007E774 = temp_v0;
+                }
+            }
+        }
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_arrow.c
