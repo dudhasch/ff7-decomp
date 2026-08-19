@@ -2323,6 +2323,7 @@ s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
 }
 #endif
 
+void KawaiSetColorToPktsBelowLvl(FieldModelEntry* model, u8* data);
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPktsBelowLvl);
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetColorToPartPktsBelowLvl);
@@ -2506,7 +2507,125 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+/* Fade a model's vertex colour over time below a light level (KAWAI
+ * sub-command). Four channels (cur@0/2/4/6, target@8/A/C/E, delta@10/12/14/16,
+ * unk18@0x18, done@0x19 in the 0x3C-stride slot table). data[0]==0 inits the
+ * slot from twelve LE u16 descriptor words; data[0]==1 exports the four cur
+ * channels + unk18 to the D_800DFE1C scratch buffer, pushes them to the
+ * below-level packets, then advances each channel toward its target with the
+ * sign-aware clamp and bumps done once all four reach 0xF. Returns 1 while
+ * fading, 0 when done. The scratch-quad $at remat in the apply arm is the wall
+ * (same as KawaiFadeModelColor); codegen pinned via MASPSX_OVERRIDE, #else is
+ * the verified C. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", KawaiColorFadeBelowLvl);
+#else
+typedef struct {
+    /* 0x00 */ u16 cur0;
+    /* 0x02 */ u16 cur1;
+    /* 0x04 */ u16 cur2;
+    /* 0x06 */ u16 cur3;
+    /* 0x08 */ s16 target0;
+    /* 0x0A */ s16 target1;
+    /* 0x0C */ s16 target2;
+    /* 0x0E */ s16 target3;
+    /* 0x10 */ s16 delta0;
+    /* 0x12 */ s16 delta1;
+    /* 0x14 */ s16 delta2;
+    /* 0x16 */ s16 delta3;
+    /* 0x18 */ u8 unk18;
+    /* 0x19 */ u8 done;
+} KawaiFadeBelowLvlSlot;
+
+s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
+    KawaiFadeBelowLvlSlot* slot;
+    s32 done;
+
+    slot = (KawaiFadeBelowLvlSlot*)&D_800DFE3C[data[1]];
+    if (data[0] == 0) {
+        slot->cur0 = data[0x02] | (data[0x03] << 8);
+        slot->cur1 = data[0x04] | (data[0x05] << 8);
+        slot->cur2 = data[0x06] | (data[0x07] << 8);
+        slot->cur3 = data[0x08] | (data[0x09] << 8);
+        slot->target0 = data[0x0A] | (data[0x0B] << 8);
+        slot->target1 = data[0x0C] | (data[0x0D] << 8);
+        slot->target2 = data[0x0E] | (data[0x0F] << 8);
+        slot->target3 = data[0x10] | (data[0x11] << 8);
+        slot->delta0 = data[0x12] | (data[0x13] << 8);
+        slot->delta1 = data[0x14] | (data[0x15] << 8);
+        slot->delta2 = data[0x16] | (data[0x17] << 8);
+        slot->delta3 = data[0x18] | (data[0x19] << 8);
+        slot->done = 0;
+        slot->unk18 = data[0x1A];
+        return 0;
+    }
+    if (data[0] == 1) {
+        D_800DFE1C[0] = slot->cur0;
+        D_800DFE1C[1] = slot->cur0 >> 8;
+        D_800DFE1C[2] = slot->cur1;
+        D_800DFE1C[3] = slot->cur1 >> 8;
+        D_800DFE1C[4] = slot->cur2;
+        D_800DFE1C[5] = slot->cur2 >> 8;
+        D_800DFE1C[6] = slot->cur3;
+        D_800DFE1C[7] = slot->cur3 >> 8;
+        D_800DFE1C[8] = slot->unk18;
+        KawaiSetColorToPktsBelowLvl(model, D_800DFE1C);
+        if (slot->done != 0) {
+            return 1;
+        }
+        done = 0;
+        slot->cur0 += slot->delta0;
+        if (slot->delta0 >= 0) {
+            if ((s16)slot->cur0 < slot->target0) {
+                goto cur0done;
+            }
+        } else if (slot->target0 < (s16)slot->cur0) {
+            goto cur0done;
+        }
+        slot->cur0 = slot->target0;
+        done |= 1;
+    cur0done:
+        slot->cur1 += slot->delta1;
+        if (slot->delta1 >= 0) {
+            if ((s16)slot->cur1 < slot->target1) {
+                goto cur1done;
+            }
+        } else if (slot->target1 < (s16)slot->cur1) {
+            goto cur1done;
+        }
+        slot->cur1 = slot->target1;
+        done |= 2;
+    cur1done:
+        slot->cur2 += slot->delta2;
+        if (slot->delta2 >= 0) {
+            if ((s16)slot->cur2 < slot->target2) {
+                goto cur2done;
+            }
+        } else if (slot->target2 < (s16)slot->cur2) {
+            goto cur2done;
+        }
+        slot->cur2 = slot->target2;
+        done |= 4;
+    cur2done:
+        slot->cur3 += slot->delta3;
+        if (slot->delta3 >= 0) {
+            if ((s16)slot->cur3 < slot->target3) {
+                goto cur3done;
+            }
+        } else if (slot->target3 < (s16)slot->cur3) {
+            goto cur3done;
+        }
+        slot->cur3 = slot->target3;
+        done |= 8;
+    cur3done:
+        if (done == 0xF) {
+            slot->done++;
+        }
+        return 0;
+    }
+    return 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiSetLightingToModelPkts);
 
