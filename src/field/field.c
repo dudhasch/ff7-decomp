@@ -6231,7 +6231,86 @@ s32 OpcodeFuncAnimEx(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
+/* CANIM (change animation): switch the current model's animation to a new id
+ * read from the script, recompute the frame rate from the base speed and the
+ * script's divisor, and clamp the last frame. Twin of OpcodeFuncCanmEx. m2c
+ * seed; residual is the per-model address CSE and the divide scheduling.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
+#else
+s32 OpcodeFuncCanim(void)
+{
+    FieldModelEntry* temp_v1_5;
+    s16 temp_v0;
+    s32 temp_a1_4;
+    s32 temp_lo;
+    u16* temp_a0;
+    u16* temp_a3;
+    u16* temp_v1_2;
+    u8 temp_a1;
+    u8 temp_a1_2;
+    u8 temp_a1_3;
+    u8 temp_v1;
+    u8 temp_v1_4;
+    void* temp_v1_3;
+
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("canim", 4U);
+    }
+    temp_a1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_a1 != 0xFF) {
+        temp_v1 = D_800756E8[temp_a1];
+        if (temp_v1 != 3) {
+            if ((s32) temp_v1 >= 4) {
+                if (temp_v1 != 4) {
+                    return 1;
+                }
+                D_800756E8[temp_a1] = 0;
+                temp_v1_2 = (D_800722C4 * 2) + &D_800831FC;
+                *temp_v1_2 += 5;
+                return 0;
+            }
+            if ((s32) temp_v1 < 2) {
+                if ((s32) temp_v1 >= 0) {
+                    goto block_10;
+                }
+                // Duplicate return node #19. Try simplifying control flow for better match
+                return 1;
+            }
+            return 1;
+        }
+block_10:
+        temp_v1_3 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
+        temp_a1_2 = temp_v1_3->unk4;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E = (u8) temp_v1_3->unk1;
+        temp_v1_4 = *(&D_8007EB98 + D_800722C4);
+        ((temp_v1_4 * 0x84) + D_8009C544)->unk60 = (s16) ((s16) D_8009D828[temp_v1_4] / (s32) temp_a1_2);
+        temp_a3 = (D_800722C4 * 2) + &D_800831FC;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 = (s16) (((s32) (D_8009C6DC + *temp_a3)->unk2 / (s32) temp_a1_2) * 0x10);
+        temp_lo = (s32) (D_8009C6DC + *temp_a3)->unk3 / (s32) temp_a1_2;
+        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
+        temp_v1_5 = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3].modelEntryIndex];
+        temp_a1_4 = temp_a1_3 * 0x84;
+        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) + &temp_v1_5->modelData[temp_v1_5->animationOffset]) + 0xFFFF;
+        if (temp_v0 < temp_lo) {
+            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+        } else {
+            (temp_a1_4 + D_8009C544)->unk64 = (s16) temp_lo;
+        }
+        if (g_FieldCurrentOpcode == 0xB0) {
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 5;
+            goto block_15;
+        }
+        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
+        return 1;
+    }
+block_15:
+    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_a0 += 5;
+    return 0;
+}
+#endif
 
 /* CANM! (change animation, extended): switch the current model's animation to
  * a new id read from the script, recompute the frame rate from the base speed
