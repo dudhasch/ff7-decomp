@@ -354,4 +354,47 @@ typedef struct {
     /* 0x04 */ FieldModelLoaderData models[0]; // variable length
 } FieldModelFileDesc;
 
+/* The field background's tile tables. One header sits at the head of the
+ * loaded background block; each layer's tiles are a flat array behind one of
+ * its four byte offsets, and the run list at +0x10 says how many consecutive
+ * tiles share a texture page. A run is three s16 -- tag, sprite index, count
+ * -- except the 0x7FFF terminator, which is a bare tag. */
+typedef struct {
+    /* 0x00 */ s16 x;
+    /* 0x02 */ s16 y;
+    /* 0x04 */ u8 u;
+    /* 0x05 */ u8 v;
+    /* 0x06 */ u16 clut;
+} FieldBgTile1; // size:0x8
+
+typedef struct {
+    /* 0x00 */ s16 x;
+    /* 0x02 */ s16 y;
+    /* 0x04 */ u8 u;
+    /* 0x05 */ u8 v;
+    /* 0x06 */ u16 clut;
+    /* 0x08 */ u16 tpage;
+    /* 0x0A */ u16 rg; // red in the low byte, green in the high one
+    /* 0x0C */ u8 flags;
+    /* 0x0D */ u8 param;
+} FieldBgTile2; // size:0xE
+
+typedef struct {
+    /* 0x00 */ s16 x;
+    /* 0x02 */ s16 y;
+    /* 0x04 */ u8 u;
+    /* 0x05 */ u8 v;
+    /* 0x06 */ u16 clut;
+    /* 0x08 */ u8 flags;
+    /* 0x09 */ u8 param;
+} FieldBgTile3; // size:0xA
+
+typedef struct {
+    /* 0x00 */ u32 layer1Offset;
+    /* 0x04 */ u32 tpageOffset;
+    /* 0x08 */ u32 layer2Offset;
+    /* 0x0C */ u32 layer34Offset;
+    /* 0x10 */ s16 runs[0]; // variable length
+} FieldBgData;
+
 #endif /* FIELD_PRIVATE_H */

@@ -267,7 +267,224 @@ void FieldButtonsUpdate(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
+extern FieldBgData** D_8009D848;
+extern FieldBgTile3* D_8007EBD4;
+extern u16 D_8011448C;
+extern u16 D_801144C8;
+extern u16 D_801144D0;
+
+/* Build the sprite packets for the field background's four layers. Layers 1
+ * and 2 are 16x16 sprites, layers 3 and 4 are 32x32; each layer walks the run
+ * list from where the previous one stopped, emitting one packet per tile and a
+ * DR_MODE whenever a run asks for a different texture page. `pairs` collects
+ * the two per-sprite parameter bytes the animation code later edits in place.
+ *
+ * The four run walks are goto loops on purpose. Written as `while` or as
+ * `for (;;) { if (...) break; }` gcc's duplicate_loop_exit_test copies the
+ * 0x7FFF test to the bottom of each loop, which costs two rows per layer and
+ * shifts the whole register allocation; a backward goto is not a loop gcc
+ * recognises, so the test stays at the top and is reached by a plain `j`.
+ *
+ * 25 rows out, and they are one register-allocation decision repeated: the
+ * target keeps `modes` in s8 and spills both sprite counters (0x20 and 0x28);
+ * this build keeps spriteCount in s8 and spills `modes`, so every `modes++`
+ * costs an lw/addiu/sw instead of one addiu. The target's frame is 0x10 larger
+ * than ours with 36 bytes of its locals never touched, which says it carried
+ * one more long-lived value than this C creates -- find that value and the
+ * allocation should fall out. Two structural findings are already folded in
+ * above: the goto loops, and the explicit if/else around SetSemiTrans.
+ * Measured and rejected: `while` loops with the same body (43 rows, frame
+ * 0x10 too large), assigning `run` after tile1/tpages (no change), and
+ * `for (;;) { if (...) break; }` (38 rows).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
+#else
+void FieldBackgroundInitPackets(
+    SPRT_16* sprt16, SPRT* sprt, u8* pairs, DR_MODE* modes) {
+    FieldBgData* data;
+    FieldBgTile1* tile1;
+    FieldBgTile2* tile2;
+    u16* tpages;
+    s16* run;
+    s16 count;
+    u16 spriteCount;
+    u16 sprite34Count;
+
+    spriteCount = 0;
+    sprite34Count = 0;
+    D_8011448C = 0;
+    D_801144D0 = 0;
+    data = *D_8009D848;
+    run = data->runs;
+    tile1 = (FieldBgTile1*)((u8*)data + data->layer1Offset);
+    tpages = (u16*)((u8*)data + data->tpageOffset);
+
+layer1:
+    if (run[0] == 0x7FFF) {
+        run++;
+        goto layer2;
+    }
+    if (run[0] == 0x7FFE) {
+        SetDrawMode(modes, 0, 1, *tpages++, NULL);
+        D_8011448C++;
+        modes++;
+    } else {
+        count = run[2];
+        if (count != 0) {
+            do {
+                SetSprt16(sprt16);
+                SetShadeTex(sprt16, 1);
+                SetSemiTrans(sprt16, 0);
+                sprt16->r0 = 0x80;
+                sprt16->g0 = 0x80;
+                sprt16->b0 = 0x80;
+                sprt16->x0 = tile1->x;
+                sprt16->y0 = tile1->y;
+                sprt16->u0 = tile1->u;
+                sprt16->v0 = tile1->v;
+                sprt16->clut = tile1->clut;
+                spriteCount++;
+                tile1++;
+                sprt16++;
+                pairs += 2;
+            } while (--count != 0);
+        }
+    }
+    run += 3;
+    goto layer1;
+
+layer2:
+    D_8011448C = spriteCount - D_8011448C;
+    data = *D_8009D848;
+    tile2 = (FieldBgTile2*)((u8*)data + data->layer2Offset);
+
+layer2run:
+    if (run[0] == 0x7FFF) {
+        run++;
+        goto layer3;
+    }
+    count = run[2];
+    if (count != 0) {
+        do {
+            SetDrawMode(modes, 0, 1, tile2->tpage, NULL);
+            D_801144D0++;
+            SetSprt16(sprt16);
+            SetShadeTex(sprt16, 1);
+            if (tile2->flags & 0x80) {
+                SetSemiTrans(sprt16, 1);
+            } else {
+                SetSemiTrans(sprt16, 0);
+            }
+            modes++;
+            sprt16->r0 = tile2->rg;
+            sprt16->b0 = 0x80;
+            sprt16->g0 = tile2->rg >> 8;
+            sprt16->x0 = tile2->x;
+            sprt16->y0 = tile2->y;
+            sprt16->u0 = tile2->u;
+            sprt16->v0 = tile2->v;
+            sprt16->clut = tile2->clut;
+            pairs[0] = tile2->flags;
+            pairs[1] = tile2->param;
+            spriteCount++;
+            tile2++;
+            sprt16++;
+            pairs += 2;
+        } while (--count != 0);
+    }
+    run += 3;
+    goto layer2run;
+
+layer3:
+    D_801144C8 = spriteCount;
+    data = *D_8009D848;
+    D_8007EBD4 = (FieldBgTile3*)((u8*)data + data->layer34Offset);
+
+layer3run:
+    if (run[0] == 0x7FFF) {
+        run++;
+        goto layer4;
+    }
+    if (run[0] == 0x7FFE) {
+        SetDrawMode(modes, 0, 1, *tpages++, NULL);
+        modes++;
+    } else {
+        count = run[2];
+        run[1] = sprite34Count;
+        if (count != 0) {
+            do {
+                SetSprt(sprt);
+                SetShadeTex(sprt, 1);
+                if (D_8007EBD4->flags & 0x80) {
+                    SetSemiTrans(sprt, 1);
+                } else {
+                    SetSemiTrans(sprt, 0);
+                }
+                sprt->r0 = 0x80;
+                sprt->g0 = 0x80;
+                sprt->b0 = 0x80;
+                sprt->x0 = D_8007EBD4->x;
+                sprt->y0 = D_8007EBD4->y;
+                sprt->u0 = D_8007EBD4->u;
+                sprt->v0 = D_8007EBD4->v;
+                sprt->clut = D_8007EBD4->clut;
+                sprt->w = 0x20;
+                sprt->h = 0x20;
+                pairs[0] = D_8007EBD4->flags;
+                pairs[1] = D_8007EBD4->param;
+                sprite34Count++;
+                D_8007EBD4++;
+                sprt++;
+                pairs += 2;
+            } while (--count != 0);
+        }
+    }
+    run += 3;
+    goto layer3run;
+
+layer4:
+    if (run[0] == 0x7FFF) {
+        return;
+    }
+    if (run[0] == 0x7FFE) {
+        SetDrawMode(modes, 0, 1, *tpages++, NULL);
+        modes++;
+    } else {
+        count = run[2];
+        run[1] = sprite34Count;
+        if (count != 0) {
+            do {
+                SetSprt(sprt);
+                SetShadeTex(sprt, 1);
+                if (D_8007EBD4->flags & 0x80) {
+                    SetSemiTrans(sprt, 1);
+                } else {
+                    SetSemiTrans(sprt, 0);
+                }
+                sprt->r0 = 0x80;
+                sprt->g0 = 0x80;
+                sprt->b0 = 0x80;
+                sprt->x0 = D_8007EBD4->x;
+                sprt->y0 = D_8007EBD4->y;
+                sprt->u0 = D_8007EBD4->u;
+                sprt->v0 = D_8007EBD4->v;
+                sprt->clut = D_8007EBD4->clut;
+                sprt->w = 0x20;
+                sprt->h = 0x20;
+                pairs[0] = D_8007EBD4->flags;
+                pairs[1] = D_8007EBD4->param;
+                sprite34Count++;
+                D_8007EBD4++;
+                sprt++;
+                pairs += 2;
+            } while (--count != 0);
+        }
+    }
+    run += 3;
+    goto layer4;
+}
+#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", AddBackgroundToRender);
 
