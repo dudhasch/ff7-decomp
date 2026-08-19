@@ -6043,7 +6043,81 @@ s32 OpcodeFuncAnimb(void) {
 // Start of field_opcode_model_move.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncMove);
+/* MOVE (0x??): start a scripted move of the current entity toward a target
+ * read from the script, picking the walk/run animation by distance and setting
+ * the scripted-move state machine going. m2c seed using the raw D_ symbols;
+ * residual is the full-expression g_FieldModels[...] address CSE. Pinned
+ * pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncMove);
+#else
+s32 OpcodeFuncMove(void)
+{
+    FieldModelEntry* temp_v0;
+    s16 temp_a0_2;
+    s32 temp_v1_2;
+    s32 var_a0;
+    u16* temp_a0_3;
+    u8 temp_a0;
+    u8 temp_a1_2;
+    u8 temp_v1;
+    void* temp_a1;
+    void* temp_v1_3;
+
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("move", 5U);
+    }
+    temp_v1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_v1 == 0xFF) {
+        var_a0 = D_800722C4 * 2;
+        goto block_16;
+    }
+    ((temp_v1 * 0x84) + D_8009C544)->unk68 = 0;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk37 = 0;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk78 = (s32) ((s32) (FieldEventReadMemoryS16(1, 2) << 0x10) >> 4);
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk7C = (s32) ((s32) (FieldEventReadMemoryS16(2, 4) << 0x10) >> 4);
+    temp_a1 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+    if ((D_8009C6E0->unk10 * 3) < (s32) temp_a1->unk70) {
+        if (temp_a1->unk5E != 2) {
+            temp_a1->unk5E = 2U;
+            goto block_9;
+        }
+    } else if (temp_a1->unk5E != 1) {
+        temp_a1->unk5E = 1U;
+block_9:
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk60 = 0x10;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 = 0;
+        temp_a0 = *(&D_8007EB98 + D_800722C4);
+        temp_v0 = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a0].modelEntryIndex];
+        temp_v1_2 = temp_a0 * 0x84;
+        (temp_v1_2 + D_8009C544)->unk64 = (s16) (*((*(&D_80074F02 + temp_v1_2) * 0x10) + &temp_v0->modelData[temp_v0->animationOffset]) - 1);
+    }
+    D_800756E8[*(&D_8007EB98 + D_800722C4)] = 1;
+    temp_v1_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+    temp_a1_2 = temp_v1_3->unk5D;
+    if (temp_a1_2 == 1) {
+        temp_a0_2 = temp_v1_3->unk6A;
+        if (temp_a0_2 != temp_a1_2) {
+            if (temp_a0_2 != 2) {
+                goto block_17;
+            }
+            temp_v1_3->unk5D = 0U;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 0;
+            var_a0 = D_800722C4 * 2;
+block_16:
+            temp_a0_3 = var_a0 + &D_800831FC;
+            *temp_a0_3 += 6;
+            return 0;
+        }
+        return 1;
+    }
+block_17:
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5D = 1;
+    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
+    return 1;
+}
+#endif
 
 /* FMOVE (0xAD): move the current entity to a target while keeping its facing.
  * If a move is in flight (scriptedMoveMode 1), poll it (return 1) until
