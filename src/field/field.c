@@ -3531,7 +3531,300 @@ void FieldEventUpdate(s32 arg0) {
     UpdateFieldExitArrows(arg0);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
+extern /*?*/s32 D_8007078C;
+extern s16 D_800716DC;
+extern /*?*/s32 D_80071748;
+extern /*?*/s32 D_80071A88;
+extern s8 D_80075F23;
+extern /*?*/s32 D_8007E7AC;
+extern /*?*/s32 D_8007E7AE;
+extern /*?*/s32 D_8007E7B0;
+extern /*?*/s32 D_8007E7B2;
+extern /*?*/s32 D_8007E7B4;
+extern /*?*/s32 D_8007E7B6;
+extern /*?*/s32 D_8007E7B8;
+extern /*?*/s32 D_8007E7B9;
+extern /*?*/s32 D_8007E7BA;
+extern /*?*/s32 D_8007E7BB;
+extern /*?*/s32 D_8007E7BC;
+extern /*?*/s32 D_8007E7BD;
+extern /*?*/s32 D_8007E7BE;
+extern /*?*/s32 D_8007E7BF;
+extern /*?*/s32 D_8007E7C2;
+extern /*?*/s32 D_800833F8;
+extern s16 D_80095D84;
+extern /*?*/s32 D_8009A1C4;
+extern s8 D_8009AD38;
+
+/* Zero and default-initialise the whole field runtime state: the entity table,
+ * the per-model flags, the script state, and the various counters. m2c seed
+ * (the ?* are unknown-typed pointers). Residual is the wide store scheduling.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
+#else
+void FieldInitDefaultValues(void)
+{
+    ?* var_t0;
+    ?* var_t1;
+    ?* var_t2;
+    s16* var_v1;
+    s32 var_a1;
+    s32 var_a2;
+    s32 var_a2_2;
+    s32 var_a3;
+    s32 var_a3_2;
+    s32 var_a3_3;
+    s32 var_a3_4;
+    s32 var_a3_5;
+    s32 var_a3_6;
+    s32 var_a3_7;
+    s32 var_a3_8;
+    s32 var_a3_9;
+    s32 var_v0;
+    s32 var_v0_2;
+    s32 var_v1_3;
+    s8* temp_a0;
+    s8* temp_v1;
+    s8* var_a0;
+    s8* var_v0_4;
+    u8 (*var_t3)[8];
+    u8* temp_a1;
+    u8* var_v0_3;
+    u8* var_v1_2;
+    void* temp_v0;
+    void* temp_v0_2;
+    void* temp_v0_3;
+    void* temp_v0_4;
+    void* temp_v0_5;
+    void* temp_v0_6;
+    void* temp_v1_2;
+    void* temp_v1_3;
+    void* temp_v1_4;
+
+    D_8009C6E0->unk1 = 0;
+    D_8009C6E0->unk2 = 0;
+    D_8009C6E0->unk26 = 0;
+    D_8009C6E0->unk32 = 0;
+    D_8009C6E0->unk2E = 1;
+    D_8009C6E0->unk2A = 0;
+    D_8009C6E0->unk2C = 0;
+    D_8009C6E0->unk30 = 2;
+    D_80081DC4 = 0;
+    D_8009C6E0->unk28 = (s16) D_8009C6DC->unk3;
+    D_8009C6E0->unk33 = 0;
+    D_8009C6E0->unk34 = 0;
+    D_8009C6E0->unk35 = 0;
+    D_8009C6E0->unk3B = 0;
+    D_8009C6E0->unk36 = 0;
+    D_8009C6E0->unk37 = 0;
+    D_8009C6E0->unk3D = 0;
+    D_8009C6E0->unk48 = 0;
+    D_8009C6E0->unk44 = 0;
+    D_8009C6E0->unk40 = 0;
+    D_8009C6E0->unk3E = 0;
+    D_8009C6E0->unk3C = 0;
+    D_8009C6E0->unk12 = 0;
+    D_8009C6E0->unk13 = 0;
+    D_8009C6E0->unk14 = 0;
+    D_8009C6E0->unk8A = 0;
+    D_8009C6E0->unk18 = 0;
+    D_8009C6E0->unk1A = 0;
+    D_8009C6E0->unk98 = 0;
+    D_8009C6E0->unk8B = 0;
+    D_8009C6E0->unk99 = 0;
+    D_8009C6E0->unk3A = 0;
+    var_a3 = 0xFF;
+    D_8009C6E0->unk8E = 0;
+    D_8009C6E0->unk9C = 0;
+    D_8009C6E0->unk94 = 0;
+    D_8009C6E0->unkA2 = 0;
+    D_8009C6E0->unk96 = 0;
+    D_8009C6E0->unkA4 = 0;
+    D_8009C6E0->unk1D = 0;
+    var_a0 = &D_80075F23;
+    D_8009C6E0->unk10 = (u16) D_8009C6DC->unk8;
+    do {
+        *var_a0 = 0;
+        var_a3 -= 1;
+        var_a0 -= 1;
+    } while (var_a3 >= 0);
+    var_a3_2 = 0;
+    do {
+        var_a2 = 0;
+        if ((s32) D_8009C6DC->unk2 > 0) {
+            var_t3 = SavedScriptIds;
+            var_t2 = &D_80071A88;
+            var_t1 = &D_800833F8;
+            var_t0 = &D_80071748;
+            do {
+                temp_a1 = &(*var_t3)[var_a3_2];
+                var_t3 += 8;
+                temp_a0 = var_t2 + var_a3_2;
+                var_t2 += 8;
+                temp_v1 = var_t1 + var_a3_2;
+                var_t1 += 8;
+                *((var_a3_2 * 2) + var_t0) = 0;
+                *temp_v1 = 0;
+                *temp_a0 = 0xFF;
+                *temp_a1 = 0;
+                var_a2 += 1;
+                var_t0 += 0x10;
+            } while (var_a2 < (s32) D_8009C6DC->unk2);
+        }
+        var_a3_2 += 1;
+    } while (var_a3_2 < 8);
+    var_a3_3 = 0;
+    if ((s32) D_8009C6DC->unk2 > 0) {
+        var_v1 = &D_800716DC;
+        do {
+            *(&D_8009A1C4 + var_a3_3) = 7;
+            *(&D_8007EB98 + var_a3_3) = 0xFF;
+            *var_v1 = 0;
+            *(&D_80081D90 + var_a3_3) = 0;
+            *(&D_8007078C + var_a3_3) = 0xFF;
+            g_FieldScriptDebugEntities[var_a3_3] = 0;
+            var_a3_3 += 1;
+            var_v1 += 2;
+        } while (var_a3_3 < (s32) D_8009C6DC->unk2);
+    }
+    var_a3_4 = 0;
+    if ((s32) D_8009C6DC->unk3 > 0) {
+        var_a1 = 0;
+        do {
+            temp_v0 = var_a1 + D_8009C544;
+            temp_v0->unk36 = 0;
+            temp_v0->unk66 = 0;
+            temp_v0->unkC = 0;
+            temp_v0->unk10 = 0;
+            temp_v0->unk14 = 0;
+            temp_v0->unk72 = 0;
+            temp_v0->unk74 = 0;
+            (var_a1 + D_8009C544)->unk38 = 0;
+            (var_a1 + D_8009C544)->unk3B = 0;
+            (var_a1 + D_8009C544)->unk39 = 0;
+            (var_a1 + D_8009C544)->unk3A = 0;
+            temp_v0_2 = var_a1 + D_8009C544;
+            temp_v0_2->unk56 = 0;
+            temp_v0_2->unk3C = 0;
+            temp_v0_2->unk3E = 0;
+            temp_v0_2->unk40 = 0;
+            temp_v0_2->unk46 = 0;
+            temp_v0_2->unk4C = 0;
+            temp_v0_2->unk42 = 0;
+            temp_v0_2->unk48 = 0;
+            temp_v0_2->unk4E = 0;
+            temp_v0_2->unk44 = 0;
+            temp_v0_2->unk4A = 0;
+            temp_v0_2->unk50 = 0;
+            temp_v0_2->unk52 = 0;
+            temp_v0_2->unk54 = 0;
+            (var_a1 + D_8009C544)->unk5E = 0;
+            temp_v0_3 = var_a1 + D_8009C544;
+            temp_v0_3->unk60 = 0x10;
+            temp_v0_3->unk5C = 0;
+            temp_v0_3->unk78 = 0;
+            temp_v0_3->unk7C = 0;
+            temp_v0_3->unk80 = 0;
+            temp_v0_3->unk62 = 0;
+            temp_v0_3->unk64 = 0;
+            temp_v0_4 = var_a1 + D_8009C544;
+            temp_v0_4->unk5D = 0;
+            temp_v1_2 = var_a1 + D_8009C544;
+            temp_v0_4->unk70 = (s16) ((s16) D_8009C6E0->unk10 * 2);
+            temp_v1_2->unk5A = 0;
+            temp_v1_2->unk68 = 0;
+            temp_v1_2->unk6A = 0;
+            (var_a1 + D_8009C544)->unk58 = 0;
+            (var_a1 + D_8009C544)->unk59 = 0;
+            (var_a1 + D_8009C544)->unk5B = 0;
+            (var_a1 + D_8009C544)->unk37 = 0;
+            var_v0 = (s16) D_8009C6E0->unk10 * 0x1E;
+            temp_v1_3 = var_a1 + D_8009C544;
+            if (var_v0 < 0) {
+                var_v0 += 0x1FF;
+            }
+            temp_v1_3->unk6C = (s16) (var_v0 >> 9);
+            var_v0_2 = (s16) D_8009C6E0->unk10 * 0x50;
+            if (var_v0_2 < 0) {
+                var_v0_2 += 0x1FF;
+            }
+            temp_v1_3->unk6E = (s16) (var_v0_2 >> 9);
+            D_8008325C[var_a3_4] = 0;
+            D_800756E8[var_a3_4] = 0;
+            D_8009D828[var_a3_4] = 0x10;
+            D_80082248[var_a3_4] = 0x10;
+            temp_v1_4 = var_a1 + D_8009C544;
+            temp_v1_4->unk8 = 0;
+            temp_v1_4->unk0 = 0;
+            temp_v1_4->unk2 = 0;
+            temp_v1_4->unk4 = 0;
+            (var_a1 + D_8009C544)->unk9 = 0;
+            var_a3_4 += 1;
+            var_a1 += 0x84;
+        } while (var_a3_4 < (s32) D_8009C6DC->unk3);
+    }
+    var_a3_5 = 0;
+    do {
+        temp_v0_5 = D_8009C6E0 + var_a3_5;
+        var_a3_5 += 1;
+        temp_v0_5->unkF2 = 0;
+    } while (var_a3_5 < 0x40);
+    var_a3_6 = 0;
+    do {
+        temp_v0_6 = D_8009C6E0 + var_a3_6;
+        var_a3_6 += 1;
+        temp_v0_6->unkB2 = 0;
+    } while (var_a3_6 < 0x40);
+    var_a3_7 = 0;
+    var_v1_2 = D_80095DE0;
+    do {
+        var_a2_2 = 0xF;
+        var_v0_3 = var_v1_2 + 0x1E;
+loop_23:
+        *var_v0_3 = 0;
+        var_a2_2 -= 1;
+        var_v0_3 -= 2;
+        if (var_a2_2 >= 0) {
+            goto loop_23;
+        }
+        var_a3_7 += 1;
+        var_v1_2 += 0x20;
+    } while (var_a3_7 < 0x40);
+    var_a3_8 = 0;
+    var_v1_3 = 0;
+    do {
+        *(&D_8007E7BD + var_v1_3) = 0;
+        *(&D_8007E7BC + var_v1_3) = 0;
+        *(&D_8007E7BB + var_v1_3) = 0;
+        *(&D_8007E7BA + var_v1_3) = 0;
+        *(&D_8007E7BE + var_v1_3) = 0;
+        *(&D_8007E7BF + var_v1_3) = 0;
+        *(&D_8007E7B8 + var_v1_3) = 0;
+        *(&D_8007E7B9 + var_v1_3) = 0;
+        *(&D_8007E7C2 + var_v1_3) = 0;
+        *(&D_8007E7AC + var_v1_3) = 0;
+        *(&D_8007E7AE + var_v1_3) = 0;
+        *(&D_8007E7B0 + var_v1_3) = 0;
+        *(&D_8007E7B2 + var_v1_3) = 0;
+        *(&D_8007E7B4 + var_v1_3) = 0;
+        *(&D_8007E7B6 + var_v1_3) = 0;
+        var_a3_8 += 1;
+        var_v1_3 += 0x18;
+    } while (var_a3_8 < 0x20);
+    D_80095D84 = 0;
+    var_a3_9 = 8;
+    var_v0_4 = &D_8009AD38;
+    do {
+        *var_v0_4 = 0xFF;
+        var_a3_9 -= 1;
+        var_v0_4 -= 1;
+    } while (var_a3_9 >= 0);
+    g_EntityForSplitJoin = 0xFF;
+    g_FieldMovieOpcodeActive = 0;
+    Savemap.memory_bank_1[31] |= 3;
+}
+#endif
 
 /* Walks every entity's first script and runs its initialisation opcodes
  * (everything up to the terminating 0). The script-offset table sits past the
