@@ -3691,7 +3691,114 @@ void UpdateFieldExitArrows(s32 arg0) {
     }
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
+extern /*?*/s32 D_800E48FC;
+extern /*?*/s32 D_800E48FE;
+extern /*?*/s32 D_800E4900;
+extern /*?*/s32 D_800E4901;
+extern /*?*/s32 D_800E4904;
+extern /*?*/s32 D_800E4906;
+extern /*?*/s32 D_800E4908;
+extern /*?*/s32 D_800E4909;
+extern /*?*/s32 D_800E490C;
+extern /*?*/s32 D_800E490E;
+extern /*?*/s32 D_800E4910;
+extern /*?*/s32 D_800E4911;
+extern /*?*/s32 D_800E4914;
+extern /*?*/s32 D_800E4916;
+extern /*?*/s32 D_800E4918;
+extern /*?*/s32 D_800E4919;
+
+/* Draw the field-exit arrow sprite (a POLY_FT4) at the given OT slot, pulsing
+ * its colour over time. m2c seed; residual is the packet-field store ordering.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", DrawFieldExitArrow);
+#else
+void DrawFieldExitArrow(s32* arg0)
+{
+    POLY_FT4* temp_v1_5;
+    s16 temp_v1;
+    s16 temp_v1_2;
+    s16 temp_v1_3;
+    s16 temp_v1_4;
+    s16 var_a2;
+    s16 var_a3;
+    s32 temp_v0;
+    s32 temp_v0_2;
+    s32 temp_v0_3;
+    s32 temp_v0_4;
+    s32 var_v0;
+
+    if ((g_FieldMovieOpcodeActive == 0) && ((D_80114464 != 0x7FFF) || (D_80114468 != D_80114464))) {
+        var_a2 = D_80114464;
+        if (D_80114464 >= 0x141) {
+            var_a2 = 0x140;
+        }
+        if (D_80114464 < 0) {
+            var_a2 = 0;
+        }
+        var_a3 = D_80114468;
+        if (D_80114468 >= 0xE1) {
+            var_a3 = 0xE0;
+        }
+        if (D_80114468 < 0) {
+            var_a3 = 0;
+        }
+        D_80114490 ^= 1;
+        if (var_a2 >= 0x123) {
+            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x8F;
+            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x7F;
+            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x8F;
+            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x7F;
+            temp_v0 = D_80114490 * 0x28;
+            temp_v1 = var_a2 - 0x10;
+            *(&D_800E48FC + temp_v0) = temp_v1;
+            *(&D_800E4904 + temp_v0) = var_a2;
+            *(&D_800E490C + temp_v0) = temp_v1;
+            *(&D_800E4914 + temp_v0) = var_a2;
+            var_v0 = var_a3 << 0x10;
+        } else {
+            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x80;
+            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x90;
+            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x80;
+            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x90;
+            temp_v0_2 = D_80114490 * 0x28;
+            temp_v1_2 = var_a2 + 0x10;
+            *(&D_800E48FC + temp_v0_2) = var_a2;
+            *(&D_800E4904 + temp_v0_2) = temp_v1_2;
+            *(&D_800E490C + temp_v0_2) = var_a2;
+            *(&D_800E4914 + temp_v0_2) = temp_v1_2;
+            var_v0 = var_a3 << 0x10;
+        }
+        if ((var_v0 >> 0x10) < 0x11) {
+            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x6F;
+            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x6F;
+            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x5F;
+            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x5F;
+            temp_v0_3 = D_80114490 * 0x28;
+            temp_v1_3 = var_a3 + 0x10;
+            *(&D_800E48FE + temp_v0_3) = var_a3;
+            *(&D_800E4906 + temp_v0_3) = var_a3;
+            *(&D_800E490E + temp_v0_3) = temp_v1_3;
+            *(&D_800E4916 + temp_v0_3) = temp_v1_3;
+        } else {
+            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x60;
+            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x60;
+            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x70;
+            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x70;
+            temp_v0_4 = D_80114490 * 0x28;
+            temp_v1_4 = var_a3 - 0x10;
+            *(&D_800E48FE + temp_v0_4) = temp_v1_4;
+            *(&D_800E4906 + temp_v0_4) = temp_v1_4;
+            *(&D_800E490E + temp_v0_4) = var_a3;
+            *(&D_800E4916 + temp_v0_4) = var_a3;
+        }
+        temp_v1_5 = &D_800E48F4[D_80114490];
+        temp_v1_5->tag = (temp_v1_5->tag & 0xFF000000) | (*arg0 & 0xFFFFFF);
+        *arg0 = (*arg0 & 0xFF000000) | ((s32) temp_v1_5 & 0xFFFFFF);
+    }
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_event_debug.c
