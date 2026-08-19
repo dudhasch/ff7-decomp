@@ -536,6 +536,62 @@ a near-miss, in rough order of frequency:
   moved it from `0x18` to `0x20`, behind the `long` declared after it at
   function scope. Use it when a diff is nothing but `N(sp)` offsets in one
   branch.
+* **A scalar global does not alias a struct store; the same address reached
+  through an array or a struct member does.** gcc 2.6.3's `true_dependence`
+  disambiguates on `MEM_IN_STRUCT_P`, so a load of a plain `extern s16 x` is
+  loop-invariant even in a loop that stores through a struct pointer — gcc
+  hoists it into a register and reloads nothing. Write the same address as
+  `cam[1].x` and the load may alias, stays in the loop, and only its `%hi`/`%lo`
+  *address* is hoisted. So when the target reloads a global on every iteration
+  and your build hoists it, the global is an array or struct element in the
+  original, not a scalar. The tell is exact: `lui`/`lh` of the symbol inside the
+  loop in the target against a single load in the preheader in yours, or an
+  `addiu <reg>,<reg>,%lo(sym)` in the preheader with `lh <r>,0(<reg>)` in the
+  body. `AddBackgroundToRender` reads three such globals — a camera window, two
+  ordering-table slots and a per-sprite animation byte pair — and typing them as
+  arrays and structs was worth 172 rows and the whole frame layout.
+* **A `for (;;)` loop left by `goto` keeps the invariant hoisting that a
+  backward `goto` loses, without paying for the rotation a `break` costs.**
+  Three shapes, three different results for the same body: a backward `goto`
+  emits no `NOTE_INSN_LOOP_BEG`, so `loop_optimize` never runs and every
+  invariant is rematerialised at its use; `for (;;) { if (c) break; ... }` is a
+  loop, so invariants hoist, but `duplicate_loop_exit_test` copies the exit test
+  to the bottom, hoists an entry test into the preheader and reorders the
+  blocks around it; `for (;;) { if (c) goto next; ... }` with `next:` after the
+  loop is still a loop and still hoists, but the exit jump is not the loop's own
+  end test, so nothing is duplicated and the single top test is reached by a
+  plain `j` — which is what a target with one top test *and* a populated
+  preheader is telling you. Measured on `AddBackgroundToRender`'s four walks:
+  434 rows as backward gotos, 396 with `break`, 268 with `goto`. This is the
+  companion to the `FieldBackgroundInitPackets` bullet above, not a replacement
+  — there the bodies were small and the rotation was the whole cost, so a
+  backward goto won.
+* **Read a loop-invariant global directly; do not hoist it into a local
+  yourself.** Both spellings load it once outside the loop, but a local is a
+  source statement and lands among the surrounding code, while letting gcc hoist
+  it makes it a movable that is inserted into the preheader beside the other
+  movables — different order, different register class, and a different number
+  of callee-saved registers at the end of it. Replacing four such locals with
+  direct reads of `D_8011448C`, `D_801144C8` and `g_FieldTriggers` took
+  `AddBackgroundToRender` from 305 rows and a frame 8 bytes short to 254 rows
+  with the frame exact. The inverse case is the conditional-arm bullet above: a
+  value gcc will *not* hoist on its own still needs the local.
+* **`!(a && b)` and `x <= lo || hi <= x` are not the same to gcc 2.6.3.** Fold
+  does not apply De Morgan, so the two spellings hand `expand_expr` different
+  trees and their operands are evaluated in different orders — which decides
+  which of two loads goes first, and therefore which load-delay slots the
+  scheduler can fill. Same instructions, same branch polarity, four rows apart
+  per test. Both are worth trying whenever a range test's diff is scheduling.
+* **A value the target copies with `move` out of a register it just loaded is
+  an `s16` local assigned inside the arm.** Three spellings of the same
+  temporary: `s32 t = p->field;` before the `if` gives one `lh` and no copy, gcc
+  having coalesced the local into the loaded register; `s16 t = p->field;`
+  before the `if` gives *two* loads, an `lhu` for the `movhi` and an `lh` that
+  combine folded out of the sign-extension the comparison needed; and `s16 t =
+  p->field;` *inside* the arm, after the comparison has already loaded the field
+  with `lh`, gives the copy — cse rewrites the redundant load as a register move
+  and the HImode pseudo does not coalesce with the SImode one. The last is what
+  a lone `move` in a branch delay slot means.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
