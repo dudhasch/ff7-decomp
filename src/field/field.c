@@ -5999,7 +5999,84 @@ s32 OpcodeFuncAnimEx(void) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanim);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
+/* CANM! (change animation, extended): switch the current model's animation to
+ * a new id read from the script, recompute the frame rate from the base speed
+ * and the script's divisor, and clamp the last frame. The D_800756E8 state
+ * drives the if-else chain. m2c seed; residual is the per-model address CSE
+ * and the divide scheduling. Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncCanmEx);
+#else
+s32 OpcodeFuncCanmEx(void)
+{
+    FieldModelEntry* temp_v1_4;
+    s16 temp_v0;
+    s32 temp_a1_4;
+    s32 temp_lo;
+    u16* temp_a0;
+    u16* temp_a1_2;
+    u8 temp_a1;
+    u8 temp_a1_3;
+    u8 temp_a3;
+    u8 temp_v1;
+    u8 temp_v1_3;
+    void* temp_v1_2;
+
+    if (D_8009D820 & 3) {
+        DebugPrintOpcode("canm!", 4U);
+    }
+    temp_a1 = *(&D_8007EB98 + D_800722C4);
+    if (temp_a1 != 0xFF) {
+        temp_v1 = D_800756E8[temp_a1];
+        if (temp_v1 != 3) {
+            if ((s32) temp_v1 >= 4) {
+                if (temp_v1 != 4) {
+                    return 1;
+                }
+                D_800756E8[temp_a1] = 3;
+                goto block_17;
+            }
+            if ((s32) temp_v1 < 2) {
+                if ((s32) temp_v1 >= 0) {
+                    goto block_10;
+                }
+                // Duplicate return node #20. Try simplifying control flow for better match
+                return 1;
+            }
+            return 1;
+        }
+block_10:
+        temp_v1_2 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
+        temp_a3 = temp_v1_2->unk4;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E = (u8) temp_v1_2->unk1;
+        temp_v1_3 = *(&D_8007EB98 + D_800722C4);
+        ((temp_v1_3 * 0x84) + D_8009C544)->unk60 = (s16) ((s16) D_8009D828[temp_v1_3] / (s32) temp_a3);
+        temp_a1_2 = (D_800722C4 * 2) + &D_800831FC;
+        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 = (s16) ((D_8009C6DC + *temp_a1_2)->unk2 * 0x10);
+        temp_lo = (s32) (D_8009C6DC + *temp_a1_2)->unk3 / (s32) temp_a3;
+        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
+        temp_v1_4 = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3].modelEntryIndex];
+        temp_a1_4 = temp_a1_3 * 0x84;
+        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) + &temp_v1_4->modelData[temp_v1_4->animationOffset]) + 0xFFFF;
+        if (temp_v0 < temp_lo) {
+            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+        } else {
+            (temp_a1_4 + D_8009C544)->unk64 = (s16) temp_lo;
+        }
+        if (g_FieldCurrentOpcode == 0xB1) {
+            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 6;
+block_17:
+            goto block_18;
+        }
+        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
+        return 1;
+    }
+block_18:
+    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
+    *temp_a0 += 5;
+    return 0;
+}
+#endif
 
 s32 OpcodeFuncAnimw(void) {
     u8 modelIdx;
