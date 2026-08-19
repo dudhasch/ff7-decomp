@@ -8162,7 +8162,38 @@ s32 FieldEventSplitJoinEndTurn(s16 entityId) {
 // Begin of field_opcode_fade.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+/* FADE (0x6B): start a screen fade. Reads the fade type and per-channel target
+ * colours, then the speed. The jump table picks the fadeAdjust start value per
+ * fade family (subtractive fades start at the speed, additive at 0). The
+ * .rodata phase wall (jump table). Verified C kept as the #else; codegen pinned
+ * via MASPSX_OVERRIDE. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncFade);
+#else
+s32 OpcodeFuncFade(void) {
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("fade", 8);
+    }
+    g_FieldState->fadeType = GET_PARAM_U8(7);
+    switch (g_FieldState->fadeType) {
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
+    case FFT_FIELD_TO_STANDARD_ADD:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8) + 1;
+        break;
+    default:
+        g_FieldState->fadeAdjust = GET_PARAM_U8(8);
+        break;
+    }
+    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(1, 1);
+    g_FieldState->fadeRed = FieldEventReadMemoryU8(2, 3);
+    g_FieldState->fadeGreen = FieldEventReadMemoryU8(3, 4);
+    g_FieldState->fadeBlue = FieldEventReadMemoryU8(4, 5);
+    PC_INC(9);
+    return 0;
+}
+#endif
 
 /* Every instruction matches except one: the original leaves the delay slot of
  * the first FieldEventReadMemoryU8 call empty and stores fadeType ahead of it,
