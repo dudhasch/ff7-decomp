@@ -448,6 +448,19 @@ a near-miss, in rough order of frequency:
   Note this is the exact inverse of the `OpcodeFuncLader` bullet, where the
   fold had to be *defeated* with nested `if`s — read the target for which
   one it wants.
+* **An argument to a narrow parameter needs a wide local, or combine folds the
+  constant into the wrong mode.** `func(i | 0xC600)` where the prototype takes
+  `u16` lets `force_to_mode` do the `ior` in HImode, and an HImode `const_int`
+  is *sign-extended*: 0xC600 becomes -0x3a00, which is no longer a legal `ori`
+  immediate. gcc then materialises it with `li` into a register, hoists that
+  out of the loop as an invariant, and — because the loop already uses one
+  callee-saved register — grows the frame. What you see in the diff is a
+  changed stack size and a couple of `sw`/`lw` in the prologue, which reads
+  like ordinary allocation noise and sends you looking at the wrong loop. The
+  fix is an `s32` local: `itemId = i | 0xC600; func(itemId);` keeps the `ior`
+  in SImode and the constant as a plain `ori`. A `u16` local does **not** work
+  — it is the same HImode trap. `OpcodeFuncSpcal`'s two inventory loops need
+  this, and it was worth four rows and the whole frame layout.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
