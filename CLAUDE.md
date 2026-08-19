@@ -715,8 +715,8 @@ The batch shape that works:
 same slot at `0x801B0000`. Seven are in the build, all under `src/magic/`:
 `BARRIER.BIN`, `MABARIA.BIN`, `REFREC.BIN`, `GATTAI.BIN`, `TEARS.BIN` and
 `ALMIGHTY.BIN` are fully C; `ESCAPE.BIN` has one function left, `func_801B009C`
-(22 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
-and a hundred and thirty measured rejected phrasings written down. They are the
+(12 of 361 instructions), parked under `#else /* NON_MATCHINGS */` with its diff
+and a hundred and fifty measured rejected phrasings written down. They are the
 cheapest work in the repo — a few kilobytes each, six or seven functions, no
 `.rodata` entanglement — and the ones near barrier in size are near-clones of it,
 so the matching C is largely a transcription with different field offsets.
