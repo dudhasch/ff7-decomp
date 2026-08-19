@@ -414,6 +414,40 @@ a near-miss, in rough order of frequency:
   in `src/field/field4.c` the ADPALs and MPPALs compute the load base first,
   the RTPALs the store base. Find which base feeds the `lhu` in the target
   and declare that one first.
+* **A loop bound that lives in memory has to be a local.** `for (i = 0; i <
+  src->partCount; i++) { d[k] = s[k]; ... }` reloads `partCount` on every
+  iteration — the stores may alias it, and gcc 2.6.3 does no aliasing
+  analysis worth the name, so the bound is re-read after each one. The
+  target loads it once into a register before the loop, which is what
+  `count = src->partCount;` gives. The tell is an `lbu`/`lhu` of a struct
+  field appearing *inside* the loop body in your build and only in the
+  preheader in the target. `FieldModelLoadBcx` had three of these and they
+  were worth 20 rows.
+* **Copy an unrolled record with `d[i * 8 + k]`, never with `d += 8`.** Both
+  spell the same walk, but the pointer form makes `d` and `s` bivs, and gcc
+  then strength-reduces the eight element addresses onto a *second* base
+  register — `addiu a3,a1,0x18` / `addiu v1,a0,0x18` in the preheader, with
+  the body reaching back through negative offsets. It costs two instructions
+  per loop and it is invisible in the body, which still looks perfect. Which
+  element becomes the new base is a giveaway that the mechanism is giv
+  benefit counting: whichever address is referenced most (the field that is
+  copied and then fixed up) or, failing a tie-break, the last one. Indexing
+  off the counter leaves the addresses as `biv + constant`, which gcc leaves
+  alone. This is the same lever as the `&parts[i * 32]` bullet above; here it
+  was worth four rows per loop across four loops in `FieldModelLoadBcx`.
+* **A folded range test in front of a `switch` deletes the switch's own
+  bounds check.** `if (id >= 1 && id <= 9)` becomes `(u32)(id - 1) < 9`
+  through `fold_range_test` — bit-for-bit the comparison `do_tablejump`
+  emits for cases 1..9 — and cse, which follows the fall-through path out of
+  a conditional branch and records its outcome, folds the second copy to a
+  constant and drops it. The tell is unmistakable and otherwise
+  inexplicable: code that belongs *before* the switch (here `if (unk6 ==
+  0)`) sits between the range check and the `jr` through the jump table.
+  Nothing you do to the switch alone can produce that, because
+  `expand_end_case` emits the range check and the tablejump as one unit.
+  Note this is the exact inverse of the `OpcodeFuncLader` bullet, where the
+  fold had to be *defeated* with nested `if`s — read the target for which
+  one it wants.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
