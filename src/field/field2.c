@@ -275,7 +275,77 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldBGUpdateDrawenv);
 // Begin of field_entity.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldEntityInitPos);
+/* Points at the field walk mesh: three vertices per triangle, each three s16
+ * plus a pad word, so 12 shorts per triangle and 4 per vertex. */
+extern s16* D_800E4274;
+
+/* Place the player's model when a field map starts. The walk mesh triangle the
+ * player stands on comes from FieldState; when no exit position was stored
+ * (pcPosX is the 0x7FFF sentinel) the model is dropped on that triangle's
+ * centroid, otherwise it keeps the stored X/Y and its height is solved from
+ * the triangle's plane. Interaction radius and walk speed both scale with the
+ * map, and every entity's queued turn is cleared.
+ *
+ * D_800E4274 is the walk mesh: three vertices per triangle, each vertex three
+ * s16 plus a pad word, so 12 shorts per triangle and 4 per vertex. */
+void FieldEntityInitPos(void) {
+    s32 edgeA[3];
+    s32 edgeB[3];
+    s32 point[3];
+    s16 moveSpeed;
+    s16 i;
+
+    if (g_FieldAnimLock == 0) {
+        g_PlayerModelId = D_8009ABF4.pcModelId;
+        g_FieldEntity[g_PlayerModelId].PosI = D_8009ABF4.pcWalkMeshId;
+        if (D_8009ABF4.pcPosX == 0x7FFF) {
+            g_FieldEntity[g_PlayerModelId].PosX =
+                ((D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 0] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 8]) /
+                 3)
+                << 12;
+            g_FieldEntity[g_PlayerModelId].PosY =
+                ((D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 1] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 5] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 9]) /
+                 3)
+                << 12;
+            g_FieldEntity[g_PlayerModelId].PosZ =
+                ((D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 2] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 6] +
+                  D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 10]) /
+                 3)
+                << 12;
+        } else {
+            g_FieldEntity[g_PlayerModelId].PosX = D_8009ABF4.pcPosX << 12;
+            g_FieldEntity[g_PlayerModelId].PosY = D_8009ABF4.pcPosY << 12;
+            FieldEntityVectorSub(
+                edgeA,
+                &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4],
+                &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12]);
+            FieldEntityVectorSub(
+                edgeB,
+                &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 8],
+                &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4]);
+            point[0] = D_8009ABF4.pcPosX;
+            point[1] = D_8009ABF4.pcPosY;
+            g_FieldEntity[g_PlayerModelId].PosZ =
+                FieldEntityCalculateZ(
+                    edgeA, edgeB, point,
+                    &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12])
+                << 12;
+        }
+        g_FieldEntity[g_PlayerModelId].SolidRange =
+            (D_8009ABF4.currentFieldScale * 0x11) >> 8;
+        moveSpeed = D_8009ABF4.currentFieldScale * 2;
+        g_FieldEntity[g_PlayerModelId].animSpeed = 0x10;
+        g_FieldEntity[g_PlayerModelId].MoveSpeed = moveSpeed;
+    }
+    for (i = 0; i < D_8009ABF4.modelCount; i++) {
+        g_FieldEntity[i].MoveDirAdd = 0;
+    }
+}
 
 void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
     if (g_FieldAnimLock == 0) {
@@ -489,7 +559,6 @@ s32 FieldEntityAutoMove(FieldEntity* entity, s16 range) {
 }
 
 extern /*?*/ s32 D_8009ACA6;
-extern s32 D_800E4274;
 extern u16 D_80113F28;
 extern s32 D_80114458;
 extern s16 D_801144CC;

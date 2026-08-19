@@ -549,7 +549,7 @@ typedef struct {
     u16 SolidRange;       // 0x6C
     u16 TalkRange;        // 0x6E
     u16 MoveSpeed;        // 0x70
-    s16 PosI;             // 0x72
+    u16 PosI;             // 0x72
     s16 MoveEndI;         // 0x74
     u16 Pad76;
     s32 MoveEndX; // 0x78
@@ -648,7 +648,7 @@ typedef struct {
     u8 pcDirection;   // Direction player is facing.
     u8 unk25;
     s16 movieCommandState; // enum MovieCommandState.
-    u16 modelCount;
+    s16 modelCount;
     s16 pcModelId;
     u16 idleAnimId;
     u16 walkAnimId;

@@ -341,7 +341,7 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToModel);
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", KawaiLightingApplyToPolyColor);
+INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
 
 /* Set the semi-transparency/shade bits of every packet of every part of one
  * model. Walks each part's double-buffered packet area (the two ordering-table
