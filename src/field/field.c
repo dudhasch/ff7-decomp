@@ -6706,7 +6706,123 @@ s32 OpcodeFuncTurn(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
+/* TURNR (turn toward a direction, with the trnrc/trnlc turn-clockwise /
+ * counter-clockwise variants): set up the current entity's turn toward a
+ * target direction read from the script, choosing the short way around. The
+ * turn state lives in the FieldEntity TurnStart/TurnEnd/TurnStep fields. m2c
+ * seed; residual is the per-model address CSE and the turn-delta sign logic.
+ * Pinned pending a permuter pass. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", OpcodeFuncTurnr);
+#else
+s32 OpcodeFuncTurnr(void)
+{
+    s16 temp_v0_2;
+    s16 temp_v1_3;
+    s16 temp_v1_4;
+    s16 var_a0_2;
+    s8* var_a0;
+    u16 temp_a1_2;
+    u16 temp_a3;
+    u16* temp_a0_6;
+    u8 temp_a0;
+    u8 temp_a0_2;
+    u8 temp_a2;
+    u8 temp_v1_2;
+    void* temp_a0_3;
+    void* temp_a0_4;
+    void* temp_a0_5;
+    void* temp_a1;
+    void* temp_a2_2;
+    void* temp_v0;
+    void* temp_v1;
+
+    temp_a0 = D_800722C4;
+    if (*(&D_8007EB98 + temp_a0) != 0xFF) {
+        if (D_8009D820 & 3) {
+            temp_v1 = D_8009C6DC + *(&D_800831FC + (temp_a0 * 2));
+            temp_a0_2 = temp_v1->unk5;
+            switch (temp_a0_2) {                    // irregular
+                case 1:
+                    var_a0 = "turnr";
+                    if (temp_v1->unk3 != 0) {
+                        var_a0 = "turnl";
+                    }
+block_9:
+                    DebugPrintOpcode(var_a0, 5U);
+                    break;
+                case 2:
+                    var_a0 = "trnrc";
+                    if (temp_v1->unk3 != 0) {
+                        var_a0 = "trnlc";
+                    }
+                    goto block_9;
+            }
+        }
+        temp_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+        temp_a2 = temp_a0_3->unk3B;
+        if (temp_a2 == 3) {
+            temp_a0_3->unk3B = 0U;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
+            goto block_30;
+        }
+        if ((temp_a0_3->unk3A == 0) || (temp_a1 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)), (temp_a2 != temp_a1->unk5)) || (temp_a0_3->unk39 != temp_a1->unk4)) {
+            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v0->unk3C = (s16) temp_v0->unk38;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B = (u8) (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk5;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = (u8) (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk4;
+            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E = (s16) (FieldEventReadMemoryU8(2, 2) & 0xFF);
+            temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
+            if (temp_v1_2 != 1) {
+                if ((s32) temp_v1_2 < 2) {
+                    if (temp_v1_2 != 0) {
+                        return 1;
+                    }
+                    temp_a0_4 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                    temp_v0_2 = temp_a0_4->unk3E;
+                    if (temp_v0_2 < (s32) temp_a0_4->unk38) {
+                        temp_a0_4->unk3E = (s16) (temp_v0_2 + 0x100);
+                    }
+                    goto block_31;
+                }
+                if (temp_v1_2 == 2) {
+                    temp_a2_2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+                    temp_a1_2 = temp_a2_2->unk3E;
+                    temp_a3 = temp_a2_2->unk3C;
+                    temp_v1_3 = temp_a1_2 - temp_a3;
+                    var_a0_2 = temp_v1_3;
+                    if (temp_v1_3 & 0x8000) {
+                        var_a0_2 = ~temp_v1_3 + 1;
+                    }
+                    if (var_a0_2 >= 0x81) {
+                        if ((s16) temp_a3 < (s16) temp_a1_2) {
+                            temp_a2_2->unk3E = (u16) (temp_a1_2 - 0x100);
+                        } else {
+                            temp_a2_2->unk3E = (u16) (temp_a1_2 + 0x100);
+                        }
+                    }
+                }
+                // Duplicate return node #32. Try simplifying control flow for better match
+                return 1;
+            }
+            temp_a0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
+            temp_v1_4 = temp_a0_5->unk3E;
+            if ((s32) temp_a0_5->unk38 < temp_v1_4) {
+                temp_a0_5->unk3E = (s16) (temp_v1_4 - 0x100);
+            }
+block_31:
+            // Duplicate return node #32. Try simplifying control flow for better match
+            return 1;
+        }
+        return 1;
+    }
+block_30:
+    temp_a0_6 = (temp_a0 * 2) + &D_800831FC;
+    *temp_a0_6 += 6;
+    return 0;
+}
+#endif
 
 /* Snap this entity to a facing, cancelling any turn in progress. Returns 1 when
  * the entity actually has a model, unlike most opcodes. */
