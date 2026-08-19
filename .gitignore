@@ -22,3 +22,4 @@ objdiff.json
 # for this project's asm/us/<ovl>/nonmatchings/... layout it lands here.
 /nonmatchings/
 tools/docker-build.ps1
+permlogs/
