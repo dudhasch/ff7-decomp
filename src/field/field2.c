@@ -1938,7 +1938,327 @@ void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
 // Begin of field_model.c
 /////////////////////////////////////////////////
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
+/* One texture page inside a BSX model file: where it lives in VRAM and where
+ * its pixels sit relative to the start of the file. */
+typedef struct {
+    /* 0x0 */ u16 w;
+    /* 0x2 */ u16 h;
+    /* 0x4 */ u16 x;
+    /* 0x6 */ u16 y;
+    /* 0x8 */ u32 dataOffset;
+} BsxTexEntry; // size:0xC
+
+typedef struct {
+    /* 0x0 */ u32 unk0;
+    /* 0x4 */ u8 texCount;
+    /* 0x5 */ u8 tdbOffsetHi;  // 24-bit offset of the TDB chunk, big-endian:
+    /* 0x6 */ u16 tdbOffsetLo; // (hi << 16) | lo, zero when there is none
+    /* 0x8 */ BsxTexEntry entries[1];
+} BsxTexHeader;
+
+/* Header of the shared field-model texture block at *D_800DFCA0. */
+typedef struct {
+    /* 0x0 */ u32 magic;
+    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
+    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
+    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
+    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
+} FieldTexBlockHeader;
+
+/* One model's record inside a BSX model file. The bone, part and animation
+ * blocks all live at dataOffset, back to back, and each says where in the
+ * destination model it belongs; the four colour groups are the KAWAI lighting
+ * the field hands to KawaiLightingApplyToModel -- three directional lights and
+ * an ambient one. */
+typedef struct {
+    /* 0x00 */ u16 unk0;
+    /* 0x02 */ u16 scale;
+    /* 0x04 */ u32 dataOffset; // bone/part/anim data, relative to this record
+    /* 0x08 */ u8 light0[3];
+    /* 0x0B */ u8 unkB;
+    /* 0x0C */ u16 light0Dir[3];
+    /* 0x12 */ s8 boneIndex;
+    /* 0x13 */ u8 unk13;
+    /* 0x14 */ u8 light1[3];
+    /* 0x17 */ u8 boneCount;
+    /* 0x18 */ u16 light1Dir[3];
+    /* 0x1E */ s8 partIndex;
+    /* 0x1F */ u8 unk1F;
+    /* 0x20 */ u8 light2[3];
+    /* 0x23 */ u8 partCount;
+    /* 0x24 */ u16 light2Dir[3];
+    /* 0x2A */ s8 animIndex;
+    /* 0x2B */ u8 unk2B;
+    /* 0x2C */ u8 ambient[3];
+    /* 0x2F */ u8 animCount;
+} BsxModelRecord; // size:0x30
+
+/* The model block of a BSX file: one record per model, the texture header, and
+ * the offset of the scratch copy of the records the field keeps live. */
+typedef struct {
+    /* 0x00 */ u32 unk0;
+    /* 0x04 */ u32 modelCount;
+    /* 0x08 */ u32 texOffset;
+    /* 0x0C */ u32 recordsOffset;
+    /* 0x10 */ BsxModelRecord models[1];
+} BsxModelBlock;
+
+extern FieldTexBlockHeader* D_800DFCA0;
+extern u8* D_800E0200;
+extern u8* D_800E0204;
+
+void FieldModelBsxTdbModify(u8* tdb);
+void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx);
+u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2);
+void KawaiLightingApplyToModel(FieldModelEntry* model, u8* light);
+void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
+
+/* Load the field map's own model file and bring every model in it up: either
+ * stream it off the CD or copy the block already in memory down to D_800E0204,
+ * apply its texture delta and push its textures to VRAM, then per model splice
+ * the bone, part and animation records into the model entry -- relocating the
+ * pointer each part and animation carries -- and finally build its packets,
+ * load its face texture, pose it and apply its KAWAI lighting and colour.
+ * Returns the scratch copy of the model records, which is also where the next
+ * allocation starts.
+ *
+ * 103 rows out with 7 insertions, and every one of them is downstream of a
+ * single allocator decision: the target spills `models` (0x38) and `records`
+ * (0x40) to the stack and gives `pkts` the frame-pointer register, where this C
+ * keeps `models` and `records` in s-registers and spills `pkts` instead. The
+ * frame is the same 0xa8, the same nine registers are saved, every loop has the
+ * same shape and the same induction variables -- what differs is which value
+ * lost, and that renames most of the s-registers from the first loop onward.
+ *
+ * Measured on the way here, all against this same body: hoisting the model
+ * entry, the three record counts and `words / 4` into locals is worth 58 rows
+ * and 29 insertions (gcc reloads a count and re-derives the entry after every
+ * store otherwise, since a store through s32* may alias them); giving the
+ * 0x30-record copy its own pair of pointers rather than reusing the word
+ * copy's is worth 20; taking the address of D_800DF114 into a local before the
+ * third loop is worth 19, because loop.c will not hoist an address whose only
+ * uses are inside a conditional arm -- the same rule as the constant hoist in
+ * HandleKawaiDataInModel. Walking a record pointer through the lighting block
+ * instead of indexing `records[i]` costs 30 rows, and computing `models`
+ * before the scratch pointer costs 5. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE(
+    "asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
+#else
+u8* LoadLocalFieldModelAndInitAll(
+    FieldModelFileDesc* desc, FieldModelData* data, u8* readFromCd, u32* buf) {
+    MATRIX mtx;
+    RECT rect;
+    FieldModelLoaderData* models;
+    BsxModelBlock* block;
+    BsxModelRecord* rec;
+    BsxModelRecord* records;
+    BsxTexHeader* bsx;
+    u32* fileInfo;
+    u32* s;
+    u32* d;
+    u32* sm;
+    u32* dm;
+    s32* src;
+    s32* bones;
+    s32* parts;
+    s32* anims;
+    u8* scratch;
+    u8* pkts;
+    u8* flip;
+    FieldModelEntry* entry;
+    s32 fixup;
+    s32 words;
+    s32 w;
+    s32 n;
+    u32 count;
+    u32 i;
+    u32 j;
+    s32 modelIndex;
+
+    scratch = (u8*)0x1F800000;
+    models = desc->models;
+    fileInfo = *(u32**)scratch;
+    if (*readFromCd != 0) {
+        DS_read(fileInfo[0], fileInfo[1], buf, NULL);
+        while (SystemCdromReadChain() != 0) {
+        }
+    } else {
+        s = buf;
+        d = (u32*)D_800E0204;
+        words = (buf[0] >> 2) + ((buf[0] & 3) != 0);
+        n = words / 4;
+        for (w = 0; w < n; w++) {
+            d[0] = s[0];
+            d[1] = s[1];
+            d[2] = s[2];
+            d[3] = s[3];
+            s += 4;
+            d += 4;
+        }
+        for (w = n * 4; w < words; w++) {
+            *d++ = *s++;
+        }
+        buf = (u32*)D_800E0204;
+    }
+
+    block = (BsxModelBlock*)((u8*)buf + buf[1]);
+    bsx = (BsxTexHeader*)((u8*)block + block->texOffset);
+    if (*(u32*)&bsx->texCount & ~0xFF) {
+        FieldModelBsxTdbModify(
+            (u8*)bsx + ((bsx->tdbOffsetHi << 16) | bsx->tdbOffsetLo));
+    }
+    FieldModelLoadBsxTexToVram(bsx);
+    DrawSync(0);
+
+    count = block->modelCount;
+    fixup = (s32)buf - 0x80000000;
+    for (i = 0; i < count; i++) {
+        if (models[i].npcFlag != 0) {
+            rec = &block->models[i];
+            entry = &data->modelEntries[models[i].modelEntryIndex];
+            entry->scale = rec->scale;
+            bones = (s32*)entry->modelData;
+            src = (s32*)((u8*)rec + rec->dataOffset);
+            n = rec->boneCount;
+            for (j = 0; j < n; j++) {
+                bones[rec->boneIndex + j] = *src++;
+            }
+            parts = (s32*)(entry->modelData + entry->partsOffset);
+            n = rec->partCount;
+            for (j = 0; j < n; j++) {
+                parts[(rec->partIndex + j) * 8 + 0] = src[0];
+                parts[(rec->partIndex + j) * 8 + 1] = src[1];
+                parts[(rec->partIndex + j) * 8 + 2] = src[2];
+                parts[(rec->partIndex + j) * 8 + 3] = src[3];
+                parts[(rec->partIndex + j) * 8 + 4] = src[4];
+                parts[(rec->partIndex + j) * 8 + 5] = src[5];
+                parts[(rec->partIndex + j) * 8 + 6] = src[6];
+                parts[(rec->partIndex + j) * 8 + 7] = src[7];
+                parts[(rec->partIndex + j) * 8 + 6] = src[6] + fixup;
+                src += 8;
+            }
+            anims = (s32*)(entry->modelData + entry->animationOffset);
+            n = rec->animCount;
+            for (j = 0; j < n; j++) {
+                anims[(rec->animIndex + j) * 4 + 0] = src[0];
+                anims[(rec->animIndex + j) * 4 + 1] = src[1];
+                anims[(rec->animIndex + j) * 4 + 2] = src[2];
+                anims[(rec->animIndex + j) * 4 + 3] = src[3];
+                anims[(rec->animIndex + j) * 4 + 3] = src[3] + fixup;
+                src += 4;
+            }
+        }
+    }
+
+    records = (BsxModelRecord*)((u8*)block + block->recordsOffset);
+    dm = (u32*)records;
+    sm = (u32*)block->models;
+    for (i = 0; i < count; i++) {
+        dm[0] = sm[0];
+        dm[1] = sm[1];
+        dm[2] = sm[2];
+        dm[3] = sm[3];
+        dm[4] = sm[4];
+        dm[5] = sm[5];
+        dm[6] = sm[6];
+        dm[7] = sm[7];
+        dm[8] = sm[8];
+        dm[9] = sm[9];
+        dm[10] = sm[10];
+        dm[11] = sm[11];
+        sm += 12;
+        dm += 12;
+    }
+
+    pkts = (u8*)block;
+    flip = &D_800DF114;
+    for (i = 0; i < count; i++) {
+        if (models[i].npcFlag != 0) {
+            modelIndex = models[i].modelEntryIndex;
+            pkts = FieldModelCreatePktsAndScale(
+                &data->modelEntries[modelIndex], pkts, modelIndex);
+            if (data->modelEntries[modelIndex].textureFaceId < 0x21) {
+                rect.x = 0x140;
+                rect.y = modelIndex + 0x1E0;
+                rect.w = 0x10;
+                rect.h = 1;
+                LoadImage(
+                    &rect,
+                    (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->clutOffset +
+                              (data->modelEntries[modelIndex].textureFaceId
+                               << 5)));
+                scratch[0] = 0;
+                scratch[1] = 0;
+                scratch[2] = 0;
+                scratch[3] = modelIndex;
+                KawaiLoadEyesMouthTexToVram(
+                    &data->modelEntries[modelIndex], scratch);
+            }
+            mtx.m[0][0] = mtx.m[1][1] = mtx.m[2][2] = 0x1000;
+            mtx.t[0] = mtx.t[1] = mtx.t[2] = 0;
+            mtx.m[0][1] = mtx.m[0][2] = mtx.m[1][0] = mtx.m[1][2] =
+                mtx.m[2][0] = mtx.m[2][1] = 0;
+            *(s32*)0x1F800000 = 1;
+            FieldModelAnimCalcMtrxs(
+                &data->modelEntries[modelIndex], &mtx, 0, 0);
+            scratch[0] = records[i].light0[0];
+            scratch[1] = records[i].light0[1];
+            scratch[2] = records[i].light0[2];
+            scratch[3] = records[i].light1[0];
+            scratch[4] = records[i].light1[1];
+            scratch[5] = records[i].light1[2];
+            scratch[0xC] = records[i].light0Dir[0];
+            scratch[0xD] = records[i].light0Dir[0] >> 8;
+            scratch[0xE] = records[i].light0Dir[1];
+            scratch[0xF] = records[i].light0Dir[1] >> 8;
+            scratch[0x10] = records[i].light0Dir[2];
+            scratch[0x11] = records[i].light0Dir[2] >> 8;
+            scratch[6] = records[i].light2[0];
+            scratch[7] = records[i].light2[1];
+            scratch[8] = records[i].light2[2];
+            scratch[0x12] = records[i].light1Dir[0];
+            scratch[0x13] = records[i].light1Dir[0] >> 8;
+            scratch[0x14] = records[i].light1Dir[1];
+            scratch[0x15] = records[i].light1Dir[1] >> 8;
+            scratch[0x16] = records[i].light1Dir[2];
+            scratch[0x17] = records[i].light1Dir[2] >> 8;
+            scratch[9] = records[i].ambient[0];
+            scratch[0xA] = records[i].ambient[1];
+            scratch[0xB] = records[i].ambient[2];
+            scratch[0x18] = records[i].light2Dir[0];
+            scratch[0x19] = records[i].light2Dir[0] >> 8;
+            scratch[0x1A] = records[i].light2Dir[1];
+            scratch[0x1B] = records[i].light2Dir[1] >> 8;
+            scratch[0x1C] = records[i].light2Dir[2];
+            scratch[0x1D] = records[i].light2Dir[2] >> 8;
+            scratch[0x1E] = 0;
+            KawaiLightingApplyToModel(&data->modelEntries[modelIndex], scratch);
+            scratch[0] = 0;
+            scratch[1] = 0;
+            scratch[2] = 0;
+            scratch[3] = 0;
+            scratch[4] = 0;
+            scratch[5] = 0;
+            scratch[6] = 1;
+            KawaiSetColorToModelPkts(&data->modelEntries[modelIndex], scratch);
+            scratch[0] = 0;
+            scratch[1] = 0;
+            scratch[2] = 0;
+            scratch[3] = 0;
+            scratch[4] = 0;
+            scratch[5] = 0;
+            scratch[6] = 1;
+            *flip ^= 1;
+            KawaiSetColorToModelPkts(&data->modelEntries[modelIndex], scratch);
+            *flip ^= 1;
+        }
+    }
+
+    D_800E0200 = (u8*)records;
+    return (u8*)records;
+}
+#endif
 
 extern u8* FieldModelCreatePktsForPart(u8* part, u8* pkts, s32 arg2, s32 arg3);
 extern void FieldModelScaleModel(FieldModelEntry* model, s16 scale, s32 arg2);
@@ -1961,23 +2281,6 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldModelCreatePktsForPart);
 
-/* One texture page inside a BSX model file: where it lives in VRAM and where
- * its pixels sit relative to the start of the file. */
-typedef struct {
-    /* 0x0 */ u16 w;
-    /* 0x2 */ u16 h;
-    /* 0x4 */ u16 x;
-    /* 0x6 */ u16 y;
-    /* 0x8 */ u32 dataOffset;
-} BsxTexEntry; // size:0xC
-
-typedef struct {
-    /* 0x0 */ u32 unk0;
-    /* 0x4 */ u8 texCount;
-    /* 0x5 */ u8 pad[3];
-    /* 0x8 */ BsxTexEntry entries[1];
-} BsxTexHeader;
-
 void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
     RECT rect;
     u32 i;
@@ -1994,15 +2297,6 @@ void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
         LoadImage(&rect, (u_long*)((u8*)bsx + entries[i].dataOffset));
     }
 }
-
-/* Header of the shared field-model texture block at *D_800DFCA0. */
-typedef struct {
-    /* 0x0 */ u32 magic;
-    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
-    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
-    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
-    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
-} FieldTexBlockHeader;
 
 /* One record of a TDB ("texture delta") chunk inside a BSX model file. */
 typedef struct {
@@ -2062,8 +2356,6 @@ void FieldModelBsxTdbModify(u8* tdb) {
     }
 }
 #endif
-
-extern s32 D_800E0204;
 
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
@@ -2146,7 +2438,6 @@ void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
 }
 #endif
 
-extern u_long* D_800DFCA0;
 u8* FieldModelLoadBcx(
     FieldModelFileDesc* desc, FieldModelData* data, u8* pkts, s32 index);
 
