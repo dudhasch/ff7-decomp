@@ -992,15 +992,20 @@ extern s8 D_8009AD38;
 
 /* Zero and default-initialise the whole field runtime state: the entity table,
  * the per-model flags, the script state, and the various counters. m2c seed
- * (the ?* are unknown-typed pointers). Residual is the wide store scheduling.
+ * (three locals m2c left untyped -- see the note in the body). Residual is
+ * the wide store scheduling.
  * Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldInitDefaultValues);
 #else
 void FieldInitDefaultValues(void) {
-    ? *var_t0;
-    ? *var_t1;
-    ? *var_t2;
+    /* m2c could not infer these three; u8* is a placeholder chosen so the
+     * unit parses, not a claim about the real type. The strides the body
+     * walks them by (8, 8, 0x10) and the byte store through var_t0 are
+     * consistent with it. Settle the real types when this body is worked. */
+    u8* var_t0;
+    u8* var_t1;
+    u8* var_t2;
     s16* var_v1;
     s32 var_a1;
     s32 var_a2;
