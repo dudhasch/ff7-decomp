@@ -7557,9 +7557,21 @@ s32 OpcodeFuncCppal(void) {
 /* As CPPAL, but source and destination each get their own start entry, so the
  * copy can shift a run of colours within or between palettes.
  *
- * Instruction-for-instruction identical; the preheader swaps $v0 and $v1
- * between the scaled index and the base address. Reversing the operand order in
- * the C does not move it. */
+ * The #else body below is a VERIFIED MATCH -- `tools/checkfn.py` reports MATCH
+ * for it. It is still pinned only because OpcodeFuncCppal above owns the
+ * "cppal" string this function prints and is itself still MASPSX_OVERRIDE, so
+ * writing the literal here would emit a second copy and shift every later
+ * .rodata offset. Unpark the two together the moment CPPAL lands.
+ *
+ * What it needed: the palette base has to be its own named `u8*` local,
+ * assigned inside the first address expression and reused by the second
+ * (`(pal = D_80095DE0) + dstPal * 32`), and declared between `src` and `dst`.
+ * That gives the symbol address a pseudo of its own with a live range starting
+ * at the first use, which is what swaps $v0 and $v1 in the preheader. A plain
+ * `u8* pal = D_80095DE0;` statement at the top of the loop body is NOT the same
+ * thing -- it defines the pseudo before the index computation and costs three
+ * rows -- and the declaration position is load-bearing: every other slot in the
+ * local list scores three rows as well. Found by decomp-permuter. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCppal2);
 #else
@@ -7568,6 +7580,7 @@ s32 OpcodeFuncCppal2(void) {
     s16 srcPal;
     s16 dstPal;
     s16 src;
+    u8* pal;
     s16 dst;
     s16 end;
 
@@ -7581,8 +7594,8 @@ s32 OpcodeFuncCppal2(void) {
     dst = FieldEventReadMemoryU8(2, 6);
     end = src + count;
     while (src < end) {
-        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
-        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
+        u16* to = (u16*)((pal = D_80095DE0) + dstPal * 32);
+        u16* from = (u16*)(pal + srcPal * 32);
 
         to[dst] = from[src];
         src++;

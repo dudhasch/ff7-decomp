@@ -13,14 +13,14 @@
  * target positions/step/fraction are what FieldBGScrollUpdate consumes each
  * frame.
  *
- * Instructions all match; the only diff is the jump table landing at
- * .rodata+0x54 (target) vs +0x58 (ours) — the field overlay's .rodata base is
- * 4 mod 8 and this function needs the --phase 4 jump-table demotion, but the
- * overlay carries both phases at once (the file-split residue). Codegen pinned
- * via MASPSX_OVERRIDE; the #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollInit);
-#else
+ * Modes 7-9 are empty arms, not part of the 5/6 dual-target block: the target's
+ * table sends .rodata+0x1c/0x20/0x24 straight to the epilogue while 0x14/0x18
+ * reach the work block. They still have to be written out as `case 7: case 8:
+ * case 9: break;` rather than dropped, or the range test narrows from
+ * `sltiu 0xa` to `sltiu 0x7` and the table loses three entries. This was
+ * previously mis-read as the jump-table alignment phase; a `.rodata+0xNN` row
+ * from checkfn means the table's *contents* differ, and only a `want:/got:` on
+ * the table's own address means alignment. */
 extern u8 D_8009AC11;  // scroll mode (jump-table selector)
 extern u8 D_8009AC13;  // scroll state (0 = idle)
 extern s16 D_8009A100; // scroll enable
@@ -68,9 +68,6 @@ void FieldBGScrollInit(void) {
         break;
     case 5:
     case 6:
-    case 7:
-    case 8:
-    case 9:
         D_8009A100 = 1;
         D_80075CF8 = 0;
         D_8009AC13 = 1;
@@ -80,9 +77,12 @@ void FieldBGScrollInit(void) {
         D_80075E18 = D_8009ABFE;
         D_80075E20 = D_8009AC00;
         break;
+    case 7:
+    case 8:
+    case 9:
+        break;
     }
 }
-#endif
 
 /* Project a point onto a trigger line: for a type-1 or type-2 trigger compute
  * the closest on-line point to the entity and write it back into arg1. m2c
@@ -364,16 +364,20 @@ void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
  * model loops back to the start; every other entity holds on its last frame.
  * g_FieldAnimFreeze freezes all field animation at once.
  *
- * Not matching: the original reserves an unused 8-byte frame, and its clamp
- * arm keeps animLastFrame live across the branch to recompute `* 16` in the
- * delay slot where gcc reuses the already-shifted value. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityAnimationUpdate);
-#else
+ * Two things this needed. The clamp arm compares with `* 16` and stores with
+ * `<< 4`: cse unifies only *identical* rtx, and MULT_EXPR and LSHIFT_EXPR
+ * survive expand as different trees even though both become an `ashift`, so
+ * spelling them apart gives the two shifts the original has. Written the same
+ * way, gcc computes one shift, keeps it live across the branch and fills the
+ * delay slot with a nop; written apart, the raw halfword stays live (`move
+ * a1,v0`) and reorg pulls the second `sll` into the delay slot. And the
+ * function reserves a frame it never touches -- one dead scalar is enough,
+ * since MIPS rounds the frame to 8. */
 void FieldEntityAnimationUpdate(s32 entityId) {
     FieldModelEntry* model;
     u8* anims;
     u8 entryIndex;
+    s32 unusedLocal;
 
     entryIndex = g_FieldModelLoaderData[entityId].modelEntryIndex;
     if (entryIndex == 0xFF) {
@@ -396,10 +400,9 @@ void FieldEntityAnimationUpdate(s32 entityId) {
     } else if (g_FieldEntity[entityId].animLastFrame * 16 <
                g_FieldEntity[entityId].animCurrentFrame) {
         g_FieldEntity[entityId].animCurrentFrame =
-            g_FieldEntity[entityId].animLastFrame * 16;
+            g_FieldEntity[entityId].animLastFrame << 4;
     }
 }
-#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
 
@@ -736,19 +739,20 @@ extern s16 D_8009AC1C;
  * characters on a different floor of the same map never block one another.
  * Only the player's own collisions arm the other entity's push script.
  *
- * Not matching: register assignment only. Every instruction is in the right
- * place, but the original holds &D_8009AC1C in a1 and copies it into t4 for the
- * loop, where gcc keeps one register for both and renames the rest downstream.
- */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCollisionCheck);
-#else
+ * The entity count is `D_8009ABF4.modelCount` -- FieldState + 0x28 -- and
+ * reading it as that struct member rather than through the flat `D_8009AC1C`
+ * symbol is what makes this match. As a struct reference the load may alias the
+ * `g_FieldEntity[i]` stores in the body, so gcc leaves it in the loop and
+ * hoists only its `%hi`/`%lo` address; that address is a movable with a
+ * REG_EQUAL note, which `move_movables` lifts into a fresh pseudo and copies
+ * into the original one -- the `move t4,a1` the flat spelling cannot produce.
+ * A `FieldState*` local instead of the direct member is not the same thing and
+ * scores eight rows. */
 s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
     s16 i;
     s32 hit;
     s32 sqrRadius;
     s32 range;
-    s16* entityCount;
     s32 dz;
     s32 radius;
     s32 dx;
@@ -756,8 +760,7 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
 
     hit = 0;
     range = g_FieldEntity[entityId].SolidRange;
-    entityCount = &D_8009AC1C;
-    for (i = 0; i < *entityCount; i++) {
+    for (i = 0; i < D_8009ABF4.modelCount; i++) {
         if (i == entityId) {
             continue;
         }
@@ -782,7 +785,6 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
     }
     return hit;
 }
-#endif
 
 /* Squared distance from `point` to the segment `line`, with the foot of the
  * perpendicular written to `nearest`. Returns -1 when that foot lands outside
@@ -790,9 +792,14 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
  * the end of the line" apart from "near it". The line parameter runs in 8-bit
  * fixed point, so the projection stays in integer arithmetic throughout.
  *
- * Not matching: register assignment only. Every instruction and its order are
- * right; the original accumulates the dot product in v1 and holds y1 in a0,
- * where gcc picks the two the other way round and the swap propagates. */
+ * 6 rows, and all six are the same thing: the original keeps the return value
+ * in a0 and copies it to v0 in the `jr ra` delay slot, where gcc coalesces the
+ * pseudo straight into v0 and leaves the slot empty. Every path -- the three
+ * `li -1` delay slots and the final `addu` -- follows that one choice.
+ * Measured and rejected: a separate `s32 d` for the squared distance (either
+ * declaration order) and returning the sum expression without a variable, all
+ * three of which score 22. Reusing `t` for both the line parameter and the
+ * distance is right. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntitySqrDistToLine);
 #else
@@ -1557,22 +1564,28 @@ void FieldRainAddToRender(
     *ot = (*ot & 0xFF000000) | ((u32)rainDm & 0xFFFFFF);
 }
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldRainUpdate);
-#else
-
 extern u8 g_RainControl;
 extern s16 g_PlayerModelId;
 
-extern FieldEntity g_FieldEntities[];
 extern u8 g_RandomTable[];
 extern struct FieldRain g_FieldRain[];
 
+/* Ramp the rain force towards 0 or 255 with the weather bit, then respawn any
+ * drop whose wait has run out at a random offset around the player.
+ *
+ * The ceiling has to be a `u8` local (`u8 max = 255;`): as `s32` the constant
+ * and the loaded `g_RainForce` swap $v0 and $v1 in the compare, which is four
+ * rows. The parked body also carried a `g_FieldEntities[]` extern of its own,
+ * which is not a symbol -- the array is `g_FieldEntity` -- so three rows were
+ * checkfn refusing to alias `g_FieldEntities+0xc` onto `D_80074EB0`, and the
+ * body would not have linked. Watch for that whenever a park's residue is a
+ * handful of `%lo(sym+N)` rows against `D_` symbols: check the extern is the
+ * real one before touching codegen. */
 void FieldRainUpdate(void) {
     s32 i;
     s32 limit;
     s32 player;
-    s32 max = 255;
+    u8 max = 255;
     s32 vz;
 
     if ((g_RainControl & 0x80) == 0) {
@@ -1599,17 +1612,17 @@ void FieldRainUpdate(void) {
                 g_FieldRain[i].wait = 7;
 
                 g_FieldRain[i].p2.vx =
-                    (g_FieldEntities[player].PosX >> 12) +
+                    (g_FieldEntity[player].PosX >> 12) +
                     g_RandomTable[g_FieldRain[i].rndSeed & 0xFF] * 12 - 0x600;
 
                 seed3 = g_FieldRain[i].rndSeed * 3;
-                g_FieldRain[i].p2.vy = (g_FieldEntities[player].PosY >> 12) +
+                g_FieldRain[i].p2.vy = (g_FieldEntity[player].PosY >> 12) +
                                        g_RandomTable[seed3] * 12 - 0x600;
 
                 g_FieldRain[i].p1.vx = g_FieldRain[i].p2.vx;
                 g_FieldRain[i].p1.vy = g_FieldRain[i].p2.vy;
 
-                g_FieldRain[i].z = (g_FieldEntities[player].PosZ >> 12) - 0x300;
+                g_FieldRain[i].z = (g_FieldEntity[player].PosZ >> 12) - 0x300;
             } else {
                 g_FieldRain[i].wait = 1;
                 g_FieldRain[i].render = 0;
@@ -1627,7 +1640,6 @@ void FieldRainUpdate(void) {
         g_FieldRain[i].wait--;
     }
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_battle.c

@@ -2400,32 +2400,30 @@ s32 AddStrNextDebugRow(s16 page, const char* str) {
  * spellings as AddStrNextDebugRow above, plus the colour byte reached as
  * `D_800E0758 + 0x150 + off` so that its base is the live `rows` register too.
  *
- * 1 row out, and it is pure post-reload scheduling: the `lui a0,0x6666` that
- * materialises the /10 magic constant is issued in the first slot after the
- * call's delay slot, where the target issues it two slots later, behind
- * `addiu v0,s0,0x150` / `addu v0,s2,v0`. Both orders are legal and the
- * dependency chains are identical, so the priority tie breaks the other way.
- * Measured and rejected: declaring `colors` after `hdr`, computing `hdr`
- * before the colour store, `*(colors + row)` instead of `colors[row]`,
- * hoisting the quotient into an `s32 limit` local, and reversing the
- * comparison -- all six produce the identical 1-row residue. Codegen pinned
- * via MASPSX_OVERRIDE; the #else body is the verified-correct C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", AddColorStrNextDebugRow);
-#else
+ * The head-row increment has to be a named `s16` local computed *before* the
+ * header pointer, not written inline into `hdr->headRow`. Inline, the store's
+ * address and its value are one statement and the scheduler issues the
+ * `lui a0,0x6666` that materialises the /10 magic constant one slot too early;
+ * split, the address computation fills those slots instead. `s32 next` does
+ * not work -- the widening node changes the store. Found by decomp-permuter
+ * after six hand phrasings (moving `colors`, moving `hdr`, `*(colors + row)`,
+ * an `s32 limit` for the quotient, reversing the comparison) all measured the
+ * identical 1-row residue. */
 s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
     s32 off;
     char* rows;
     u8* colors;
     FieldDebugPageHdr* hdr;
+    s16 next;
 
     off = page * 378;
     rows = D_800E0758 + off;
     FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
     colors = (u8*)(D_800E0758 + 0x150 + off);
     colors[*(s16*)((u8*)D_800E0754 + off)] = color;
+    next = *(s16*)((u8*)D_800E0754 + off) + 1;
     hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
-    hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
+    hdr->headRow = next;
     if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
         *(s16*)((u8*)D_800E0754 + off)) {
         *(s16*)((u8*)D_800E0754 + off) = 0;
@@ -2433,7 +2431,6 @@ s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
     D_8009D824 = 1;
     return 1;
 }
-#endif
 
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
     char* rows = D_800E0758 + page * 378;

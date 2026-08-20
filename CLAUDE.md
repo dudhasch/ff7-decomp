@@ -839,6 +839,42 @@ a near-miss, in rough order of frequency:
   clamp — reproduces the target's polarity. When one instance of a repeated
   pattern refuses to follow the others, spell its control flow explicitly
   rather than looking for a reason.
+* **`x * 16` and `x << 4` are not the same expression to cse.** Both expand to
+  an `ashift`, but MULT_EXPR and LSHIFT_EXPR reach RTL as distinct rtx and cse
+  unifies only identical ones — so a value written the same way twice is
+  computed once and kept live across the branch between the two uses, and a
+  value written `* 16` in the comparison and `<< 4` in the store is computed
+  twice. The tell is a `move` preserving the *unshifted* value past a compare
+  that clobbers it, plus a second shift in the branch delay slot (reorg pulls
+  it out of the fall-through block). Spelling both the same way instead leaves
+  the delay slot as a `nop`. `FieldEntityAnimationUpdate` in `src/field/field2.c`
+  needs the two spellings, and it is worth ten rows of register naming.
+* **A dead local does not have to be an aggregate to reserve frame.** The
+  `unusedLocals[0xNN]` idiom above is about a *sized* hole; when the target's
+  frame is the minimum 8 bytes and your code needs none, a single unused scalar
+  (`s32 unusedLocal;`) is enough, and `u8 unusedLocals[1]` gives the identical
+  frame. Do not scale the array to the frame size in that case —
+  `u8 unusedLocals[8]` measures 0x10, not 8.
+* **A symbol base shared by two sibling address expressions wants a named local
+  assigned inside the first one.** `(u16*)((pal = D_80095DE0) + dstPal * 32)`
+  followed by `(u16*)(pal + srcPal * 32)` gives the symbol's address a pseudo
+  whose live range starts at the first use, which is what decides whether the
+  preheader holds the address in `$v0` or `$v1`. A plain `u8* pal = D_80095DE0;`
+  statement at the top of the loop body is *not* the same thing — it defines the
+  pseudo ahead of the index computation and costs three rows — and the
+  declaration's position in the local list is load-bearing: for
+  `OpcodeFuncCppal2` in `src/field/field4.c` only the slot between `src` and
+  `dst` matches, every other slot scores three rows. Reach for this when the
+  whole function is instruction-for-instruction right and two preheader
+  registers are swapped.
+* **A store whose value is an arithmetic expression may need the value in a
+  named local computed *before* the address.** Written as one statement, the
+  address computation and the value computation compete for the slots after a
+  call and the scheduler issues a constant materialisation one slot early;
+  split, the address computation fills those slots instead.
+  `AddColorStrNextDebugRow`'s `hdr->headRow = row + 1` needs `s16 next = row + 1;`
+  ahead of the `hdr = ...` assignment — and it has to be `s16`, since an `s32`
+  local puts a widening node back into the store.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
