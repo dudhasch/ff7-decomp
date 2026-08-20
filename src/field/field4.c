@@ -8572,20 +8572,22 @@ s32 OpcodeFuncVwoft(void) {
 // Begin of field_opcode_party_manage.c
 /////////////////////////////////////////////////
 
-s32 FieldEventJoinSet(u8, u8); // extern
+s32 FieldEventJoinSet(s16, s16); // extern
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncJoin);
-#else
-/* 25 rows: gcc hoists the 0xFF constant into a saved reg ($s1) for the two
- * memory_bank_2[10]/[11] compares and reuses it across both FieldEventJoinSet
- * calls; target reloads `li v0,0xff` per compare and keeps the stack frame at
- * -0x18 (no $s1 save). GET_PARAM_U8(1) shared by both calls is the hoist
- * trigger. g_FieldModels idiom (not g_FieldEntity) was the key fix that cut
- * 66->25 rows. Polarity flip and block-scope arg temp both plateau at 25. */
+/* JOIN (0xC3): walk the two followers back onto the party leader, then relock
+ * the party. Returns 1 while either of them is still moving.
+ *
+ * Two declarations carry the whole codegen. The per-follower flags are `s16'
+ * -- the target truncates each one (`sll v0,s0,16') before testing it, which
+ * an `s32' does not do -- and both guards are `if (x == 0xFF) ok = 1; else ok
+ * = call;'. The obvious `ok = 1; if (x != 0xFF) ok = call;' for the first one
+ * lets cse share the 0xFF between the two comparisons; the shared pseudo then
+ * has to survive a call, so it lands in $s1 and the frame grows by a save and
+ * a restore. Written as two if/elses gcc materialises `li v0,0xff' twice, as
+ * the target does. That was 20 rows and the frame. */
 s32 OpcodeFuncJoin(void) {
-    s32 joinOk;
-    s32 splitOk;
+    s16 joinOk;
+    s16 splitOk;
     s16 i;
     u8 modelId;
     u8 charId;
@@ -8594,8 +8596,9 @@ s32 OpcodeFuncJoin(void) {
         DebugPrintOpcode("join", 1);
     }
     g_EntityForSplitJoin = g_CurrentEntity;
-    joinOk = 1;
-    if (Savemap.memory_bank_2[10] != 0xFF) {
+    if (Savemap.memory_bank_2[10] == 0xFF) {
+        joinOk = 1;
+    } else {
         joinOk = FieldEventJoinSet(
             g_CharIdToEntity[Savemap.memory_bank_2[10]], GET_PARAM_U8(1));
     }
@@ -8635,18 +8638,26 @@ s32 OpcodeFuncJoin(void) {
     }
     return 1;
 }
-#endif
 
-s32 FieldEventSplitSet(u8, s16, s16, s32, s32); // extern
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncSplit);
-#else
-/* 25 rows: same $s1 0xFF-constant hoist as OpcodeFuncJoin (twin function).
- * if==0xFF polarity matches target; the != form regressed to 39. g_FieldModels
- * idiom applied. Solve Join and the recipe transfers here. */
+s32 FieldEventSplitSet(s16, s16, s16, s16, s16); // extern
+/* SPLIT (0xC2): walk the two followers away from the leader to their own
+ * destinations, then unlock the party. Returns 1 while either is still moving.
+ * Twin of OpcodeFuncJoin, and it wants the same two things -- s16 flags and
+ * the `if (x == 0xFF) ok = 1; else ok = call;' shape that keeps gcc from
+ * sharing the 0xFF across a call in a callee-saved register.
+ *
+ * On top of that, **one variable holds the party byte and then the result**.
+ * The byte has to survive the three FieldEventReadMemory* calls, because
+ * `g_CharIdToEntity[...]' is the argument evaluated last, so it needs a
+ * callee-saved register either way; writing it as a separate local leaves gcc
+ * with three long-lived pseudos for two registers and it picks the other pair
+ * (7 rows of pure $s2/$s3 swap, and nothing about the *types* of the locals
+ * moves it -- u8, s16 and merging both bytes into the existing `charId' were
+ * all measured). Assigning the byte to `splitOkA' and then overwriting it with
+ * the call's result is one pseudo, and the allocation falls out. */
 s32 OpcodeFuncSplit(void) {
-    s32 splitOkA;
-    s32 splitOkB;
+    s16 splitOkA;
+    s16 splitOkB;
     s16 i;
     u8 modelId;
     u8 charId;
@@ -8655,20 +8666,22 @@ s32 OpcodeFuncSplit(void) {
         DebugPrintOpcode("split", 8);
     }
     g_EntityForSplitJoin = g_CurrentEntity;
-    if (Savemap.memory_bank_2[10] == 0xFF) {
+    splitOkA = Savemap.memory_bank_2[10];
+    if (splitOkA == 0xFF) {
         splitOkA = 1;
     } else {
         splitOkA = FieldEventSplitSet(
-            g_CharIdToEntity[Savemap.memory_bank_2[10]],
-            FieldEventReadMemoryS16(1, 4), FieldEventReadMemoryS16(2, 6),
-            FieldEventReadMemoryU8(3, 8) & 0xFF, GET_PARAM_U8(14));
+            g_CharIdToEntity[splitOkA], FieldEventReadMemoryS16(1, 4),
+            FieldEventReadMemoryS16(2, 6), FieldEventReadMemoryU8(3, 8) & 0xFF,
+            GET_PARAM_U8(14));
     }
-    if (Savemap.memory_bank_2[11] == 0xFF) {
+    splitOkB = Savemap.memory_bank_2[11];
+    if (splitOkB == 0xFF) {
         splitOkB = 1;
     } else {
         splitOkB = FieldEventSplitSet(
-            g_CharIdToEntity[Savemap.memory_bank_2[11]],
-            FieldEventReadMemoryS16(4, 9), FieldEventReadMemoryS16(5, 11),
+            g_CharIdToEntity[splitOkB], FieldEventReadMemoryS16(4, 9),
+            FieldEventReadMemoryS16(5, 11),
             FieldEventReadMemoryU8(6, 13) & 0xFF, GET_PARAM_U8(14));
     }
     if (splitOkA && splitOkB) {
@@ -8701,127 +8714,106 @@ s32 OpcodeFuncSplit(void) {
     }
     return 1;
 }
-#endif
 
 extern /*?*/ s32 D_80081D90;
 
-/* Drive one party member through a JOIN: state 0 starts the turn toward the
- * leader, state 2 waits for the turn then starts the move, state 1 waits for
- * the move then marks done, state 3 is done. Returns 1 while a step is in
- * progress. Twin of FieldEventSplitSet. m2c seed; residual is the g_FieldModels
- * *0x84 base regalloc and the s16 arg-widening. Pinned pending a permuter pass.
+/* Drive one party member through a JOIN: state 0 turns them toward the party
+ * leader, state 2 waits for that turn and then walks them onto the leader,
+ * state 1 waits for the walk and then makes them intangible and invisible,
+ * state 3 is done. Returns 1 once this member has finished. Twin of
+ * FieldEventSplitSet -- written from the target rather than permuted, and the
+ * two share a shape worth knowing: an `if' guard chain, then a four-case
+ * switch whose non-terminal arms `break' to one `return 0'.
+ *
+ * `leaderEntity' is s16. It is only ever a `lbu' of g_CharIdToEntity, so u8 is
+ * the obvious declaration and it costs one row -- the copy into the index
+ * register comes out `andi s1,s0,0xff' instead of `move s1,s0'. s32 is worse
+ * still (26 rows): it drops the sign extension the two 0xFF comparisons want.
  */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventJoinSet);
-#else
-s32 FieldEventJoinSet(u8 arg0, u8 arg1) {
-    s32 sp18;
-    s32 sp1C;
-    s32 sp20;
-    s32 sp28;
-    s32 sp2C;
-    s32 sp30;
-    s32 sp38;
-    s32 var_v0;
-    u8 temp_s0;
-    u8 temp_v1;
-    void* temp_v0;
+s32 FieldEventJoinSet(s16 entityId, s16 steps) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    s16 leaderEntity;
 
-    if (*Savemap.memory_bank_2[9] != 0xFF) {
-        temp_s0 = D_8009AD30[*Savemap.memory_bank_2[9]];
-        if (D_8009D820 & 3) {
-            FieldDebugAddParseValueToPage2("join p0=", (s32)temp_s0, 2);
-            if (D_8009D820 & 3) {
-                FieldDebugAddParseValueToPage2("join p1=", (s32)(s16)arg0, 2);
-            }
-        }
-        if ((temp_s0 != 0xFF) && ((s16)arg0 != 0xFF)) {
-            temp_v1 = *(&D_80081D90 + (s16)arg0);
-            if (temp_v1 != 1) {
-                if ((s32)temp_v1 < 2) {
-                    if (temp_v1 != 0) {
-                        return 0;
-                    }
-                    sp18 =
-                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
-                            ->unkC >>
-                        0xC;
-                    sp1C =
-                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
-                            ->unk10 >>
-                        0xC;
-                    sp20 =
-                        (s32)((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
-                            ->unk14 >>
-                        0xC;
-                    sp28 = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
-                               ->unkC >>
-                           0xC;
-                    sp2C = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
-                               ->unk10 >>
-                           0xC;
-                    sp30 = (s32)((*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544)
-                               ->unk14 >>
-                           0xC;
-                    FieldEventSplitJoinSetTurn(
-                        (s16)arg0,
-                        ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)
-                            ->unk38,
-                        FieldEntityDirByVec(
-                            (VECTOR*)&sp18, (VECTOR*)&sp28, &sp38) &
-                            0xFF);
-                    *(&D_80081D90 + (s16)arg0) = 2;
-                    return 0;
-                }
-                if (temp_v1 != 2) {
-                    var_v0 = 1;
-                    if (temp_v1 != 3) {
-                        return 0;
-                    }
-                    // Duplicate return node #21. Try simplifying control flow
-                    // for better match
-                    return var_v0;
-                }
-                if (FieldEventSplitJoinEndTurn((s16)arg0) != 0) {
-                    temp_v0 = (*(&D_8007EB98 + temp_s0) * 0x84) + D_8009C544;
-                    FieldEventSplitJoinSetMove(
-                        (s16)arg0, (s32)(temp_v0->unkC * 0x10) >> 0x10,
-                        (s32)(temp_v0->unk10 * 0x10) >> 0x10, (s16)arg1, 0);
-                    *(&D_80081D90 + (s16)arg0) = 1;
-                    if (D_8009D820 & 3) {
-                        FieldDebugAddParseValueToPage2("end setmove", 0, 0);
-                        return 0;
-                    }
-                }
-                goto block_20;
-            }
-            if (FieldEventSplitJoinEndMove((s16)arg0) != 0) {
-                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk59 = 1;
-                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk5B = 1;
-                ((*(&D_8007EB98 + (s16)arg0) * 0x84) + D_8009C544)->unk5C = 0;
-                *(&D_80081D90 + (s16)arg0) = 3;
-                return 1;
-            }
-        block_20:
-            var_v0 = 0;
-            return var_v0;
-        }
-        goto block_19;
+    if (Savemap.memory_bank_2[9] == 0xFF) {
+        return 1;
     }
-block_19:
-    return 1;
+    leaderEntity = g_CharIdToEntity[Savemap.memory_bank_2[9]];
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("join p0=", leaderEntity, 2);
+    }
+    if (g_DebugLevel & 3) {
+        FieldDebugAddParseValueToPage2("join p1=", entityId, 2);
+    }
+    if (leaderEntity == 0xFF) {
+        return 1;
+    }
+    if (entityId == 0xFF) {
+        return 1;
+    }
+    switch (g_EntitySplitJoinState[entityId]) {
+    case 0:
+        from.vx = g_FieldModels[g_EntityToModel[entityId]].PosX >> 12;
+        from.vy = g_FieldModels[g_EntityToModel[entityId]].PosY >> 12;
+        from.vz = g_FieldModels[g_EntityToModel[entityId]].PosZ >> 12;
+        to.vx = g_FieldModels[g_EntityToModel[leaderEntity]].PosX >> 12;
+        to.vy = g_FieldModels[g_EntityToModel[leaderEntity]].PosY >> 12;
+        to.vz = g_FieldModels[g_EntityToModel[leaderEntity]].PosZ >> 12;
+        FieldEventSplitJoinSetTurn(
+            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir,
+            FieldEntityDirByVec(&from, &to, &sqrDist) & 0xFF);
+        g_EntitySplitJoinState[entityId] = 2;
+        break;
+    case 1:
+        if (FieldEventSplitJoinEndMove(entityId) == 0) {
+            break;
+        }
+        g_FieldModels[g_EntityToModel[entityId]].SolidOff = 1;
+        g_FieldModels[g_EntityToModel[entityId]].TalkOff = 1;
+        g_FieldModels[g_EntityToModel[entityId]].visible = 0;
+        g_EntitySplitJoinState[entityId] = 3;
+        return 1;
+    case 2:
+        if (FieldEventSplitJoinEndTurn(entityId) == 0) {
+            break;
+        }
+        FieldEventSplitJoinSetMove(
+            entityId,
+            (g_FieldModels[g_EntityToModel[leaderEntity]].PosX * 16) >> 16,
+            (g_FieldModels[g_EntityToModel[leaderEntity]].PosY * 16) >> 16,
+            steps, 0);
+        g_EntitySplitJoinState[entityId] = 1;
+        if (g_DebugLevel & 3) {
+            FieldDebugAddParseValueToPage2("end setmove", 0, 0);
+        }
+        break;
+    case 3:
+        return 1;
+    }
+    return 0;
 }
-#endif
 
 /* Drive one party member through a SPLIT: state 0 starts the move, state 1
  * waits for the move then starts the turn, state 2 waits for the turn, state 3
- * is done. Returns 1 while a step is still in progress. The g_FieldModels
- * *0x84 base regalloc and the s16 arg-widening (<<0x10/>>0x10) are the wall;
- * codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitSet);
-#else
-s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
+ * is done. Returns 1 once this member has finished, 0 while a step is still in
+ * progress.
+ *
+ * The parked body had the last two parameters the wrong way round -- the
+ * fourth is the facing to turn to (used as `turnDir & 0xFF' in state 1) and
+ * the fifth is the step count handed to FieldEventSplitJoinSetMove, whose own
+ * fifth argument is the constant 1, not this function's. All five are s16;
+ * `entityId' was `u8' and the `sll'/`sra' pair before the debug call and the
+ * state index is what says otherwise. That was 35 of the 39 rows.
+ *
+ * The last four were the register the state constant goes in. Every arm that
+ * ends the frame writes `g_EntitySplitJoinState[entityId]' and then returns 0,
+ * and spelling that as an explicit `return 0' per arm makes gcc keep $v0 for
+ * the return value and put the constant in $v1; spelling it as `break' with a
+ * single `return 0' after the switch lets the constant have $v0 and re-zero it
+ * on the way out, which is what the target does. Same for the two early exits
+ * on FieldEventSplitJoinEndMove/EndTurn returning 0. */
+s32 FieldEventSplitSet(s16 entityId, s16 x, s16 y, s16 turnDir, s16 steps) {
     if (g_DebugLevel & 3) {
         FieldDebugAddParseValueToPage2("split p1=", entityId, 2);
     }
@@ -8830,22 +8822,23 @@ s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
     }
     switch (g_EntitySplitJoinState[entityId]) {
     case 0:
-        FieldEventSplitJoinSetMove(entityId, x, y, turnDir, a4);
+        FieldEventSplitJoinSetMove(entityId, x, y, steps, 1);
         g_EntitySplitJoinState[entityId] = 1;
-        return 0;
+        break;
     case 1:
         if (FieldEventSplitJoinEndMove(entityId) == 0) {
-            return 0;
+            break;
         }
         g_FieldModels[g_EntityToModel[entityId]].SolidOff = 0;
         g_FieldModels[g_EntityToModel[entityId]].TalkOff = 0;
         FieldEventSplitJoinSetTurn(
-            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir, a4 & 0xFF);
+            entityId, g_FieldModels[g_EntityToModel[entityId]].Dir,
+            turnDir & 0xFF);
         g_EntitySplitJoinState[entityId] = 2;
-        return 0;
+        break;
     case 2:
         if (FieldEventSplitJoinEndTurn(entityId) == 0) {
-            return 0;
+            break;
         }
         g_EntitySplitJoinState[entityId] = 3;
         return 1;
@@ -8854,7 +8847,6 @@ s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
     }
     return 0;
 }
-#endif
 
 /* Start one party member walking to (x, y) as part of a SPLIT or JOIN.
  *

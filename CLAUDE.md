@@ -995,6 +995,29 @@ a near-miss, in rough order of frequency:
   Written as a `switch`, `expand_end_case` emits the same constant as part of
   its own compare chain and the slot fills. Same two arms, one row —
   `OpcodeFuncJump`.
+* **A value that a call clobbers and a result that replaces it are one
+  variable, not two.** `charId = party[n]; if (charId == 0xFF) ok = 1; else ok
+  = f(map[charId], g(), h());` needs `charId` alive across `g()` and `h()`,
+  because the argument that uses it is evaluated last — so it takes a
+  callee-saved register, and so does `ok`. Two long-lived pseudos for the two
+  available registers is a coin flip, and gcc calls it the other way: pure
+  `$s2`/`$s3` swap, seven rows, immune to every declared type. Write
+  `ok = party[n];` and let the call's result overwrite it and there is one
+  pseudo and no choice to get wrong. `OpcodeFuncSplit` needs this on both
+  followers.
+* **A `0xFF` sentinel compared on both sides of a call gets a callee-saved
+  register.** `ok = 1; if (x != 0xFF) ok = f();` twice in a row lets cse share
+  the constant between the two comparisons; the shared pseudo has to survive
+  the call, so it lands in `$s1` and the frame grows by a save and a restore.
+  `if (x == 0xFF) ok = 1; else ok = f();` — the same test written as an
+  if/else — materialises `li v0,0xff` twice, which is what the target does.
+  Worth 20 rows and the frame on `OpcodeFuncJoin`.
+* **An arm that ends the frame by writing a state byte and returning a
+  constant wants `break`, not `return`.** With an explicit `return 0` per arm
+  gcc keeps `$v0` reserved for the return value across the arm and the state
+  constant goes in `$v1`; with `break` and a single `return 0` after the
+  switch, the constant gets `$v0` and is re-zeroed on the way out, which is
+  what the target does. `FieldEventSplitSet`'s last four rows.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
