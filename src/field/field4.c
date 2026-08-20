@@ -2240,6 +2240,15 @@ void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
 // Begin of field_event_memory_bank.c
 /////////////////////////////////////////////////
 
+/* The #else body is a VERIFIED MATCH -- checkfn reports MATCH for it -- but it
+ * cannot land alone. This function LENDS: its `.s` owns D_800A032C, the
+ * "bank" diagnostic that FieldEventWriteMemoryU8, FieldEventReadMemoryS16 and
+ * FieldEventWriteMemoryS16 all print, and all three are still pinned. Writing
+ * the literal here emits a second copy under a local label and the link fails
+ * with `undefined reference to D_800A032C`. The four have to land together;
+ * the other three are at 16, 22 and 22 rows. (rodata_owner.py says SAFE, which
+ * is its MASPSX_OVERRIDE blind spot -- it reads the `#else` bodies and cannot
+ * tell that the pinned siblings still assemble their `.s`.) */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventReadMemoryU8);
 #else
@@ -4201,12 +4210,17 @@ s32 OpcodeFuncFmusc(void) {
  * First call arms the PARTY_MENU event command, flags the menu overlay and
  * resolves the tutorial's block into D_800E48E0 for the main loop to stream;
  * once the menu reports MOVCMD_DONE, clear the command and advance past the
- * operand. Verified C is the #else; codegen pinned via MASPSX_OVERRIDE. */
+ * operand. */
+extern u8* D_800E48E0;
+
+/* The #else body is a VERIFIED MATCH but cannot land alone: this function's
+ * `.s` owns D_800A08D0, and src/field/field5.c reaches that string by symbol
+ * (field_private.h:208). A C literal here becomes a local label, so field5
+ * fails to link. Landing it means giving the string a home both units can
+ * reach -- not a codegen problem. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTutor);
 #else
-extern u8* D_800E48E0;
-
 s32 OpcodeFuncTutor(void) {
     s16 tutorialId;
 
@@ -7516,21 +7530,10 @@ void FieldEventRectClear(s16* arg0) {
  * the loop they land ahead of the zero-trip guard, and written inline gcc
  * reassociates the base out and the body needs a third `addu`.
  *
- * One instruction from matching: the original materialises &D_80095DE0 between
- * the `andi` that widens the palette id and the `sll` that scales it, gcc after
- * both. That is the same residue as OpcodeFuncStpls -- gcc will not put the
- * symbol's address early -- and it survives every way of writing the address:
- * casting the sum or the base, indexing in bytes or in u16 entries, `<< 5`
- * against `* 32`, and even redeclaring D_80095DE0 as the `u16[][16]` it
- * actually is and letting the scale come from the element type. All seven
- * phrasings produce byte-identical output, which says gcc canonicalises the
- * address tree well before it decides an order.
- *
- * The two are a .rodata unit -- OpcodeFuncCppal owns the "cppal" string that
- * OpcodeFuncCppal2 prints -- so neither can land without the other. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCppal);
-#else
+ * Same base-address recipe as ADPAL below: widen the palette id into an `s32`,
+ * then take `u8* base = D_80095DE0;` as its own statement, then compute the two
+ * pointers off `base`. The three invariant statements are hoisted in source
+ * order, which is the order the target's preheader has them. */
 s32 OpcodeFuncCppal(void) {
     s16 count;
     u8 src;
@@ -7544,43 +7547,29 @@ s32 OpcodeFuncCppal(void) {
     src = FieldEventReadMemoryU8(1, 2);
     dst = FieldEventReadMemoryU8(2, 3);
     for (i = 0; i < count; i++) {
-        u16* dstPal = (u16*)(D_80095DE0 + dst * 32);
-        u16* srcPal = (u16*)(D_80095DE0 + src * 32);
+        s32 dp = dst;
+        u8* base = D_80095DE0;
+        u16* dstPal = (u16*)(base + dp * 32);
+        u16* srcPal = (u16*)(base + src * 32);
 
         dstPal[i] = srcPal[i];
     }
     PC_INC(5);
     return 0;
 }
-#endif
 
 /* As CPPAL, but source and destination each get their own start entry, so the
  * copy can shift a run of colours within or between palettes.
  *
- * The #else body below is a VERIFIED MATCH -- `tools/checkfn.py` reports MATCH
- * for it. It is still pinned only because OpcodeFuncCppal above owns the
- * "cppal" string this function prints and is itself still MASPSX_OVERRIDE, so
- * writing the literal here would emit a second copy and shift every later
- * .rodata offset. Unpark the two together the moment CPPAL lands.
- *
- * What it needed: the palette base has to be its own named `u8*` local,
- * assigned inside the first address expression and reused by the second
- * (`(pal = D_80095DE0) + dstPal * 32`), and declared between `src` and `dst`.
- * That gives the symbol address a pseudo of its own with a live range starting
- * at the first use, which is what swaps $v0 and $v1 in the preheader. A plain
- * `u8* pal = D_80095DE0;` statement at the top of the loop body is NOT the same
- * thing -- it defines the pseudo before the index computation and costs three
- * rows -- and the declaration position is load-bearing: every other slot in the
- * local list scores three rows as well. Found by decomp-permuter. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCppal2);
-#else
+ * Same recipe as CPPAL above; the store base is the one that has to be widened
+ * and computed first, since that is the order this function's target builds
+ * them in. The two are a .rodata unit -- CPPAL owns the "cppal" string CPPAL2
+ * prints -- so they had to land in the same change. */
 s32 OpcodeFuncCppal2(void) {
     s16 count;
     s16 srcPal;
     s16 dstPal;
     s16 src;
-    u8* pal;
     s16 dst;
     s16 end;
 
@@ -7594,8 +7583,10 @@ s32 OpcodeFuncCppal2(void) {
     dst = FieldEventReadMemoryU8(2, 6);
     end = src + count;
     while (src < end) {
-        u16* to = (u16*)((pal = D_80095DE0) + dstPal * 32);
-        u16* from = (u16*)(pal + srcPal * 32);
+        s32 dp = dstPal;
+        u8* base = D_80095DE0;
+        u16* to = (u16*)(base + dp * 32);
+        u16* from = (u16*)(base + srcPal * 32);
 
         to[dst] = from[src];
         src++;
@@ -7604,7 +7595,6 @@ s32 OpcodeFuncCppal2(void) {
     PC_INC(8);
     return 0;
 }
-#endif
 
 /* Rotate a palette: the run of colours ending at `count` is written back
  * starting `start` entries along, and the tail that falls off the end wraps
@@ -7719,12 +7709,30 @@ s32 OpcodeFuncRtpal2(void) {
  * zero but did not start there is forced to 0x8000, since an all-zero entry is
  * the PS1's transparent pixel rather than black.
  *
- * ONE row from matching, and it is the documented one: the target puts the
- * `lui`/`addiu` of &D_80095DE0 between the `andi` that widens srcPal and the
- * `sll` that scales it, gcc puts the `sll` first. Every other instruction and
- * every register in the function is identical.
+ * The base address needs TWO statements of its own inside the loop, in this
+ * order: the byte palette id widened into an `s32`, then `u8* base =
+ * D_80095DE0;`, then the two pointers computed off `base`. That is the whole
+ * of what parked this function (and its ADPAL2 twin, and the CPPAL, MPPAL,
+ * RTPAL and PLS families) for so long, so it is worth spelling out.
  *
- * Three things got it here, each measured:
+ * The residue was one transposition: the target issues `lui`/`addiu` of
+ * &D_80095DE0 *between* the `andi` that widens srcPal and the `sll` that
+ * scales it; gcc issued the `sll` first. Nothing about the address expression
+ * moves it -- `(u8*)D_80095DE0 + (id << 5)`, `&((u16*)D_80095DE0)[id * 16]`,
+ * `&D_80095DE0[id * 32]`, `id * 32 + D_80095DE0` and the plain form all
+ * compile to the identical bytes, because fold canonicalises the tree to
+ * `(mult) + (symbol)` and expand then evaluates the multiply first.
+ *
+ * The order in the preheader is `move_movables` emitting the loop's invariant
+ * insns in the order `scan_loop` recorded them, which is insn order in the
+ * body. So the fix is to give the body three separate invariant statements
+ * whose natural order is the one wanted: widen, then base, then index. Widening
+ * alone does nothing (gcc folds it back into the address), and a `base` local
+ * alone puts the `lui`/`addiu` *before* the `andi` -- one row the other way.
+ * Together they match. `(base + (sp << 5))` works as well as `sp * 32`, and
+ * widening the second id too is harmless.
+ *
+ * Two other things this function needed, both still true:
  *   - `count` as s16, not u16. The s16->int widening collapses to exactly the
  *     `move a0,s4` the target has ahead of the zero-trip guard, and makes that
  *     guard `beqz` rather than `blez`. u16 folds the copy away and loses two
@@ -7733,24 +7741,13 @@ s32 OpcodeFuncRtpal2(void) {
  *   - `from` declared before `to` inside the loop; that is the order the
  *     target computes the two bases in, and it is worth 14 rows. RTPAL and
  *     RTPAL2 above compute the store base first and want the opposite order.
- *   - no named local for the base. `u8* pal = D_80095DE0;` puts the pair
- *     before the `andi` instead of between: one row, but in the other
- *     direction, and it drags the $v0/$v1 and $s2/$s3 assignments with it.
- * Rejected, both measured: hoisting the two pointers above the loop (3 rows),
- * and widening srcPal into its own local inside the loop, which gcc folds
- * straight back out and which changes nothing at all.
+ * Rejected and measured: hoisting the two pointers above the loop (3 rows).
  *
- * This one row is what parks OpcodeFuncAdpal2 below, which *does* match
- * byte-for-byte: the two share the "adpal" literal, so a lone C copy of it
- * emits a second string and shifts every later .rodata offset. Verified --
- * with ADPAL2 alone as C, `make build` reports `field.exe: FAILED` while
- * every function still diffs clean. Land this one and ADPAL2 lands with it.
- * (`rodata_owner.py` says SHARES for the pair, which is wrong here: it reads
- * the `#else` body and cannot tell that MASPSX_OVERRIDE means the .s still
- * supplies the literal.) */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncAdpal);
-#else
+ * OpcodeFuncAdpal2 below shares the "adpal" literal with this one, so the two
+ * had to land together -- a lone C copy emits a second string and shifts every
+ * later .rodata offset. (`rodata_owner.py` says SHARES for such a pair, which
+ * is wrong while one of them is pinned: it reads the `#else` body and cannot
+ * tell that MASPSX_OVERRIDE means the .s still supplies the literal.) */
 s32 OpcodeFuncAdpal(void) {
     s16 count;
     u8 srcPal;
@@ -7779,8 +7776,10 @@ s32 OpcodeFuncAdpal(void) {
         addR ^= 0xFF00;
     }
     for (i = 0; i < count; i++) {
-        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
-        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
+        s32 sp = srcPal;
+        u8* base = D_80095DE0;
+        u16* from = (u16*)(base + sp * 32);
+        u16* to = (u16*)(base + dstPal * 32);
         u16 color = from[i];
         s16 r;
         s16 g;
@@ -7815,7 +7814,6 @@ s32 OpcodeFuncAdpal(void) {
     PC_INC(0xA);
     return 0;
 }
-#endif
 
 /* ADPAL over a sub-range: the run starts `start` entries in and the two
  * palettes come from the script rather than from event memory.
@@ -7830,9 +7828,6 @@ s32 OpcodeFuncAdpal(void) {
  * FieldEventReadMemoryU8, so there is no `andi` for &D_80095DE0's `lui`/
  * `addiu` to straddle -- which is precisely why this one matches and its
  * sibling does not. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncAdpal2);
-#else
 s32 OpcodeFuncAdpal2(void) {
     s16 count;
     u8 srcPal;
@@ -7902,7 +7897,6 @@ s32 OpcodeFuncAdpal2(void) {
     PC_INC(0xB);
     return 0;
 }
-#endif
 
 /* Scale every colour of a palette per channel. The factor is a 1.7 fixed-point
  * byte, so the channel is doubled before the multiply and the product shifted

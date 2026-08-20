@@ -875,6 +875,32 @@ a near-miss, in rough order of frequency:
   `AddColorStrNextDebugRow`'s `hdr->headRow = row + 1` needs `s16 next = row + 1;`
   ahead of the `hdr = ...` assignment — and it has to be `s16`, since an `s32`
   local puts a widening node back into the store.
+* **Two sibling pointers off one global base want three separate statements:
+  widen, base, index.** For `p = (u16*)(SYM + id * 32)` gcc's fold canonicalises
+  the tree to `(mult) + (symbol)` and expand then evaluates the multiply first,
+  so the `lui`/`addiu` of the symbol lands *after* the `sll`. Every spelling of
+  the address compiles to the identical bytes — `(u8*)SYM + (id << 5)`,
+  `&((u16*)SYM)[id * 16]`, `&SYM[id * 32]`, `id * 32 + SYM` were all measured —
+  because the difference is not in the expression at all. It is the order
+  `move_movables` hoists the loop's invariant insns, which is the order
+  `scan_loop` recorded them, which is insn order in the body. So write the body
+  so that order is the one you want:
+
+  ```c
+  for (i = 0; i < count; i++) {
+      s32 sp = srcPal;            /* the andi */
+      u8* base = D_80095DE0;      /* the lui/addiu */
+      u16* from = (u16*)(base + sp * 32);
+      u16* to = (u16*)(base + dstPal * 32);
+  ```
+
+  Neither half works alone: widening on its own gcc folds straight back into the
+  address, and a `base` local on its own puts the `lui`/`addiu` *before* the
+  `andi` — one row, in the other direction. This is what unparked
+  `OpcodeFuncAdpal`, `OpcodeFuncAdpal2`, `OpcodeFuncCppal` and
+  `OpcodeFuncCppal2` in `src/field/field4.c` after each had absorbed a long
+  budget on the address expression alone. Which of the two pointers is declared
+  first still matters separately (see the ADPAL note in that file).
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -995,6 +1021,23 @@ the whole `.rodata` group or skip" without saying so. All six of
 instructions and near-clones of the other, which made them the cheapest work
 in the file rather than the most expensive. Scan the blocked table for
 reciprocal pairs before believing the "actionable" count.
+
+**A `SAFE` verdict is unreliable for the same reason, in the other
+direction.** The tool cannot see that a *pinned* sibling still assembles its
+`.s`, so it will not tell you the function you are about to land is the one
+that **owns** a literal those siblings print. `FieldEventReadMemoryU8` and
+`OpcodeFuncTutor` both report SAFE, both match instruction-for-instruction, and
+both break the link the moment they land — the first because its three
+`FieldEvent*Memory*` siblings reference `D_800A032C`, the second because
+`src/field/field5.c` reaches `D_800A08D0` by symbol. A C string literal becomes
+a *local* label, so the definition simply disappears. Before landing a function
+that prints anything, grep `asm/` for the `glabel` of every `.rodata` symbol its
+own `.s` defines and check who else names it:
+
+```shell
+grep -rln "glabel D_800A032C" asm/us/field/
+grep -rln "D_800A032C" asm/us/field/ src/field/
+```
 
 **`rodata_owner.py` reads `MASPSX_OVERRIDE` as if it were C, and it is not.**
 The tool decides a symbol is owned by C once it sees a body in the `.c`, so a
