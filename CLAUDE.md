@@ -1253,6 +1253,26 @@ a near-miss, in rough order of frequency:
   every type for the subtrahend measured (u8, s16, u16, u32, s32, with and
   without a cast at the use) and all five compile identically, because none of
   them is where the `andi` comes from.
+* **Where you put a constant's local decides which invariant is hoisted
+  first.** Two levers already in this file combine into a third. A
+  loop-invariant is hoisted only if its defining insn is on the loop's
+  always-executed path, and `move_movables` emits the hoists in the order
+  `scan_loop` recorded them — insn order in the loop body. So a *pointer*
+  assigned above the loop is not a movable at all and lands ahead of every
+  hoist; the same assignment as the loop's first statement becomes a movable
+  but still precedes any constant whose first use is further down; and naming
+  the constant and assigning it *above* the pointer puts the two movables in
+  the other order. `FieldEntityLineInteract` in `src/field/field2.c` measured
+  19, 17 and 0 rows for those three arrangements of the same two values —
+  `active = 1;` then `pad2 = &g_FieldPad2State;`, both at the top of the loop
+  body. The tell is two preheader initialisations in the wrong order with a
+  callee-saved rename cascade behind them and nothing else wrong.
+
+  The corollary is that a park note reading "this value is materialised early
+  here and late in the target" is only half a diagnosis: check the *position*
+  of the local before concluding the local itself is wrong. That note had
+  rejected the one alternative it tried and concluded "the local is right" —
+  it was right, and in the wrong place.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
