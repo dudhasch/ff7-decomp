@@ -5255,40 +5255,48 @@ void OpcodeFuncPdira(void) {
     FieldEventSetDirByActorId(actorId);
 }
 
-/* Face the current entity towards another entity. Reads both models' fixed
- * point positions, computes the direction with FieldEntityDirByVec, and snaps
- * the current entity's Dir to it, cancelling any turn in progress. No-op when
- * either entity has no model. The g_FieldModels *0x84 base regalloc is the
- * wall; codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSetDirByActorId);
-#else
-void FieldEventSetDirByActorId(u8 actorId) {
+/* Face the current entity towards another entity: read both models' fixed
+ * point positions, compute the direction with FieldEntityDirByVec, and snap
+ * the current entity's Dir to it, cancelling any turn in progress. This is the
+ * whole of the DIRA/PDIRA opcode, not a helper -- it steps the script PC past
+ * the two bytes itself and returns 1, or 0 when either entity has no model.
+ *
+ * Three things the parked body had wrong, worth 150 rows between them and all
+ * of them readable off the target: the parameter is `s16', not `u8' (the
+ * `sll'/`sra' pair ahead of the g_EntityToModel index is the sign extension);
+ * the PC_INC(2) and the return value live here rather than in the callers;
+ * and when the two positions share an x and a y the source nudges from.vx by
+ * one before calling FieldEntityDirByVec, which is the pair of `bne's guarding
+ * the `addiu v0,t0,0x1'. A degenerate direction vector would otherwise make
+ * the callee's atan2 meaningless. Every model access is the full indexed
+ * expression -- caching g_EntityToModel[g_CurrentEntity] in a local is what
+ * made this look like a register-allocation problem. */
+s32 FieldEventSetDirByActorId(s16 actorId) {
     VECTOR from;
     VECTOR to;
     s32 sqrDist;
-    u8 curModel;
-    u8 targetModel;
 
-    curModel = g_EntityToModel[g_CurrentEntity];
-    if (curModel == 0xFF) {
-        return;
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF ||
+        g_EntityToModel[actorId] == 0xFF) {
+        PC_INC(2);
+        return 0;
     }
-    targetModel = g_EntityToModel[actorId];
-    if (targetModel == 0xFF) {
-        return;
+    from.vx = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosX >> 12;
+    from.vy = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosY >> 12;
+    from.vz = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosZ >> 12;
+    to.vx = g_FieldModels[g_EntityToModel[actorId]].PosX >> 12;
+    to.vy = g_FieldModels[g_EntityToModel[actorId]].PosY >> 12;
+    to.vz = g_FieldModels[g_EntityToModel[actorId]].PosZ >> 12;
+    if (from.vx == to.vx && from.vy == to.vy) {
+        from.vx = from.vx + 1;
     }
-    from.vx = g_FieldModels[curModel].PosX >> 12;
-    from.vy = g_FieldModels[curModel].PosY >> 12;
-    from.vz = g_FieldModels[curModel].PosZ >> 12;
-    to.vx = g_FieldModels[targetModel].PosX >> 12;
-    to.vy = g_FieldModels[targetModel].PosY >> 12;
-    to.vz = g_FieldModels[targetModel].PosZ >> 12;
-    g_FieldModels[curModel].Dir = FieldEntityDirByVec(&from, &to, &sqrDist);
-    g_FieldModels[curModel].TurnType = 0;
-    g_FieldModels[curModel].TurnStep = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir =
+        FieldEntityDirByVec(&from, &to, &sqrDist);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+    PC_INC(2);
+    return 1;
 }
-#endif
 
 void OpcodeFuncTura(void) {
     if (g_DebugLevel & 3) {
@@ -5585,49 +5593,70 @@ s32 OpcodeFuncTurnw(void) {
 /* TURN (0xB5): turn the current entity to a target direction over a number of
  * steps. If the previous turn finished (TurnType 3) clear it and advance. If an
  * identical turn is already in flight, keep waiting. Otherwise (re)arm the
- * turn: TurnStart = current Dir, TurnEnd = target. Verified C kept as the
- * #else; codegen pinned via MASPSX_OVERRIDE (the g_FieldModels *0x84 base
- * regalloc wall). */
+ * turn: TurnStart = current Dir, TurnEnd = target.
+ *
+ * PARKED at 29 rows, down from 116. What that 116 was is worth reading before
+ * anyone calls the rest "the g_FieldModels *0x84 regalloc wall": the parked
+ * body hoisted GET_PARAM_U8(4)/(5) into locals at the top and kept a `model'
+ * pointer, and the target does neither -- it re-reads both parameters at each
+ * of their three use sites (the debug switch, the still-in-flight test, and
+ * the rearm) and spells every model access as the full indexed expression.
+ * The debug print is a two-case `switch' on GET_PARAM_U8(5) whose arms
+ * cross-jump onto one shared DebugPrintOpcode call; written as if/else-if it
+ * is nine rows worse.
+ *
+ * The residue is the shared `PC_INC(6); return 0;' block. The target reaches
+ * it from both the no-model guard and the TurnType == 3 arm, and lays it out
+ * *after* the rearm code -- which is what the `goto step' below produces, and
+ * is worth five insertions against writing the two exits out inline. What is
+ * still wrong is where the merge starts: the target's shared block begins at
+ * the `%hi(g_FieldScriptPC)' with g_CurrentEntity already in $a0, each
+ * predecessor having loaded it, while ours pulls that load into the shared
+ * block too. Rejected: both exits inline (28 rows but 7 insertions), the
+ * debug test as if/else-if (37). */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurn);
 #else
 s32 OpcodeFuncTurn(void) {
     s16 dir;
-    FieldEntity* model;
-    u8 turnType;
-    u8 turnSteps;
 
     if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
-        PC_INC(6);
-        return 0;
+        goto step;
     }
-    turnSteps = GET_PARAM_U8(4);
-    turnType = GET_PARAM_U8(5);
     if (g_DebugLevel & 3) {
-        if (turnType == 1) {
+        switch (GET_PARAM_U8(5)) {
+        case 1:
             DebugPrintOpcode("turn", 5);
-        } else if (turnType == 2) {
+            break;
+        case 2:
             DebugPrintOpcode("turnc", 5);
+            break;
         }
     }
-    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-    if (model->TurnType == 3) {
-        model->TurnType = 0;
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType == 3) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 0;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
-        PC_INC(6);
-        return 0;
+        goto step;
     }
     dir = FieldEventReadMemoryS16(2, 2);
-    if (model->TurnStep != 0 && (s16)dir == model->TurnEnd &&
-        model->TurnType == turnType && model->TurnSteps == turnSteps) {
+    if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep != 0 &&
+        (s16)dir == g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd &&
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType ==
+            GET_PARAM_U8(5) &&
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps ==
+            GET_PARAM_U8(4)) {
         return 1;
     }
-    model->TurnStart = g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir;
-    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = turnType;
-    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = turnSteps;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStart =
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].Dir;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = GET_PARAM_U8(5);
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = GET_PARAM_U8(4);
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd = dir;
     return 1;
+step:
+    PC_INC(6);
+    return 0;
 }
 #endif
 

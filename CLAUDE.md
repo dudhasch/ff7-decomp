@@ -948,6 +948,53 @@ a near-miss, in rough order of frequency:
   were wrong in `OpcodeFuncFadew`'s parked body and together were worth 22 of
   its 26 rows. A `.rodata+0xNN` grouping line in `diff.py` output tells you
   which table slots reach which arm — read it like a case list.
+* **A base address the target rebuilds at every use is a control-flow fact,
+  not an allocation fact.** Ten functions in `src/field/field4.c` were parked
+  with a note saying "the `g_FieldModels` *0x84 base regalloc is the wall", and
+  not one of them had an allocation problem: in every case the parked C was a
+  different *program*, and the rebuilt base was the consequence. gcc 2.6.3's
+  cse walks the dominator tree, so a block with **two predecessors** starts
+  with nothing known — and the FF7 opcode handlers are full of such blocks,
+  because the original writes the "start a fresh action" path as a block that
+  *both* a failed test and a dispatch default fall into. Give the same block
+  one predecessor by writing the default as its own `return` and gcc keeps the
+  base live across it, which is a dozen rows out and reads exactly like
+  register noise. `OpcodeFuncFmove`, `OpcodeFuncCmove`, `OpcodeFuncJump`,
+  `OpcodeFuncTurn` and `FieldEventSetDirByActorId` were all this, 116 rows at
+  the worst, and all five are plain matching C now. Read the branch structure
+  first; the base rebuild is a symptom, and the `.s` shows you which blocks
+  have how many predecessors for free.
+* **Three habits that read as good C and are always wrong here.** Caching
+  `g_EntityToModel[g_CurrentEntity]` (or the model pointer it indexes) in a
+  local, hoisting a `GET_PARAM_U8(n)` into a named variable at the top of a
+  handler, and taking a `FieldEntity*` instead of repeating the array
+  expression. The original re-reads all of them at every use — `OpcodeFuncTurn`
+  reads `GET_PARAM_U8(4)` and `(5)` three times each — and the locals are worth
+  tens of rows because they change what is live where. Repeat the whole
+  indexed expression, however ugly it looks.
+* **A helper that "just" wraps an opcode usually is the opcode.** Two `void`
+  handlers calling a `void` helper, each doing its own `PC_INC`, is the shape
+  m2c and a first reading produce; the original often has the helper do the
+  `PC_INC` and return the 0/1 the dispatcher wants, with the callers passing
+  its value straight through. A `void` C function leaves `$v0` alone, so the
+  callers stay byte-identical either way and nothing tells you — except the
+  helper's own `.s`, which ends in `addiu v1,v1,N / sh v1,0(a0)` and an
+  `ori v0,1`. `FieldEventSetDirByActorId` was 150 rows on this plus a `u8`
+  parameter that is really `s16` (the `sll`/`sra` ahead of the index is the
+  give-away) plus a missing degenerate-vector nudge.
+* **`a < b` and `b > a` are the same test and different code.** gcc 2.6.3
+  evaluates a comparison's operands in source order, so the two spellings emit
+  their operand setup — two `sll`/`sra` sign-extension pairs, in the case that
+  matters — the other way round, and every register downstream of them follows.
+  `FieldEventSplitJoinSetTurn`'s entire 16-row residue was this one line.
+  Reversing the *arms* instead (`>=` with the bodies swapped) does not do it.
+* **A branch whose delay slot the target fills and yours does not may want to
+  be a `switch`.** Written as two `if`s, the `li v0,K` setting up the second
+  comparison is live on the first branch's taken path whenever that path
+  returns a value in `$v0`, so reorg refuses to steal it and you get a `nop`.
+  Written as a `switch`, `expand_end_case` emits the same constant as part of
+  its own compare chain and the slot fills. Same two arms, one row —
+  `OpcodeFuncJump`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
