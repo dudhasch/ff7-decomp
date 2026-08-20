@@ -221,76 +221,108 @@ extern s16 D_8009C558;
 
 /* Per-frame background scroll: on the field's scroll state machine, drive the
  * background X/Y toward the entity's clamped screen position (linear or
- * ease-in-out depending on the mode). The seed is semantically close; the
- * residual is the oversized stack frame (dead locals the original declared)
- * plus regalloc. Codegen pinned via MASPSX_OVERRIDE pending a permuter pass. */
+ * ease-in-out depending on the mode).
+ *
+ * 26 rows out, from an m2c seed that did not compile (it closed with a
+ * `default:` outside the switch). What the rewrite established:
+ *   - the jump table has ten entries, not six. `sltiu v0,v1,0xa` on the
+ *     selector itself, with no `addiu -1` in front of it, means the case set
+ *     spans 0..9; writing only the five live arms gives a six-entry table
+ *     indexed off `selector - 1` and 61 rows.
+ *   - arms 2, 3 and 5 test `!=` with the increment first, arm 6 tests `==`
+ *     with the state store first. The two spellings put the shared block on
+ *     opposite sides of the branch, which is what stops all four tails
+ *     cross-jumping into one. Written the same way round they merge and it
+ *     costs 3 rows.
+ *   - there is no dead local: `long screenPos` alone gives the target's 0x40
+ *     frame. Reserving 0x24 for the gap between it and the saved ra -- which
+ *     is what the frame arithmetic suggests -- costs 17 rows.
+ *
+ * The residue is one cross-jumping choice. The target keeps arm 2's copy of
+ * the shared tail inline and has arms 3 and 5 jump backwards into it, at the
+ * `jal` and at the tail respectively; ours emits the tail once after arm 6 and
+ * has arms 2, 3 and 5 all jump forwards to it. m2c's seed says the original
+ * reached both points by `goto` -- one label on the second LinearStep call,
+ * shared by arms 2 and 5, and one on the tail, shared by 2, 3 and 5 -- and
+ * that is almost certainly right, but transcribing it measures 47 rows however
+ * the two carried values are typed or ordered (s16/s32 for the y target, its
+ * assignment before or after arm 5's first call, either declaration order).
+ * Something about the carried `s16` is wrong; the labels themselves are not
+ * the problem. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollUpdate);
 #else
 void FieldBGScrollUpdate(void) {
-    s32 sp10;
-    s16 var_a1;
-    s16 var_v0_2;
-    s32 var_v0;
+    long screenPos;
 
-#define unksp12 (((s16*)&sp10)[1])
+#define SCREEN_X (((s16*)&screenPos)[0])
+#define SCREEN_Y (((s16*)&screenPos)[1])
     if (D_8009AC13 == 1) {
         switch (D_8009AC11) {
         case 1:
-            FieldBGGetEntityScreenPos(&sp10);
-            FieldBGClampPos((s16*)&sp10);
-            D_80071E38 = -(s16)(u16)sp10;
-            D_80071E3C = -(s16)unksp12;
-            return;
+            FieldBGGetEntityScreenPos(&screenPos);
+            FieldBGClampPos((s16*)&screenPos);
+            D_80071E38 = -SCREEN_X;
+            D_80071E3C = -SCREEN_Y;
+            break;
         case 2:
-            FieldBGGetEntityScreenPos(&sp10);
-            FieldBGClampPos((s16*)&sp10);
-            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32) - (s16)sp10,
-                                             (s32)D_8009C558, (s32)D_80075CF8);
-            var_a1 = -unksp12;
-        block_5:
-            var_v0 = FieldCalcLinearStep(
-                (s32)D_80075E1C, (s32)var_a1, (s32)D_8009C558, (s32)D_80075CF8);
-        block_6:
-            D_80071E3C = (s16)var_v0;
+            FieldBGGetEntityScreenPos(&screenPos);
+            FieldBGClampPos((s16*)&screenPos);
+            D_80071E38 = FieldCalcLinearStep(
+                D_80075E14, -SCREEN_X, D_8009C558, D_80075CF8);
+            D_80071E3C = FieldCalcLinearStep(
+                D_80075E1C, -SCREEN_Y, D_8009C558, D_80075CF8);
             if (D_8009C558 != D_80075CF8) {
-                var_v0_2 = D_80075CF8 + 1;
-            block_13:
-                D_80075CF8 = var_v0_2;
+                D_80075CF8 = D_80075CF8 + 1;
             } else {
-            block_11:
                 D_8009AC13 = 2;
-                return;
             }
             break;
         case 3:
-            FieldBGGetEntityScreenPos(&sp10);
-            FieldBGClampPos((s16*)&sp10);
-            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32) - (s16)sp10,
-                                            (s32)D_8009C558, (s32)D_80075CF8);
-            var_v0 = FieldCalcEaseInOut((s32)D_80075E1C, (s32)-unksp12,
-                                        (s32)D_8009C558, (s32)D_80075CF8);
-            goto block_6;
-        case 5:
-            var_a1 = D_80075E20;
-            D_80071E38 = FieldCalcLinearStep((s32)D_80075E14, (s32)D_80075E18,
-                                             (s32)D_8009C558, (s32)D_80075CF8);
-            goto block_5;
-        case 6:
-            D_80071E38 = FieldCalcEaseInOut((s32)D_80075E14, (s32)D_80075E18,
-                                            (s32)D_8009C558, (s32)D_80075CF8);
-            D_80071E3C = FieldCalcEaseInOut((s32)D_80075E1C, (s32)D_80075E20,
-                                            (s32)D_8009C558, (s32)D_80075CF8);
-            if (D_8009C558 == D_80075CF8) {
-                goto block_11;
+            FieldBGGetEntityScreenPos(&screenPos);
+            FieldBGClampPos((s16*)&screenPos);
+            D_80071E38 = FieldCalcEaseInOut(
+                D_80075E14, -SCREEN_X, D_8009C558, D_80075CF8);
+            D_80071E3C = FieldCalcEaseInOut(
+                D_80075E1C, -SCREEN_Y, D_8009C558, D_80075CF8);
+            if (D_8009C558 != D_80075CF8) {
+                D_80075CF8 = D_80075CF8 + 1;
+            } else {
+                D_8009AC13 = 2;
             }
-            var_v0_2 = D_80075CF8 + 1;
-            goto block_13;
+            break;
+        case 5:
+            D_80071E38 = FieldCalcLinearStep(
+                D_80075E14, D_80075E18, D_8009C558, D_80075CF8);
+            D_80071E3C = FieldCalcLinearStep(
+                D_80075E1C, D_80075E20, D_8009C558, D_80075CF8);
+            if (D_8009C558 != D_80075CF8) {
+                D_80075CF8 = D_80075CF8 + 1;
+            } else {
+                D_8009AC13 = 2;
+            }
+            break;
+        case 6:
+            D_80071E38 = FieldCalcEaseInOut(
+                D_80075E14, D_80075E18, D_8009C558, D_80075CF8);
+            D_80071E3C = FieldCalcEaseInOut(
+                D_80075E1C, D_80075E20, D_8009C558, D_80075CF8);
+            if (D_8009C558 == D_80075CF8) {
+                D_8009AC13 = 2;
+            } else {
+                D_80075CF8 = D_80075CF8 + 1;
+            }
+            break;
+        case 0:
+        case 4:
+        case 7:
+        case 8:
+        case 9:
+            break;
         }
-    } else {
-    default:
     }
-#undef unksp12
+#undef SCREEN_X
+#undef SCREEN_Y
 }
 #endif
 
