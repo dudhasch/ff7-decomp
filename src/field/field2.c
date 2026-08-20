@@ -896,10 +896,34 @@ out:
 /* Walk the map's 32 trigger lines against one entity and raise the script
  * requests each is due. Entering a line's radius arms touch-on (and, if the
  * entity crossed the line this frame and faces it within +/-64, push and
- * isOnLine), leaving arms touch-off. Returns 1 if any line is in range. The
- * crossing test is the four-way sign ladder; the walking flag pointer is the
- * regalloc wall. Codegen pinned via MASPSX_OVERRIDE; the #else is verified C.
- */
+ * isOnLine), leaving arms touch-off.
+ *
+ * 91 rows -> 58. Three of the corrections are program, not codegen:
+ *   - the return value is only raised for a line whose `slipDisabled` byte is
+ *     1, not for every line in range. The target reads +0x16 for that test and
+ *     +0x0E (touch) for the touch-on test right after it; the old body read
+ *     +0x0E for both and set `hit` unconditionally.
+ *   - the four-way sign ladder is *not* negated. `across` is set when one of
+ *     the four terms holds, and the target's first branch (`bltz crossFrom` to
+ *     the second term, else `bltz crossTo` straight to the store) says so
+ *     plainly. Worth 5 rows on its own.
+ *   - the facing test needs an `s32` local: `(u8)(...) >= 0x80` inline gives
+ *     `sltiu`, through a local `slti`, which is what the target has.
+ * And the shape of the walk: `line` is a walking `FieldLine*` used for the
+ * SqrDistToLine call and for `pos.x1`, while every other field is reached as
+ * `lines[i].<field>`. That is not a scaffold -- it is what the target's two
+ * base registers say. Writing all the `pos` fields through `line` measures 88,
+ * all of them through `lines[i]` measures 79, and one pointer for everything
+ * (either spelling) 91-96.
+ *
+ * The 58 rows left are one fact with a long tail: the target's second base is
+ * `lines + 0x0E` and it keeps the counter `i` alive beside it, where gcc bases
+ * the giv at +0 and then eliminates `i` entirely, rewriting the exit test as a
+ * pointer compare against `lines + 0x300`. Every field offset therefore reads
+ * 0x0E high and the saved-register list is one short (the target uses s0..s8,
+ * this uses s0..s7). Nothing tried moves it: `&lines[i]` for the call, the
+ * flags through a separate `u8*`, indexing everything, walking everything.
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineCheck);
 #else
@@ -912,6 +936,7 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     s32 crossFrom;
     s32 crossTo;
     u8 hit;
+    s32 delta;
     s32 i;
 
     from = (s32*)0x1F800000;
@@ -924,48 +949,50 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     to[1] = dest->vy;
     to[2] = entity->PosZ >> 12;
     hit = 0;
-    for (i = 0; i < 32; i++) {
-        line = &lines[i];
-        if (line->isActive != 1) {
+    for (i = 0, line = lines; i < 32; i++, line++) {
+        if (lines[i].isActive != 1) {
             continue;
         }
-        line->isOnLine = 0;
+        lines[i].isOnLine = 0;
         sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
         if (sqrDist != -1 &&
             sqrDist < entity->SolidRange * entity->SolidRange) {
-            hit = 1;
-            if (line->touch == 0) {
-                line->requestTouchOnScript = 1;
+            if (lines[i].slipDisabled == 1) {
+                hit = 1;
             }
-            line->touch = 1;
+            if (lines[i].touch == 0) {
+                lines[i].requestTouchOnScript = 1;
+            }
+            lines[i].touch = 1;
             crossFrom =
-                (line->pos.x2 - line->pos.x1) * (from[1] - line->pos.y1) -
-                (from[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
-            crossTo = (line->pos.x2 - line->pos.x1) * (to[1] - line->pos.y1) -
-                      (to[0] - line->pos.x1) * (line->pos.y2 - line->pos.y1);
-            if (!((crossFrom >= 0 && crossTo < 0) ||
-                  (crossTo >= 0 && crossFrom < 0) ||
-                  (crossFrom > 0 && crossTo <= 0) ||
-                  (crossTo > 0 && crossFrom <= 0))) {
-                line->across = 1;
+                (lines[i].pos.x2 - line->pos.x1) * (from[1] - lines[i].pos.y1) -
+                (from[0] - line->pos.x1) * (lines[i].pos.y2 - lines[i].pos.y1);
+            crossTo =
+                (lines[i].pos.x2 - line->pos.x1) * (to[1] - lines[i].pos.y1) -
+                (to[0] - line->pos.x1) * (lines[i].pos.y2 - lines[i].pos.y1);
+            if ((crossFrom >= 0 && crossTo < 0) ||
+                (crossTo >= 0 && crossFrom < 0) ||
+                (crossFrom > 0 && crossTo <= 0) ||
+                (crossTo > 0 && crossFrom <= 0)) {
+                lines[i].across = 1;
             }
             if (nearest[0] != from[0] || nearest[1] != from[1]) {
-                line->proximityAngle = FieldEntityDirByVec(
+                lines[i].proximityAngle = FieldEntityDirByVec(
                     (VECTOR*)from, (VECTOR*)nearest, &sqrDist);
-                if ((u8)(line->proximityAngle - entity->MoveDir + 0x40) >=
-                    0x80) {
+                delta = (u8)(lines[i].proximityAngle - entity->MoveDir + 0x40);
+                if (delta >= 0x80) {
                     continue;
                 }
             } else {
                 continue;
             }
-            line->requestPushScript = 1;
-            line->isOnLine = 1;
+            lines[i].requestPushScript = 1;
+            lines[i].isOnLine = 1;
         } else {
-            if (line->touch == 1) {
-                line->requestTouchOffScript = 1;
+            if (lines[i].touch == 1) {
+                lines[i].requestTouchOffScript = 1;
             }
-            line->touch = 0;
+            lines[i].touch = 0;
         }
     }
     return hit;
