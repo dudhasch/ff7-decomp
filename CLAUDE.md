@@ -511,6 +511,33 @@ a near-miss, in rough order of frequency:
   twice inside an `if` in its third loop; taking `flip = &D_800DF114;` before
   the loop and writing `*flip ^= 1;` hoists the address the way the target has
   it, and is worth 19 rows.
+* **The counter-merging rule scales to a whole function, and the partition is
+  outer-versus-inner, not adjacent-versus-distant.** `FieldInitDefaultValues`
+  in `src/field/field4.c` runs eleven loops over three hundred lines, and the
+  target puts *every* outer and sequential loop on one variable (`$a3`) and
+  *both* inner loops -- a script-bank walk and a palette clear, far apart in
+  the source and unrelated in purpose -- on a second (`$a2`). Writing a third
+  counter for the one loop that reads as genuinely different (the bank walk's
+  outer index) split the reference count three ways and cost **34 rows**, all
+  of it register renaming that reads as allocator noise. When a function's diff
+  is dozens of rows of `a3` against `a2` on loop counters and nothing else,
+  count the target's counter registers before looking at anything: two
+  registers means two variables, however many loops there are.
+* **`*p = 0xFF` gives `li -1` through an `s8*` and `li 0xff` through a `u8*`.**
+  The constant is narrowed to QImode against the store, and an HImode/QImode
+  `const_int` is sign-extended, so `0xFF` becomes -1 and gcc materialises it
+  with `addiu <r>,zero,-1` rather than `ori <r>,zero,0xff`. The stored byte is
+  identical and the row is a real difference. Same trap as the `0xC600`
+  narrowing bullet above, one width down.
+* **m2c's temporaries are a *readout* of gcc's grouping, not a source-level
+  fact, and writing them back as locals makes things worse.** A run of stores
+  that share one loaded pointer appears in m2c output as `temp_v0->a = 0;
+  temp_v0->b = 0; ...` with the singletons spelled inline, which looks exactly
+  like a source structure worth reproducing. Spelling those groups out as
+  explicit `T* e = &arr[i];` locals -- at precisely the boundaries the target
+  has -- took `FieldInitDefaultValues` from 82 rows to **126**. The plain
+  `arr[i].member` spelling at every store is what the original wrote; the
+  grouping is decided after the front end and a local cannot pin it.
 * **One pointer per copy loop, even when the loops are far apart.** Reusing a
   `u32* s` / `u32* d` pair for two unrelated copies in the same function
   stretches both live ranges across everything between them, and the allocator

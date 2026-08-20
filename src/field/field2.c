@@ -1993,7 +1993,6 @@ u8 FieldGetNextRandomU8(void) {
 
 extern s8 D_800716D0;
 extern u16 D_8007173C;
-extern /*?*/ s32 D_80074F14;
 extern s16 D_8007E774;
 extern s8 D_8007EBC8;
 extern s16 D_8009ABF6;
@@ -2002,147 +2001,163 @@ extern u8 D_8009C6D8;
 
 /* Check for a random or scripted battle this frame: roll the encounter, pick
  * the battle from the field's encounter table, and kick off the transition if
+ * one triggers.
+ *
+ * 83 rows / 4 inserted. The C is semantically right and the structure is the
+ * target's; what is left is three groups, all measured:
+ *
+ *  - The roll's mask. The target emits `andi <t>,a0,0xff` on `roll` at every
+ *    one of the four special-encounter compares; we emit it at compares 2 and
+ *    3 (where cse shares one temp) and drop it at 1 and 4, because `roll`
+ *    comes from `srl a0,v0,2` of a zero-extended byte and combine's
+ *    `nonzero_bits` therefore proves the top 26 bits clear.  Four rows.
+ *    Rejected, all measured identical: `s32 roll` (B), an explicit `u8 limit`
+ *    local assigned from the sum before each compare (E), and writing the
+ *    masks out as `(roll & 0xFF) < (u8)sum` (F).  Getting the mask back needs
+ *    a spelling in which gcc cannot see the shift, and none of `u8`/`s32`/
+ *    explicit-mask is one.
+ *
+ *  - The third callee-saved register.  The target holds `&D_8009ABF6` in `s2`
+ *    from the `D_8009ABF6 != D_8007E774` test onward (`lui s2 / addiu s2 /
+ *    lh v1,0(s2)`, then `sh v0,0(s2)` in the second loop); we emit the
+ *    two-instruction `%hi`/`%lo` form at the load and a fresh `$at` expansion
+ *    at the store, so the frame is 0x20 rather than 0x28 and `s2` is never
+ *    saved.  cse follows the `beq` into the reroll loop in both builds and the
+ *    label structure is identical, so the reason it relates the two references
+ *    there and not here is not yet understood.  Six rows plus the four frame
+ *    rows.
+ *
+ *  - `i` and `p` swap `a0`/`a1` in both loops, and the fallback load is read
+ *    through `p` (`lhu v1,0xc(a0)`) rather than through `enc` (`lhu v0,
+ *    0xc(s1)`).  Rejected: declaration order (`s32 i` before `u16* p`, J/K,
+ *    inert here despite the same-type/same-live-range rule), `p` assigned as
+ *    its own statement before the fallback store (G) and inside the `for`
+ *    init after it (I) - identical.
+ *
+ * What did move it, and is in the body above:
+ *  - `((u32)D_8007173C * D_80062F19) >> 12` rather than a signed product:
+ *    gives the target's `srl`/`sltu` instead of `sra`/`slt`.
+ *  - Splitting the special-encounter running total into `sum` / `total` /
+ *    `rate` so the target's `s0` (running sum) and `v1` (the special[2]
+ *    total, which special[3] adds to) are two variables rather than one.
+ *  - Dropping a redundant `i = 0;` written before `FieldGetNextRandomU8()`:
+ *    it made `i` live across the call, so `i` took a callee-saved register
+ *    and pushed `enc` from `s1` to `s2`, which renamed roughly twenty rows.
+ *    This is the same lever as the `KawaiFadeModelColor` note in CLAUDE.md,
+ *    run in the other direction - there a dead store before a call is what
+ *    *buys* the callee-saved register.
+ */
+/* Check for a random or scripted battle this frame: roll the encounter, pick
+ * the battle from the field's encounter table, and kick off the transition if
  * one triggers. m2c seed; residual is the encounter-table regalloc and the
  * divide scheduling. Pinned pending a permuter pass. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
 #else
 void FieldBattleCheck(void) {
-    s16 temp_v0;
-    s16 var_v0;
-    s32 temp_s0;
-    s32 temp_v1;
-    s32 var_a0;
-    s32 var_a0_2;
-    s32 var_a1;
-    s32 var_a1_2;
-    s32 var_s0;
-    s32 var_s0_2;
-    s32 var_s0_3;
-    s32 var_s1;
-    s32 var_v0_2;
-    s32 var_v0_3;
-    u16 temp_a0;
-    u16 temp_a1;
-    u16 temp_v1_2;
-    u16 temp_v1_3;
-    u32 temp_a0_2;
-    u32 temp_a2;
-    u32 temp_a2_2;
-    u32 temp_a2_3;
+    FieldEncounterTable* enc;
+    u16* p;
+    s32 i;
+    s32 sum;
+    s32 rate;
+    s32 total;
+    s32 formation;
+    u8 roll;
+    u16 control;
+    u16 slot;
 
     if (D_8009AC30 == 0) {
-        var_s1 = g_FieldEncounters;
+        enc = (FieldEncounterTable*)g_FieldEncounters;
     } else {
-        var_s1 = g_FieldEncounters + 0x18;
+        enc = (FieldEncounterTable*)(g_FieldEncounters + 0x18);
     }
     D_8009C6D8 += 0x20;
     if (D_8009C6D8 == 0) {
         func_800262D8();
-        Savemap.memory_bank_4[6].unk0 = (u8)(Savemap.memory_bank_4[6].unk0 + 1);
-        if ((Savemap.memory_bank_4[6].unk0 == 0) &&
-            (Savemap.memory_bank_4[6].unk1 != 0xFF)) {
-            Savemap.memory_bank_4[6].unk1 =
-                (u8)(Savemap.memory_bank_4[6].unk1 + 1);
+        Savemap.memory_bank_4[6]++;
+        if (Savemap.memory_bank_4[6] == 0 && Savemap.memory_bank_4[7] != 0xFF) {
+            Savemap.memory_bank_4[7]++;
         }
-        temp_a0 = var_s1->unk0;
-        if ((temp_a0 & 1) && (g_FieldMovieStreamActive == 0) &&
-            (D_8009AC2F == 0)) {
-            D_8007173C += (s32) * (&D_80074F14 + (g_PlayerModelId * 0x84)) /
-                          (s32)(temp_a0 >> 8);
-            if ((u32)(FieldGetRandomU8FromList() & 0xFF) <
-                (u32)(D_80062F1B & 0x7F)) {
+        control = enc->control;
+        if ((control & 1) && g_FieldMovieStreamActive == 0 && D_8009AC2F == 0) {
+            D_8007173C += (s32)g_FieldEntity[g_PlayerModelId].MoveSpeed /
+                          (s32)(control >> 8);
+            if (FieldGetRandomU8FromList() < (D_80062F1B & 0x7F)) {
                 D_800716D0 = 4;
             } else {
                 D_800716D0 = 0;
             }
-            if ((u32)(FieldGetRandomU8FromList() & 0xFF) <
-                (u32)((u32)(D_8007173C * D_80062F19) >> 0xC)) {
+            if (FieldGetRandomU8FromList() < ((u32)D_8007173C * D_80062F19) >>
+                12) {
                 StopFieldMapPreload();
                 D_8009ABF5 = 2;
                 D_8007EBC8 = 1;
-                temp_a0_2 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
+                roll = FieldGetNextRandomU8() >> 2;
                 if (!(D_80062F1B & 0x80)) {
-                    var_s0 = (s32)(var_s1->unkE << 0x10) >> 0x1A;
+                    sum = (s32)(enc->special[0] << 16) >> 26;
                 } else {
-                    var_s0 = (s32)(var_s1->unkE << 0x10) >> 0x1B;
+                    sum = (s32)(enc->special[0] << 16) >> 27;
                 }
-                if ((u32)(temp_a0_2 & 0xFF) < (u32)(var_s0 & 0xFF)) {
+                if ((u8)roll < (u8)sum) {
                     D_800716D0 = 0;
-                    var_v0 = var_s1->unkE & 0x3FF;
-                    goto block_31;
+                    formation = enc->special[0] & 0x3FF;
+                    goto found;
                 }
                 if (!(D_80062F1B & 0x80)) {
-                    var_v0_2 = (s32)(var_s1->unk10 << 0x10) >> 0x1A;
+                    rate = (s32)(enc->special[1] << 16) >> 26;
                 } else {
-                    var_v0_2 = (s32)(var_s1->unk10 << 0x10) >> 0x1B;
+                    rate = (s32)(enc->special[1] << 16) >> 27;
                 }
-                temp_s0 = var_s0 + var_v0_2;
-                temp_a2 = temp_a0_2 & 0xFF;
-                if (temp_a2 < (u32)(temp_s0 & 0xFF)) {
+                sum += rate;
+                if ((u8)roll < (u8)sum) {
                     D_800716D0 = 0;
-                    var_v0 = var_s1->unk10 & 0x3FF;
-                    goto block_31;
+                    formation = enc->special[1] & 0x3FF;
+                    goto found;
                 }
-                temp_a1 = var_s1->unk12;
-                temp_v1 = temp_s0 + ((s32)(temp_a1 << 0x10) >> 0x1A);
-                if (temp_a2 < (u32)(temp_v1 & 0xFF)) {
-                    D_8009ABF6 = temp_a1 & 0x3FF;
+                slot = enc->special[2];
+                total = sum + ((s32)(slot << 16) >> 26);
+                if ((u8)roll < (u8)total) {
+                    D_8009ABF6 = slot & 0x3FF;
                     return;
                 }
                 if (!(D_80062F1B & 0x80)) {
-                    var_v0_3 = (s32)(var_s1->unk14 << 0x10) >> 0x1A;
+                    rate = (s32)(enc->special[3] << 16) >> 26;
                 } else {
-                    var_v0_3 = (s32)(var_s1->unk14 << 0x10) >> 0x1B;
+                    rate = (s32)(enc->special[3] << 16) >> 27;
                 }
-                if ((u32)(temp_a0_2 & 0xFF) <
-                    (u32)((temp_v1 + var_v0_3) & 0xFF)) {
-                    var_v0 = var_s1->unk14 & 0x3FF;
-                block_31:
-                    D_8009ABF6 = var_v0;
+                sum = total + rate;
+                if ((u8)roll < (u8)sum) {
+                    formation = enc->special[3] & 0x3FF;
+                found:
+                    D_8009ABF6 = formation;
                     return;
                 }
-                var_s0_2 = 0;
-                var_a0 = 0;
-                temp_a2_2 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
-                var_a1 = var_s1;
-                D_8009ABF6 = var_s1->unkC & 0x3FF;
-            loop_34:
-                temp_v1_2 = var_a1->unk2;
-                var_s0_2 += (s32)(temp_v1_2 << 0x10) >> 0x1A;
-                if (temp_a2_2 >= (u32)(var_s0_2 & 0xFF)) {
-                    var_a0 += 1;
-                    var_a1 += 2;
-                    if (var_a0 < 5) {
-                        goto loop_34;
+                sum = 0;
+                roll = FieldGetNextRandomU8() >> 2;
+                D_8009ABF6 = enc->fallback & 0x3FF;
+                for (i = 0, p = (u16*)enc; i < 5; i++, p++) {
+                    slot = p[1];
+                    sum += (s32)(slot << 16) >> 26;
+                    if ((u8)roll < (u8)sum) {
+                        D_8009ABF6 = slot & 0x3FF;
+                        break;
                     }
-                } else {
-                    D_8009ABF6 = temp_v1_2 & 0x3FF;
                 }
                 if (D_8009ABF6 != D_8007E774) {
                     D_8007E774 = D_8009ABF6;
                     return;
                 }
-                var_s0_3 = 0;
-                var_a0_2 = 0;
-                temp_a2_3 = (u32)(FieldGetNextRandomU8() & 0xFF) >> 2;
-                var_a1_2 = var_s1;
-                D_8009ABF6 = var_s1->unkC & 0x3FF;
-            loop_40:
-                temp_v1_3 = var_a1_2->unk2;
-                var_s0_3 += (s32)(temp_v1_3 << 0x10) >> 0x1A;
-                var_a0_2 += 1;
-                if (temp_a2_3 >= (u32)(var_s0_3 & 0xFF)) {
-                    var_a1_2 += 2;
-                    if (var_a0_2 >= 5) {
-
-                    } else {
-                        goto loop_40;
+                sum = 0;
+                roll = FieldGetNextRandomU8() >> 2;
+                D_8009ABF6 = enc->fallback & 0x3FF;
+                for (i = 0, p = (u16*)enc; i < 5; i++, p++) {
+                    slot = p[1];
+                    sum += (s32)(slot << 16) >> 26;
+                    if ((u8)roll < (u8)sum) {
+                        D_8009ABF6 = slot & 0x3FF;
+                        D_8007E774 = slot & 0x3FF;
+                        break;
                     }
-                } else {
-                    temp_v0 = temp_v1_3 & 0x3FF;
-                    D_8009ABF6 = temp_v0;
-                    D_8007E774 = temp_v0;
                 }
             }
         }

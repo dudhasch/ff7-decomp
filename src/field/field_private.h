@@ -331,6 +331,20 @@ extern s16 D_800E42EE[0x40][12];
 extern s16 g_CurrentFieldIndex;
 extern s16 g_PlayerModelId;
 extern s32 D_8007E770;
+/* One field map's encounter table: a control word, five ordinary formations
+ * and four "special" ones. Each formation word packs a cumulative six-bit
+ * rate in its top bits and the formation id in the low ten. Two of these sit
+ * back to back and BTLTB switches between them, which is why the second is
+ * reached as +0x18. */
+typedef struct {
+    /* 0x00 */ u16 control; /* bit 0 enables encounters, high byte is the step
+                               divisor */
+    /* 0x02 */ u16 encounters[5];
+    /* 0x0C */ u16 fallback;
+    /* 0x0E */ u16 special[4];
+    /* 0x16 */ u16 pad;
+} FieldEncounterTable; /* size:0x18 */
+
 extern s32 g_FieldEncounters;
 extern s32 g_FieldTriggers;
 extern s32 g_WmPreSector;

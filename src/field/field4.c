@@ -1233,299 +1233,259 @@ void FieldEventUpdate(s32 arg0) {
     UpdateFieldExitArrows(arg0);
 }
 
-extern /*?*/ s32 D_8007078C;
-extern s16 D_800716DC;
-extern /*?*/ s32 D_80071748;
-extern /*?*/ s32 D_80071A88;
-extern s8 D_80075F23;
-extern /*?*/ s32 D_8007E7AC;
-extern /*?*/ s32 D_8007E7AE;
-extern /*?*/ s32 D_8007E7B0;
-extern /*?*/ s32 D_8007E7B2;
-extern /*?*/ s32 D_8007E7B4;
-extern /*?*/ s32 D_8007E7B6;
-extern /*?*/ s32 D_8007E7B8;
-extern /*?*/ s32 D_8007E7B9;
-extern /*?*/ s32 D_8007E7BA;
-extern /*?*/ s32 D_8007E7BB;
-extern /*?*/ s32 D_8007E7BC;
-extern /*?*/ s32 D_8007E7BD;
-extern /*?*/ s32 D_8007E7BE;
-extern /*?*/ s32 D_8007E7BF;
-extern /*?*/ s32 D_8007E7C2;
-extern /*?*/ s32 D_800833F8;
+extern u8 D_8007078C[];      // per-entity, reset to 0xFF
+extern s16 D_800716DC[];     // per-entity
+extern s16 D_80071748[][8];  // per-entity, one halfword per script bank
+extern u8 D_80071A88[][8];   // per-entity, one byte per script bank
+extern s8 D_80075F23;        // top of a 0x100-byte block cleared downward
+extern FieldLine D_8007E7AC; // 32 interaction lines
+extern u8 D_8007EB98[];      // per-entity, reset to 0xFF
+extern u8 D_80081D90[];      // per-entity
+extern u8 D_800833F8[][8];   // per-entity, one byte per script bank
 extern s16 D_80095D84;
-extern /*?*/ s32 D_8009A1C4;
-extern s8 D_8009AD38;
+extern u8 D_8009A1C4[]; // per-entity, reset to 7
+extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
 
 /* Zero and default-initialise the whole field runtime state: the entity table,
- * the per-model flags, the script state, and the various counters. m2c seed
- * (three locals m2c left untyped -- see the note in the body). Residual is
- * the wide store scheduling.
- * Pinned pending a permuter pass. */
+ * the per-model flags, the script state, and the various counters.
+ *
+ * 82 rows, and -- the reason this is a good permuter target rather than a
+ * codegen problem -- the instruction *count* is exact: 18 insertions against
+ * 18 deletions, all of them one-slot shifts. Every remaining row is naming or
+ * placement.
+ *
+ * The three symbols m2c could not infer are settled: D_8009C6E0 is
+ * g_FieldState, D_8009C6DC is g_FieldScripts and D_8009C544 is g_FieldModels,
+ * all three pointer globals that the target re-reads before nearly every
+ * store. Writing them inline, as here, is what reproduces that; a cached local
+ * gives one load for the whole function.
+ *
+ * What took it from unmeasurable to 82:
+ *   - Two loop counters for the whole function, not one per loop: the target
+ *     puts every *outer* and every sequential loop on one variable ($a3) and
+ *     both *inner* loops -- the script-bank walk and the palette clear -- on a
+ *     second ($a2). Writing a third counter for the bank loop is 34 rows, all
+ *     of them register renaming, and it reads as noise. This is CLAUDE.md's
+ *     counter-merging idiom applied across a whole function rather than a run
+ *     of adjacent loops.
+ *   - D_8009AD38 is `u8`, not `s8`. `*p = 0xFF` through an `s8*` narrows the
+ *     constant to QImode and gcc materialises it as `li v1,-1`; the target has
+ *     `li v1,0xff`. Same stored byte, different instruction.
+ *   - The FieldLine array is reached as byte offsets from D_8007E7AC, which is
+ *     what gives the target's `lui at/addiu at/addu at,at,v1` per field. The
+ *     interior labels the .s names (D_8007E7BD and friends) have no
+ *     definition, so they cannot be declared -- checkfn resolves
+ *     `%lo(D_8007E7AC+0x11)` against `%lo(D_8007E7BD)` as an alias, and the
+ *     link works only in the offset form.
+ *
+ * What is left is one phenomenon, in nine places: a group of stores that share
+ * one loaded pointer is attached in the target to the *first* statement of the
+ * group and here to the *last*. The preamble wants
+ * {0x2,0x26,0x32,0x2e,0x2a,0x2c,0x30,0x28} on the pointer loaded for 0x2 and
+ * gets it on the one loaded for 0x30; the entity loop wants
+ * {0x36,0x66,0xc,0x10,0x14,0x72,0x74} on 0x36's and gets it on 0x38's; the
+ * same shift recurs at 0x60, 0x37, and the Kawai fields at 0/2/4. The number
+ * of loads is identical either way, which is why the instruction count is
+ * exact.
+ *
+ * Measured and rejected:
+ *   - m2c's temps written out as explicit `FieldEntity*` locals, exactly at
+ *     the group boundaries the target has: 126 rows. The plain
+ *     `g_FieldModels[i].member` spelling is right and the grouping is not
+ *     something a local can pin.
+ *   - the palette clear as `D_80095DE0[i * 0x20 + j * 2]`, to stop
+ *     `check_dbra_loop` reversing the outer counter: 85. As a walked `u8* pal`
+ *     with `pal += 0x20`: 83. As `&D_80095DE0[i * 0x20]` hoisted to the inner
+ *     preheader (below): 82, and the outer loop is still reversed -- the
+ *     target counts up with `slti v0,a3,0x40`, we count down with `bgez`.
+ *   - the FieldLine loop indexed `i * 0x18` instead of a separate `off` biv:
+ *     146 rows. The scaled subscript folds the symbol into the address
+ *     register and the whole `$at` form is lost -- CLAUDE.md's
+ *     scaled-subscript rule, seen from the wrong side.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
 #else
 void FieldInitDefaultValues(void) {
-    /* m2c could not infer these three; u8* is a placeholder chosen so the
-     * unit parses, not a claim about the real type. The strides the body
-     * walks them by (8, 8, 0x10) and the byte store through var_t0 are
-     * consistent with it. Settle the real types when this body is worked. */
-    u8* var_t0;
-    u8* var_t1;
-    u8* var_t2;
-    s16* var_v1;
-    s32 var_a1;
-    s32 var_a2;
-    s32 var_a2_2;
-    s32 var_a3;
-    s32 var_a3_2;
-    s32 var_a3_3;
-    s32 var_a3_4;
-    s32 var_a3_5;
-    s32 var_a3_6;
-    s32 var_a3_7;
-    s32 var_a3_8;
-    s32 var_a3_9;
-    s32 var_v0;
-    s32 var_v0_2;
-    s32 var_v1_3;
-    s8* temp_a0;
-    s8* temp_v1;
-    s8* var_a0;
-    s8* var_v0_4;
-    u8(*var_t3)[8];
-    u8* temp_a1;
-    u8* var_v0_3;
-    u8* var_v1_2;
-    void* temp_v0;
-    void* temp_v0_2;
-    void* temp_v0_3;
-    void* temp_v0_4;
-    void* temp_v0_5;
-    void* temp_v0_6;
-    void* temp_v1_2;
-    void* temp_v1_3;
-    void* temp_v1_4;
+    s32 i;
+    s32 j;
+    s8* p;
+    u8* q;
+    s16* cell;
+    s32 off;
 
-    D_8009C6E0->unk1 = 0;
-    D_8009C6E0->unk2 = 0;
-    D_8009C6E0->unk26 = 0;
-    D_8009C6E0->unk32 = 0;
-    D_8009C6E0->unk2E = 1;
-    D_8009C6E0->unk2A = 0;
-    D_8009C6E0->unk2C = 0;
-    D_8009C6E0->unk30 = 2;
+    g_FieldState->eventCmd = 0;
+    g_FieldState->eventCmdParam = 0;
+    g_FieldState->movieCommandState = 0;
+    g_FieldState->characterLock = 0;
+    g_FieldState->walkAnimId = 1;
+    g_FieldState->pcModelId = 0;
+    g_FieldState->idleAnimId = 0;
+    g_FieldState->runAnimId = 2;
     D_80081DC4 = 0;
-    D_8009C6E0->unk28 = (s16)D_8009C6DC->unk3;
-    D_8009C6E0->unk33 = 0;
-    D_8009C6E0->unk34 = 0;
-    D_8009C6E0->unk35 = 0;
-    D_8009C6E0->unk3B = 0;
-    D_8009C6E0->unk36 = 0;
-    D_8009C6E0->unk37 = 0;
-    D_8009C6E0->unk3D = 0;
-    D_8009C6E0->unk48 = 0;
-    D_8009C6E0->unk44 = 0;
-    D_8009C6E0->unk40 = 0;
-    D_8009C6E0->unk3E = 0;
-    D_8009C6E0->unk3C = 0;
-    D_8009C6E0->unk12 = 0;
-    D_8009C6E0->unk13 = 0;
-    D_8009C6E0->unk14 = 0;
-    D_8009C6E0->unk8A = 0;
-    D_8009C6E0->unk18 = 0;
-    D_8009C6E0->unk1A = 0;
-    D_8009C6E0->unk98 = 0;
-    D_8009C6E0->unk8B = 0;
-    D_8009C6E0->unk99 = 0;
-    D_8009C6E0->unk3A = 0;
-    var_a3 = 0xFF;
-    D_8009C6E0->unk8E = 0;
-    D_8009C6E0->unk9C = 0;
-    D_8009C6E0->unk94 = 0;
-    D_8009C6E0->unkA2 = 0;
-    D_8009C6E0->unk96 = 0;
-    D_8009C6E0->unkA4 = 0;
-    D_8009C6E0->unk1D = 0;
-    var_a0 = &D_80075F23;
-    D_8009C6E0->unk10 = (u16)D_8009C6DC->unk8;
+    g_FieldState->modelCount = g_FieldScripts->numModels;
+    g_FieldState->suspendWalkAndAnim = 0;
+    g_FieldState->menuDisabled = 0;
+    g_FieldState->unk35 = 0;
+    g_FieldState->battlesDisabled = 0;
+    g_FieldState->mapJumpDisabled = 0;
+    g_FieldState->scrloSet = 0;
+    g_FieldState->battleMode1 = 0;
+    g_FieldState->nextFieldMusic = 0;
+    g_FieldState->nextBattleMusic = 0;
+    g_FieldState->unk40 = 0;
+    g_FieldState->battleMode2 = 0;
+    g_FieldState->encounterTableId = 0;
+    g_FieldState->viewOffsetNumSteps = 0;
+    g_FieldState->viewOffsetCurrentStep = 0;
+    g_FieldState->viewOffsetMode = 0;
+    g_FieldState->shakeX.enabled = 0;
+    g_FieldState->viewOffsetStart = 0;
+    g_FieldState->viewOffsetTarget = 0;
+    g_FieldState->shakeY.enabled = 0;
+    g_FieldState->shakeX.segmentActive = 0;
+    g_FieldState->shakeY.segmentActive = 0;
+    g_FieldState->backgroundMovieEnabled = 0;
+    g_FieldState->shakeX.amplitude = 0;
+    g_FieldState->shakeY.amplitude = 0;
+    g_FieldState->shakeX.numStepsPerSegment = 0;
+    g_FieldState->shakeY.numStepsPerSegment = 0;
+    g_FieldState->shakeX.currentStep = 0;
+    g_FieldState->shakeY.currentStep = 0;
+    g_FieldState->cameraScrollMode = 0;
+    g_FieldState->currentFieldScale = g_FieldScripts->scale;
+
+    p = &D_80075F23;
+    i = 0xFF;
     do {
-        *var_a0 = 0;
-        var_a3 -= 1;
-        var_a0 -= 1;
-    } while (var_a3 >= 0);
-    var_a3_2 = 0;
-    do {
-        var_a2 = 0;
-        if ((s32)D_8009C6DC->unk2 > 0) {
-            var_t3 = SavedScriptIds;
-            var_t2 = &D_80071A88;
-            var_t1 = &D_800833F8;
-            var_t0 = &D_80071748;
-            do {
-                temp_a1 = &(*var_t3)[var_a3_2];
-                var_t3 += 8;
-                temp_a0 = var_t2 + var_a3_2;
-                var_t2 += 8;
-                temp_v1 = var_t1 + var_a3_2;
-                var_t1 += 8;
-                *((var_a3_2 * 2) + var_t0) = 0;
-                *temp_v1 = 0;
-                *temp_a0 = 0xFF;
-                *temp_a1 = 0;
-                var_a2 += 1;
-                var_t0 += 0x10;
-            } while (var_a2 < (s32)D_8009C6DC->unk2);
+        *p = 0;
+        i--;
+        p--;
+    } while (i >= 0);
+
+    for (i = 0; i < 8; i++) {
+        for (j = 0; j < g_FieldScripts->numEntities; j++) {
+            D_80071748[j][i] = 0;
+            D_800833F8[j][i] = 0;
+            D_80071A88[j][i] = 0xFF;
+            SavedScriptIds[j][i] = 0;
         }
-        var_a3_2 += 1;
-    } while (var_a3_2 < 8);
-    var_a3_3 = 0;
-    if ((s32)D_8009C6DC->unk2 > 0) {
-        var_v1 = &D_800716DC;
-        do {
-            *(&D_8009A1C4 + var_a3_3) = 7;
-            *(&D_8007EB98 + var_a3_3) = 0xFF;
-            *var_v1 = 0;
-            *(&D_80081D90 + var_a3_3) = 0;
-            *(&D_8007078C + var_a3_3) = 0xFF;
-            g_FieldScriptDebugEntities[var_a3_3] = 0;
-            var_a3_3 += 1;
-            var_v1 += 2;
-        } while (var_a3_3 < (s32)D_8009C6DC->unk2);
     }
-    var_a3_4 = 0;
-    if ((s32)D_8009C6DC->unk3 > 0) {
-        var_a1 = 0;
-        do {
-            temp_v0 = var_a1 + D_8009C544;
-            temp_v0->unk36 = 0;
-            temp_v0->unk66 = 0;
-            temp_v0->unkC = 0;
-            temp_v0->unk10 = 0;
-            temp_v0->unk14 = 0;
-            temp_v0->unk72 = 0;
-            temp_v0->unk74 = 0;
-            (var_a1 + D_8009C544)->unk38 = 0;
-            (var_a1 + D_8009C544)->unk3B = 0;
-            (var_a1 + D_8009C544)->unk39 = 0;
-            (var_a1 + D_8009C544)->unk3A = 0;
-            temp_v0_2 = var_a1 + D_8009C544;
-            temp_v0_2->unk56 = 0;
-            temp_v0_2->unk3C = 0;
-            temp_v0_2->unk3E = 0;
-            temp_v0_2->unk40 = 0;
-            temp_v0_2->unk46 = 0;
-            temp_v0_2->unk4C = 0;
-            temp_v0_2->unk42 = 0;
-            temp_v0_2->unk48 = 0;
-            temp_v0_2->unk4E = 0;
-            temp_v0_2->unk44 = 0;
-            temp_v0_2->unk4A = 0;
-            temp_v0_2->unk50 = 0;
-            temp_v0_2->unk52 = 0;
-            temp_v0_2->unk54 = 0;
-            (var_a1 + D_8009C544)->unk5E = 0;
-            temp_v0_3 = var_a1 + D_8009C544;
-            temp_v0_3->unk60 = 0x10;
-            temp_v0_3->unk5C = 0;
-            temp_v0_3->unk78 = 0;
-            temp_v0_3->unk7C = 0;
-            temp_v0_3->unk80 = 0;
-            temp_v0_3->unk62 = 0;
-            temp_v0_3->unk64 = 0;
-            temp_v0_4 = var_a1 + D_8009C544;
-            temp_v0_4->unk5D = 0;
-            temp_v1_2 = var_a1 + D_8009C544;
-            temp_v0_4->unk70 = (s16)((s16)D_8009C6E0->unk10 * 2);
-            temp_v1_2->unk5A = 0;
-            temp_v1_2->unk68 = 0;
-            temp_v1_2->unk6A = 0;
-            (var_a1 + D_8009C544)->unk58 = 0;
-            (var_a1 + D_8009C544)->unk59 = 0;
-            (var_a1 + D_8009C544)->unk5B = 0;
-            (var_a1 + D_8009C544)->unk37 = 0;
-            var_v0 = (s16)D_8009C6E0->unk10 * 0x1E;
-            temp_v1_3 = var_a1 + D_8009C544;
-            if (var_v0 < 0) {
-                var_v0 += 0x1FF;
-            }
-            temp_v1_3->unk6C = (s16)(var_v0 >> 9);
-            var_v0_2 = (s16)D_8009C6E0->unk10 * 0x50;
-            if (var_v0_2 < 0) {
-                var_v0_2 += 0x1FF;
-            }
-            temp_v1_3->unk6E = (s16)(var_v0_2 >> 9);
-            D_8008325C[var_a3_4] = 0;
-            D_800756E8[var_a3_4] = 0;
-            D_8009D828[var_a3_4] = 0x10;
-            D_80082248[var_a3_4] = 0x10;
-            temp_v1_4 = var_a1 + D_8009C544;
-            temp_v1_4->unk8 = 0;
-            temp_v1_4->unk0 = 0;
-            temp_v1_4->unk2 = 0;
-            temp_v1_4->unk4 = 0;
-            (var_a1 + D_8009C544)->unk9 = 0;
-            var_a3_4 += 1;
-            var_a1 += 0x84;
-        } while (var_a3_4 < (s32)D_8009C6DC->unk3);
+    for (i = 0; i < g_FieldScripts->numEntities; i++) {
+        D_8009A1C4[i] = 7;
+        D_8007EB98[i] = 0xFF;
+        D_800716DC[i] = 0;
+        D_80081D90[i] = 0;
+        D_8007078C[i] = 0xFF;
+        g_FieldScriptDebugEntities[i] = 0;
     }
-    var_a3_5 = 0;
+    for (i = 0; i < g_FieldScripts->numModels; i++) {
+        g_FieldModels[i].MoveDir = 0;
+        g_FieldModels[i].charId = 0;
+        g_FieldModels[i].PosX = 0;
+        g_FieldModels[i].PosY = 0;
+        g_FieldModels[i].PosZ = 0;
+        g_FieldModels[i].PosI = 0;
+        g_FieldModels[i].MoveEndI = 0;
+        g_FieldModels[i].Dir = 0;
+        g_FieldModels[i].TurnType = 0;
+        g_FieldModels[i].TurnSteps = 0;
+        g_FieldModels[i].TurnStep = 0;
+        g_FieldModels[i].OfsType = 0;
+        g_FieldModels[i].TurnStart = 0;
+        g_FieldModels[i].TurnEnd = 0;
+        g_FieldModels[i].OffsetX = 0;
+        g_FieldModels[i].OffsetY = 0;
+        g_FieldModels[i].OffsetZ = 0;
+        g_FieldModels[i].OffsetStartX = 0;
+        g_FieldModels[i].OffsetStartY = 0;
+        g_FieldModels[i].OffsetStartZ = 0;
+        g_FieldModels[i].OffsetEndX = 0;
+        g_FieldModels[i].OffsetEndY = 0;
+        g_FieldModels[i].OffsetEndZ = 0;
+        g_FieldModels[i].OffsetSteps = 0;
+        g_FieldModels[i].OffsetStep = 0;
+        g_FieldModels[i].activeAnimId = 0;
+        g_FieldModels[i].animSpeed = 0x10;
+        g_FieldModels[i].visible = 0;
+        g_FieldModels[i].MoveEndX = 0;
+        g_FieldModels[i].MoveEndY = 0;
+        g_FieldModels[i].MoveEndZ = 0;
+        g_FieldModels[i].animCurrentFrame = 0;
+        g_FieldModels[i].animLastFrame = 0;
+        g_FieldModels[i].scriptedMoveMode = 0;
+        g_FieldModels[i].MoveSpeed = g_FieldState->currentFieldScale * 2;
+        g_FieldModels[i].requestTalkScript = 0;
+        g_FieldModels[i].ActionArg = 0;
+        g_FieldModels[i].ActionState = 0;
+        g_FieldModels[i].requestPushScript = 0;
+        g_FieldModels[i].SolidOff = 0;
+        g_FieldModels[i].TalkOff = 0;
+        g_FieldModels[i].DirLock = 0;
+        g_FieldModels[i].SolidRange =
+            g_FieldState->currentFieldScale * 0x1E / 512;
+        g_FieldModels[i].TalkRange =
+            g_FieldState->currentFieldScale * 0x50 / 512;
+        D_8008325C[i] = 0;
+        D_800756E8[i] = 0;
+        D_8009D828[i] = 0x10;
+        D_80082248[i] = 0x10;
+        g_FieldModels[i].BlinkOn = 0;
+        g_FieldModels[i].KawaiOp1 = 0;
+        g_FieldModels[i].KawaiOp0 = 0;
+        g_FieldModels[i].KawaiDataOffset = 0;
+        g_FieldModels[i].KawaiA = 0;
+    }
+    i = 0;
     do {
-        temp_v0_5 = D_8009C6E0 + var_a3_5;
-        var_a3_5 += 1;
-        temp_v0_5->unkF2 = 0;
-    } while (var_a3_5 < 0x40);
-    var_a3_6 = 0;
+        g_FieldState->backgroundLayerVisibility[i] = 0;
+        i++;
+    } while (i < 0x40);
+    i = 0;
     do {
-        temp_v0_6 = D_8009C6E0 + var_a3_6;
-        var_a3_6 += 1;
-        temp_v0_6->unkB2 = 0;
-    } while (var_a3_6 < 0x40);
-    var_a3_7 = 0;
-    var_v1_2 = D_80095DE0;
+        g_FieldState->blockedAccesses[i] = 0;
+        i++;
+    } while (i < 0x40);
+    i = 0;
     do {
-        var_a2_2 = 0xF;
-        var_v0_3 = var_v1_2 + 0x1E;
-    loop_23:
-        *var_v0_3 = 0;
-        var_a2_2 -= 1;
-        var_v0_3 -= 2;
-        if (var_a2_2 >= 0) {
-            goto loop_23;
-        }
-        var_a3_7 += 1;
-        var_v1_2 += 0x20;
-    } while (var_a3_7 < 0x40);
-    var_a3_8 = 0;
-    var_v1_3 = 0;
+        j = 0xF;
+        cell = (s16*)(&D_80095DE0[i * 0x20] + 0x1E);
+        do {
+            *cell = 0;
+            j--;
+            cell--;
+        } while (j >= 0);
+        i++;
+    } while (i < 0x40);
+    i = 0;
+    off = 0;
     do {
-        *(&D_8007E7BD + var_v1_3) = 0;
-        *(&D_8007E7BC + var_v1_3) = 0;
-        *(&D_8007E7BB + var_v1_3) = 0;
-        *(&D_8007E7BA + var_v1_3) = 0;
-        *(&D_8007E7BE + var_v1_3) = 0;
-        *(&D_8007E7BF + var_v1_3) = 0;
-        *(&D_8007E7B8 + var_v1_3) = 0;
-        *(&D_8007E7B9 + var_v1_3) = 0;
-        *(&D_8007E7C2 + var_v1_3) = 0;
-        *(&D_8007E7AC + var_v1_3) = 0;
-        *(&D_8007E7AE + var_v1_3) = 0;
-        *(&D_8007E7B0 + var_v1_3) = 0;
-        *(&D_8007E7B2 + var_v1_3) = 0;
-        *(&D_8007E7B4 + var_v1_3) = 0;
-        *(&D_8007E7B6 + var_v1_3) = 0;
-        var_a3_8 += 1;
-        var_v1_3 += 0x18;
-    } while (var_a3_8 < 0x20);
+        *((u8*)&D_8007E7AC + 0x11 + off) = 0;
+        *((u8*)&D_8007E7AC + 0x10 + off) = 0;
+        *((u8*)&D_8007E7AC + 0xF + off) = 0;
+        *((u8*)&D_8007E7AC + 0xE + off) = 0;
+        *((u8*)&D_8007E7AC + 0x12 + off) = 0;
+        *((u8*)&D_8007E7AC + 0x13 + off) = 0;
+        *((u8*)&D_8007E7AC + 0xC + off) = 0;
+        *((u8*)&D_8007E7AC + 0xD + off) = 0;
+        *((u8*)&D_8007E7AC + 0x16 + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + 2 + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + 4 + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + 6 + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + 8 + off) = 0;
+        *(s16*)((u8*)&D_8007E7AC + 0xA + off) = 0;
+        i++;
+        off += 0x18;
+    } while (i < 0x20);
     D_80095D84 = 0;
-    var_a3_9 = 8;
-    var_v0_4 = &D_8009AD38;
+    i = 8;
+    q = &D_8009AD38;
     do {
-        *var_v0_4 = 0xFF;
-        var_a3_9 -= 1;
-        var_v0_4 -= 1;
-    } while (var_a3_9 >= 0);
+        *q = 0xFF;
+        i--;
+        q--;
+    } while (i >= 0);
     g_EntityForSplitJoin = 0xFF;
     g_FieldMovieOpcodeActive = 0;
     Savemap.memory_bank_1[31] |= 3;
@@ -4677,8 +4637,11 @@ s32 OpcodeFuncAnimEx(void) {
  * `g_EntityToModel[g_CurrentEntity]` instead of the modelIdx local, a `u16`
  * local for the raw frame count, and `- 1` against `+ 0xFFFF` (identical
  * code -- gcc materialises the HImode constant either way). Inlining `anims`
- * costs 11 rows and `u8 unusedLocals[8]` 4. A permuter target: the
- * instruction sequence is already exact. */
+ * costs 11 rows and `u8 unusedLocals[8]` 4. Splitting the lookup into an
+ * `s32 entryIdx` statement -- which is what unparked FieldUpdateAnimationState
+ * off an identical-looking rotation -- is inert here too; see the longer note
+ * on OpcodeFuncMove. A permuter target: the instruction sequence is already
+ * exact. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanim);
 #else
@@ -4880,8 +4843,16 @@ s32 OpcodeFuncAnimb(void) {
  * expression is byte-for-byte the one in StartModelAnimation, which matches,
  * so the spelling is not the problem -- the tie is broken by what else is
  * live in the block. Measured and inert: modelIdx as u8/s16/s32, a named
- * entryIdx local, declaration order. Inlining `anims` costs 8 rows. Solve it
- * once and three functions land. */
+ * entryIdx local, declaration order. Inlining `anims` costs 8 rows.
+ *
+ * FieldUpdateAnimationState had a residue that read *identically* -- the same
+ * three registers in the same rotation -- and it fell to `s32 entryIdx` split
+ * into its own statement plus `s32 modelIdx`. Applied here, to CANIM, to
+ * CANM! and to FieldMoveToEntityUpdate, both levers measure to the row, as do
+ * an `s32 lastFrame` local for the `- 1`, replacing modelIdx with the repeated
+ * `g_EntityToModel[g_CurrentEntity]`, and every combination of the four. So
+ * this is *not* that tie; it only looks like it. Whatever breaks it is
+ * outside the lookup. Solve it once and four functions land. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else
@@ -8771,8 +8742,6 @@ s32 OpcodeFuncSplit(void) {
     }
     return 1;
 }
-
-extern /*?*/ s32 D_80081D90;
 
 /* Drive one party member through a JOIN: state 0 turns them toward the party
  * leader, state 2 waits for that turn and then walks them onto the leader,
