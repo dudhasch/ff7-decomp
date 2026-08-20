@@ -1183,6 +1183,12 @@ typedef struct {
     /* 0x0F */ u8 unk0F;
 } FieldBgTrigger;
 
+/* Declared out here rather than relying on the definition below: that one is
+ * inside a NON_MATCHINGS arm, so the matching build never sees it and gcc
+ * falls back to an implicit `int` return -- which drops the sign extension
+ * FieldEntityTriggerCheck's callers of it depend on. */
+s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type);
+
 /* Arms (even type) or disarms (odd type) one background trigger, and reports
  * whether that actually changed the bit -- the caller only redraws when it did.
  *
@@ -1195,7 +1201,7 @@ typedef struct {
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field2", FieldEntityBgTriggerActivate);
 #else
-s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
+s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     s32 changed;
     s32 bit;
     s32 old;
@@ -1243,35 +1249,66 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  * crosses or comes near. In-proximity arms directly when the entity stands on
  * the line, else needs the entity facing it within +/-64; crossing types 4/5
  * arm/disarm on the back-side sign test. Each state change plays the trigger's
- * sound effect. Verified C kept as the #else; codegen pinned via
- * MASPSX_OVERRIDE (the dual walking-pointer regalloc wall). */
+ * sound effect.
+ *
+ * 12 rows out, from an m2c seed that did not compile (`trigger->pos` on a
+ * FieldBgTrigger whose first twelve bytes were declared `u8 unk00[0xC]`).
+ * What the rewrite established, in the order it was worth:
+ *   - `trigger` is a walking pointer bumped in the `for` header, not
+ *     `&triggers[i]`. The pointer form makes it a biv, and gcc reduces the
+ *     record's byte fields onto a second base at +0xF -- which is the
+ *     `addiu s0,s1,0xf` and the negative offsets all through the loop. The
+ *     subscript form has one base and no giv: 105 rows against 69.
+ *   - `from` and `nearest` are named `s32*` locals. Without them the two
+ *     scratchpad addresses are rebuilt through the assembler's $at macro at
+ *     every use and the function ends up two callee-saved registers and 8
+ *     bytes of frame short of the target: 69 rows against 14. The three
+ *     opening stores stay spelled as absolute casts even so -- the target
+ *     writes `0(s5)` for the first and `4($at)`/`8($at)` for the other two,
+ *     which is cse relating only the first to the pointer's own pseudo.
+ *   - the sound-effect table is a local `u16 seIds[4]` initialiser. The
+ *     target copies it in with lwl/lwr and swl/swr, the unaligned block move
+ *     an `s16`-aligned initialiser gets, and reads it back with `lhu`.
+ *   - FieldEntityBgTriggerActivate returns `s16`: every caller here
+ *     sign-extends v0 through `sll`/`sra` before comparing it against 1.
+ *   - the direction test wants an `s32` local for the call result (so the
+ *     return is zero-extended into it) and a second `s32` local for the
+ *     masked difference (so the comparison is `slti`, not `sltiu`).
+ *
+ * The residue is one scheduling knot in the entry block: the target spreads
+ * `addiu s2,sp,0x10` and `addiu s0,s1,0xf` into the load-delay slots of the
+ * PosY and PosZ loads, where ours emits them together ahead of the stores and
+ * hoists the PosZ load into a second register instead. The instructions are
+ * the same ones. Neither the order of the two pointer assignments, nor moving
+ * them after the stores (32 rows), nor between them, nor the declaration order
+ * of the locals, nor writing the first store through `from` moves it. Good
+ * permuter target. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
 #else
 void FieldEntityTriggerCheck(
-    FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
-    s16 seIds[4] = {0x0, 0x36, 0x7A, 0x12A};
+    FieldEntity* entity, FieldBgTrigger* trigger, VECTOR* dest) {
+    u16 seIds[4] = {0x0, 0x36, 0x7A, 0x12A};
     s32* from;
     s32* nearest;
-    FieldBgTrigger* trigger;
     s32 sqrDist;
     s32 cross;
-    u8 dir;
+    s32 dir;
+    s32 rel;
     s32 i;
 
     from = (s32*)0x1F800000;
     nearest = (s32*)0x1F800020;
-    from[0] = entity->PosX >> 12;
-    from[1] = entity->PosY >> 12;
-    from[2] = entity->PosZ >> 12;
-    for (i = 0; i < 12; i++) {
-        trigger = &triggers[i];
+    *(s32*)0x1F800000 = entity->PosX >> 12;
+    *(s32*)0x1F800004 = entity->PosY >> 12;
+    *(s32*)0x1F800008 = entity->PosZ >> 12;
+    for (i = 0; i < 12; i++, trigger++) {
         if (trigger->entityId == 0xFF) {
             continue;
         }
         sqrDist = FieldEntitySqrDistToLine((FieldLine*)trigger, from, nearest);
         if (sqrDist != -1 &&
-            sqrDist < entity->SolidRange * entity->SolidRange) {
+            sqrDist < (s32)(entity->SolidRange * entity->SolidRange)) {
             if (from[0] == nearest[0] && from[1] == nearest[1]) {
                 if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
                     func_8001117C(seIds[trigger->unk0F]);
@@ -1280,7 +1317,8 @@ void FieldEntityTriggerCheck(
             }
             dir =
                 FieldEntityDirByVec((VECTOR*)from, (VECTOR*)nearest, &sqrDist);
-            if ((u8)(dir - entity->MoveDir + 0x40) >= 0x80) {
+            rel = (u8)(dir - entity->MoveDir + 0x40);
+            if (rel >= 0x80) {
                 continue;
             }
             if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
@@ -1291,8 +1329,8 @@ void FieldEntityTriggerCheck(
         if (trigger->type >= 4) {
             cross = (trigger->pos.x2 - trigger->pos.x1) *
                         (from[1] - trigger->pos.y1) -
-                    (from[0] - trigger->pos.x1) *
-                        (trigger->pos.y2 - trigger->pos.y1);
+                    (trigger->pos.y2 - trigger->pos.y1) *
+                        (from[0] - trigger->pos.x1);
             if (cross > 0) {
                 continue;
             }
