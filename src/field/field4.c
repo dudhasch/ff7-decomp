@@ -1518,11 +1518,35 @@ void FieldInitDefaultValues(void) {
 
 /* Walks every entity's first script and runs its initialisation opcodes
  * (everything up to the terminating 0). The script-offset table sits past the
- * entity-name table and the extras table in the script header. Semantically
- * correct; codegen pinned via MASPSX_OVERRIDE: gcc 2.6.3 fixes the address
- * arithmetic order (the <<6/<<3/<<1 sequence) and re-materialises the script
- * pointer, a conserved-pair the permuter plateaus on (best 1075 after the
- * override-strip fix, iter 55k). */
+ * entity-name table and the extras table in the script header.
+ *
+ * PARKED at 16 rows, down from 66, and three of the four causes are worth
+ * carrying to the other script walkers:
+ *
+ *   * The inner opcode loop keeps &g_FieldScriptPC in its *own* callee-saved
+ *     register, separate from the one the outer loop uses. `loop_optimize'
+ *     runs innermost-loop-first, so the inner loop's copy is hoisted into the
+ *     inner preheader before the outer's exists. A `u16* pcTable' assigned in
+ *     front of the `do' is what makes gcc keep one live across the opcode
+ *     call at all (36 rows) -- but it is assigned in the preheader, so cse
+ *     copies the outer register into it (`move s0,s2') where the target
+ *     rebuilds the address. Writing the access inline instead, in either the
+ *     byte-offset or the subscript form, loses the register entirely and is
+ *     30 rows worse.
+ *   * `g_FieldScripts' has to be a local, and it must *not* be live across the
+ *     opcode call. Read inline it is reloaded three times inside one
+ *     statement group; cached at the top of the outer body and used in the
+ *     inner loop too it takes a callee-saved register, which the target does
+ *     not have. Assigned after the debug block and used only up to the inner
+ *     loop, it lands in $a2 like the target's $a0.
+ *   * The header address is built base-last: `scriptBase + n*8 + numExtras +
+ *     (s32)scripts', not `(u8*)scripts + scriptBase + ...'. Pointer PLUS puts
+ *     the pointer first; integer PLUS keeps source order. Same for the debug
+ *     name, which is `(u8*)g_FieldScripts + 0x20 + entity*8'. Together those
+ *     were 15 rows.
+ *
+ * What is left is the `move s0,s2' above and the register renaming it drags
+ * with it. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
@@ -1535,6 +1559,8 @@ void FieldEventRunInit(void) {
     u8 lo;
     u8 op;
     u8 op2;
+    u16* pcTable;
+    FieldScriptHeader* scripts;
 
     g_FieldModelCount = 0;
     g_CurrentEntity = 0;
@@ -1542,9 +1568,8 @@ void FieldEventRunInit(void) {
         do {
             if (g_FieldScriptDebugFlags & 3) {
                 FieldDebugStringCopy(g_DebugText, &D_800E0628);
-                FieldDebugStringConcat(
-                    g_DebugText,
-                    (u8*)g_FieldScripts + (g_CurrentEntity * 8) + 0x20);
+                FieldDebugStringConcat(g_DebugText, (u8*)g_FieldScripts + 0x20 +
+                                                        (g_CurrentEntity * 8));
                 if (g_FieldScriptDebugFlags & 1) {
                     SetStrToDebugRow(4, 0, g_DebugText);
                 }
@@ -1552,23 +1577,23 @@ void FieldEventRunInit(void) {
                     DebugPrintToFieldWindow(g_DebugText);
                 }
             }
+            scripts = g_FieldScripts;
             scriptBase = g_CurrentEntity << 6;
-            numExtras = g_FieldScripts->numExtras * 4;
-            lo = ((u8*)g_FieldScripts + scriptBase +
-                  (g_FieldScripts->numEntities * 8) + numExtras)[0x20];
+            numExtras = scripts->numExtras * 4;
+            lo = ((u8*)(scriptBase + (scripts->numEntities * 8) + numExtras +
+                        (s32)scripts))[0x20];
             slot = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
             *slot = (u16)lo;
-            *slot = lo | (((u8*)g_FieldScripts + scriptBase +
-                           (g_FieldScripts->numEntities * 8) + numExtras)[0x21]
+            *slot = lo | (((u8*)(scriptBase + (scripts->numEntities * 8) +
+                                 numExtras + (s32)scripts))[0x21]
                           << 8);
-            op = *((u8*)g_FieldScripts + *slot);
+            op = *((u8*)scripts + *slot);
             g_FieldCurrentOpcode = op;
             if (op != 0) {
+                pcTable = g_FieldScriptPC;
                 do {
                     g_FieldOpcodes[g_FieldCurrentOpcode]();
-                    op2 = *((u8*)g_FieldScripts +
-                            *((u16*)((g_CurrentEntity * 2) +
-                                     (u8*)g_FieldScriptPC)));
+                    op2 = *((u8*)g_FieldScripts + pcTable[g_CurrentEntity]);
                     g_FieldCurrentOpcode = op2;
                 } while (op2 != 0);
             }

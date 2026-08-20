@@ -1044,6 +1044,22 @@ a near-miss, in rough order of frequency:
   `slt` — even when the other side is a plain `s32`. An explicit `(s32)` cast
   on the `u16` is what puts the signed compare back; it costs no instruction,
   because the value is already zero-extended by its `lhu`.
+* **A nested loop keeps its own copy of a shared base address.**
+  `loop_optimize` walks loops innermost-first, so an invariant used inside an
+  inner loop is hoisted into the *inner* preheader before the outer loop's
+  copy exists, and the function ends up with two callee-saved registers holding
+  the same `%hi`/`%lo`. If your build has one and the target has two, the inner
+  loop's use is written in a form that lets cse relate it to the outer one.
+  `FieldEventRunInit` is parked on exactly this row.
+* **A global pointer re-read three times in one statement group wants a local
+  — but only if the local dies before the next call.** gcc reloads a pointer
+  global after any store that might alias it, so `(u8*)g_FieldScripts + ...`
+  written three times is three `lui`/`lw` pairs where the target has one. Cache
+  it and the reloads go, but cache it *too early* — before a call, or across
+  one — and the local needs a callee-saved register the target does not have,
+  which costs a save, a restore and the whole allocation. Assign it after the
+  last call that precedes its uses. Worth 12 rows either way in
+  `FieldEventRunInit`, in opposite directions.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
