@@ -1561,8 +1561,30 @@ void FieldInitDefaultValues(void) {
  *     name, which is `(u8*)g_FieldScripts + 0x20 + entity*8'. Together those
  *     were 15 rows.
  *
- * What is left is the `move s0,s2' above and the register renaming it drags
- * with it. Permuter food. */
+ * What is left is the `move s0,s2' above. It is worth more than it looks:
+ * `lui'+`addiu' is two insns and the copy is one, so every branch target after
+ * it is 4 bytes short and three of the sixteen rows are that shift alone; the
+ * rest is register renaming. The one other real row is the pair of shifts at
+ * the top of the outer body -- the target issues `sll a3,v1,1' (the PC slot)
+ * before `sll v1,v1,6' (the script base) and this build issues them the other
+ * way round, which is scheduling, not statement order: moving the `slot'
+ * assignment above `scriptBase' measures 25.
+ *
+ * Both address sums are already right, and the diff hides it -- their three
+ * `addu's differ only in register names, and the operand order (base, then
+ * entity count, then scripts, then extras for the second one) is what the
+ * body below already writes. Swapping the last two addends is byte-identical,
+ * so fold canonicalises the chain and the source cannot reach it anyway.
+ *
+ * Rejected for the copy, all measured: assigning `pcTable' inside the inner
+ * loop rather than in its preheader (58), writing the inner access inline in
+ * the subscript form (46) or the byte-offset form (46), spelling the
+ * assignment `(u16*)((u8*)g_FieldScriptPC + 0)' (no change, folded), and
+ * writing the outer `slot' as `&g_FieldScriptPC[g_CurrentEntity]' (no
+ * change). What the target has is the inner loop's own hoisted movable, which
+ * only exists if `loop_optimize' finds the symbol inside the inner body --
+ * and every spelling that puts it there folds `%hi'/`%lo' into the address
+ * instead, which loses the register altogether. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
@@ -8577,7 +8599,16 @@ s32 OpcodeFuncSolid(void) {
  * `*pc += 7;' once after gets the shape right on paper but costs a pseudo
  * (27 rows). Note both builds already put &g_FieldScriptPC in $s0 across the
  * function, so the register is not the difference -- only how many copies of
- * the four-instruction index computation survive. Permuter food. */
+ * the four-instruction index computation survive.
+ *
+ * And duplication cannot be the answer, which is worth knowing before trying
+ * it again: cross-jumping runs before sched2, so at that point both copies of
+ * `PC_INC(7); return 0;' are the identical eight-insn sequence and the merge
+ * walks all the way back through `lui a0' -- one copy, in the join block, not
+ * the target's two. Re-measured with the else arm reordered as well: 48
+ * changed / 10 inserted, against 48 / 8 for duplication alone and 18 / 5 for
+ * the reorder alone. Whatever puts the index computation in both arms is in
+ * the source, not in the tail. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else

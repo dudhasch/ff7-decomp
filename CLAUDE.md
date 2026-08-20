@@ -1111,6 +1111,30 @@ a near-miss, in rough order of frequency:
   `slt` — even when the other side is a plain `s32`. An explicit `(s32)` cast
   on the `u16` is what puts the signed compare back; it costs no instruction,
   because the value is already zero-extended by its `lhu`.
+* **A counter reset between two loops has to be reset where one definition
+  dominates the second loop, or the second loop's giv initialiser is not a
+  constant.** `strength_reduce` computes a reduced giv's starting value from
+  the biv's value at the loop entry, so `for (...) {...} i = 0; for (...)
+  { models[i]... }` gives `move a2,a0` — the array base itself — only when gcc
+  can fold `i` to 0 there. Put the reset *inside* the first loop's guarding
+  `if` and the zero-trip path skips it; the two paths join, the value is
+  unknown, and the preheader grows an `sll`/`addu` pair computing
+  `base + i * stride` from a register. The tell is two extra insns in the
+  second loop's preheader and nothing else wrong with the loop.
+  `FieldModelStructInit` in `src/field/field2.c` needs the reset after the
+  `if`, not at the end of its body.
+* **A parameter the target keeps in its incoming register *and* copies to a
+  temporary is two source variables, not one.** A pseudo gets one hard
+  register, so a target that stores through `$a1` at entry, computes a derived
+  pointer into `$a1` in place (`addu a1,a1,v0`) and reads every struct field
+  through a `$t0` copy cannot come from a single pointer — write
+  `d = data;` after the first use and read through `d` from then on. The copy
+  survives because cse only propagates within an extended basic block, and the
+  uses are all in later blocks. What it buys is the argument register for the
+  derived value: with one pointer the parameter keeps `$a1` and the derived
+  pointer takes a `$t` register, renaming a dozen rows. The same shape shows
+  up for the *first* parameter whenever a target computes something like
+  `models = desc->models` into `$a0`.
 * **A nested loop keeps its own copy of a shared base address.**
   `loop_optimize` walks loops innermost-first, so an invariant used inside an
   inner loop is hoisted into the *inner* preheader before the outer loop's

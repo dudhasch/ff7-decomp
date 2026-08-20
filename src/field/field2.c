@@ -2701,25 +2701,44 @@ void FieldModelBsxTdbModify(u8* tdb) {
  *     there is worse still at 50/10) -- so the two translation units genuinely
  *     read the byte with different signedness and the cast is the honest
  *     spelling.
- * The residue is one allocation tie-break and its cascade. The target puts
- * `next` in $a1 -- the register `data` arrives in -- and copies `data` to $t0
- * at entry (`move t0,a1`, then `addu a1,a1,v0` computing next from the still
- * live incoming value); ours keeps `data` in $a1 and gives `next` $t0, which
- * renames roughly a dozen rows and costs the entry copy. Since the function is
- * a leaf, both pseudos are equally coalescable onto the argument register and
- * the winner is global-alloc priority (log2(refs)*refs/live_length), where the
- * two are close. Rejected, all measured: `next = (u8*)data;` split from the
- * `+=` (27/4); the same split hoisted to the top of the function (26/2); `next`
- * declared first among the locals (23/2, identical); computing `next` before
- * the four header stores (23/2, identical); a separate counter for the second
- * loop (40/1 -- it also loses the `move a2,a0` giv init, which is the other
- * inserted row: gcc cannot prove the counter is 0 at the second preheader
- * because a CODE_LABEL sits between the reset and the loop).
+ * Two more, worth another 3 rows and most of the structure:
+ *   - `i = 0' between the two loops belongs *after* the first `if', not
+ *     inside it. Inside, the count==0 path skips it, the two paths join, and
+ *     `strength_reduce' cannot fold the second loop's giv initialiser to
+ *     `models + 0' -- so where the target has `move a2,a0' this build emits
+ *     `sll v0,a3,3 / addu a2,v0,a0'. One definition dominating the preheader
+ *     is all it takes.
+ *   - the target holds `data' in *two* registers: the incoming $a1, for the
+ *     first store and for computing `next' (`addu a1,a1,v0', in place), and a
+ *     copy in $t0 for everything else. One variable cannot do that, since the
+ *     parameter's pseudo gets one register -- so the body below takes a second
+ *     pointer `d = data;' right after the first store and reads through it.
+ *     That is what frees $a1 for `next' and produces the entry `move'; with a
+ *     single pointer `next' lands in $t0 and a dozen rows rename. Deriving
+ *     `next' from `d' instead of from `data' undoes it (26 rows), and so does
+ *     assigning `d' before the first store (21) or only after the first loop
+ *     (26). cse does not fold the copy away because every use of `d' is in a
+ *     different basic block from the assignment.
+ *
+ * The residue is 20 rows, and it is one allocation tie-break: `d' and `i' hold
+ * each other's register -- the target has `i' in $a3 and the copy in $t0, this
+ * build the other way round -- and since $a3 comes earlier in REG_ALLOC_ORDER
+ * that means global_alloc processes `i' first there and `d' first here. The
+ * published priority is log2(refs)*refs/live_length and it says the opposite:
+ * the target's $t0 carries eleven references against $a3's six, over the same
+ * range. Whatever orders them is not the ref count. Rejected, all measured
+ * against the body below: `next = (u8*)data;` split from the `+=` and hoisted
+ * to the top (20/1, identical); all four declaration positions for `d' (20/1,
+ * identical -- declaration order is inert here as everywhere else); reading
+ * loop 2's `entry' through `data' rather than `d' (19/1, but it puts `next'
+ * back in $t0 and is structurally further away); a separate counter for the
+ * second loop (40/1).
  * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
 #else
 void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
+    FieldModelData* d;
     FieldModelLoaderData* models;
     FieldModelEntry* entry;
     u8* next;
@@ -2729,24 +2748,25 @@ void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
 
     i = 0;
     data->modelCount = 0;
+    d = data;
     models = desc->models;
     if (desc->count != 0) {
         do {
             if (models[i].npcFlag != 0) {
-                models[i].modelEntryIndex = data->modelCount;
-                data->modelCount = data->modelCount + 1;
+                models[i].modelEntryIndex = d->modelCount;
+                d->modelCount = d->modelCount + 1;
             } else {
                 models[i].modelEntryIndex = 0xFF;
             }
             i += 1;
         } while (i < desc->count);
-        i = 0;
     }
-    data->unk2 = 0;
-    data->unk1 = 0;
-    data->modelEntries = (FieldModelEntry*)((u8*)data + 0xC);
-    data->unk8 = 0;
-    next = (u8*)data + ((data->modelCount * 0x24) + 0xC);
+    i = 0;
+    d->unk2 = 0;
+    d->unk1 = 0;
+    d->modelEntries = (FieldModelEntry*)((u8*)d + 0xC);
+    d->unk8 = 0;
+    next = (u8*)data + ((d->modelCount * 0x24) + 0xC);
     if (desc->count != 0) {
         do {
             if (models[i].npcFlag != 0) {
@@ -2754,7 +2774,7 @@ void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
                     (models[i].animationCount < 3)) {
                     models[i].animationCount = 3;
                 }
-                entry = &data->modelEntries[models[i].modelEntryIndex];
+                entry = &d->modelEntries[models[i].modelEntryIndex];
                 entry->flags = 1;
                 entry->kawaiType = -1;
                 entry->boneCount = models[i].boneCount;
