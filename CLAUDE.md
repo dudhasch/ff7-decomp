@@ -792,6 +792,53 @@ a near-miss, in rough order of frequency:
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency
   because the neighbouring loop does.
+* **cse links two symbolic constants only when they share a `symbol_ref`
+  base, so an address written off the neighbouring object comes back for
+  free.** `sb v0,-0x20($a2)` where `$a2` holds one global and the store is to
+  a *different* global 0x20 below it is not cse being clever about addresses —
+  it is one source expression. Spell the second object as an offset from the
+  first (`(KawaiColorFadeSlot*)(D_800DFE1C + 0x20)` for a table that sits just
+  past a scratch buffer) and cse's `use_related_value` hands the scratch's own
+  address back as `-0x20($a2)` at every use, including as a call argument.
+  Named through its own symbol the two are unrelated and gcc materialises a
+  second base register. The three KAWAI colour/lighting handlers in
+  `src/field/field4.c` all need this.
+* **A dead assignment before a call is how a value gets a callee-saved
+  register.** `done = 0;` at the top of an arm, where nothing reads it until
+  after the call, makes the variable live across the call, so global-alloc puts
+  it in `$s1` instead of a caller-saved temp — and the frame, the saved-register
+  list and every later allocation follow. sched2 then sinks the `move s1,zero`
+  down to wherever it fits, typically a delay slot after the call, which is why
+  the target looks like the assignment was written there. Reading the position
+  back out of the asm gives you a caller-saved register and a different frame.
+  `KawaiFadeModelColor` and `KawaiColorFadeBelowLvl` both need it.
+* **`beqz` / `li 1` / `beq` / `j default` on one loaded byte is a `switch`,
+  not a chain of `if`s.** That is `expand_end_case`'s compare chain for a
+  two-case switch: the selector is loaded once, and the `li v0,1` it
+  materialises as the second compare constant is still in `v0` on the default
+  path, so a default that returns 1 costs nothing. Two separate `if`s reload
+  the selector and lay the blocks out the other way round. Read the return
+  values off the arms while you are there — all three KAWAI handlers had them
+  wrong in the m2c seed, and no amount of codegen work reaches a function that
+  returns the wrong number.
+* **A body duplicated in both arms of an `if`/`else` is not the same as one
+  block reached by two `goto`s.** Duplicated, cross-jumping merges only the
+  common tail and cse still knows what the variables held on the way in — so
+  `done |= 1` right after `done = 0` folds to `li a1,1`. Shared, the block has
+  two predecessors, cse knows nothing, and the target's `ori s1,s1,0x1`
+  survives. Write the guard as `if (cond) goto skip;` in both arms with the
+  clamp after them. The tell is a constant materialised where the target
+  or-s into a register.
+* **The same `goto` spelling does not always give the same branch polarity.**
+  In `KawaiFadeModelColor` the red and green channels take
+  `if (cur < target) goto skip;` and come out with the branch inverted around a
+  jump to the clamp, exactly like the target; the blue channel, identical in
+  every other way, gets a direct `bnez` instead, and neither operand order nor
+  a ternary moves it. Writing that one arm out the long way — `if (cur >=
+  target) goto clamp;` followed by `goto skip;`, with the label before the
+  clamp — reproduces the target's polarity. When one instance of a repeated
+  pattern refuses to follow the others, spell its control flow explicitly
+  rather than looking for a reason.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
