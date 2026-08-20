@@ -163,10 +163,17 @@ def resolve(token, syms, section_bases):
         return None if base is None else base + off
     # `D_80049208+0x1` and `D_80049209` are the same address written two ways;
     # gcc emits the former when you index one array, the .s names the latter.
-    m = re.match(r"^(.+?)\+0x([0-9A-Fa-f]+)$", token)
+    # The offset can be negative -- C that reaches an object through its higher
+    # neighbour (`(u8*)D_800E4D94 - 4`) relocates against that neighbour with a
+    # negative addend, where the .s names the object itself. Same address, same
+    # linked bytes, so the two must compare equal.
+    m = re.match(r"^(.+?)([-+])0x([0-9A-Fa-f]+)$", token)
     if m:
         base = resolve(m.group(1), syms, section_bases)
-        return None if base is None else base + int(m.group(2), 16)
+        if base is None:
+            return None
+        off = int(m.group(3), 16)
+        return base - off if m.group(2) == "-" else base + off
     if token in syms:
         return syms[token]
     m = ADDR_NAME_RE.match(token)

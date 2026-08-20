@@ -797,9 +797,9 @@ s32 FieldMainLoop(void) {
  * goes up with LoadImage, the two pages with LoadTPage, with a DrawSync
  * between every step.
  *
- * The body was rewritten from the target in this session; the previous one did
- * not compile (LoadTPage takes seven arguments, not five) and so had never been
- * measured. Three things it now gets right:
+ * The body was rewritten from the target; the previous one did not compile
+ * (LoadTPage takes seven arguments, not five) and so had never been measured.
+ * Five things it gets right:
  *
  *   - `mim` itself advances. The target reaches the second record's fields as
  *     0(a1) and 2(a1) with `addiu a1,a1,4` between the pairs, which is a
@@ -817,32 +817,30 @@ s32 FieldMainLoop(void) {
  *     and the same mechanism as the byte-offset idiom in CLAUDE.md.
  *   - `unusedLocals` reserves the 0x28 of stack the original allocates after
  *     `rect` and never touches; see FieldDebugInitBuffers for the same thing.
- *
- * 15 rows out, all of them the two `next = (size >> 2) * 4 - 0xC` chains. The
- * target computes each in place in the register that held the length
- * (`srl v1,v1,2` / `sll v1,v1,2` / `addiu v1,v1,-0xc`) and sched2 spreads the
- * three into the load-delay slots of the three stores in front of them. Ours
- * allocates the chain to v0, which is also every `lhu`'s destination, so the
- * anti-dependence pins it after the last store and maspsx fills the slots with
- * nops. Measured and rejected: one variable instead of two (`size` reassigned),
- * the chain computed before or after the length store, `next` declared first,
- * `next` as s32, `((size >> 2) << 2)`, and splitting the `- 0xC` into its own
- * statement -- all six give the identical 15-row residue, because none of them
- * changes which hard register the allocator picks. This is permuter work.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
-#else
+ *   - each block's length is stored to the state word first and then read back
+ *     out of it for the `(len >> 2) * 4 - 0xC` skip. Held in a local instead,
+ *     the pseudo is still live at the shift, so the chain needs two more
+ *     registers and sched2 cannot spread it into the load-delay slots of the
+ *     three `sh`s in front of it -- 15 rows of nops, and no declaration order,
+ *     variable count or spelling of the arithmetic moves them. Read back
+ *     through the global, cse hands the just-stored register straight back,
+ *     the shift is done in place, and the slots fill. Re-reading the *source*
+ *     word instead of the destination is not the same thing and costs 18.
+ *   - the LoadImage source is `(u8*)D_800E4D94 - 4`, not `D_800E4D90` by name,
+ *     even though the two are the same address and the store just above uses
+ *     the name. Naming it twice gives cse a second reference, it promotes the
+ *     address to a callee-saved register and the frame grows -- 7 rows. The
+ *     `.s` names D_800E4D90 there, so the relocation reads `D_800E4D94-0x4`
+ *     against the target's `D_800E4D90`; the linked bytes are identical and
+ *     `tools/checkfn.py` resolves the negative addend. */
 void FieldLoadMimToVram(s32 arg0, u8* mim) {
     RECT rect;
     u8 unusedLocals[0x28];
-    u32 size;
     u32 next;
     u16 unk0A;
 
-    size = *(u32*)mim;
-    next = (size >> 2) * 4 - 0xC;
-    *(u32*)&D_800E4D94[0] = size;
+    *(u32*)&D_800E4D94[0] = *(u32*)mim;
+    next = (*(u32*)&D_800E4D94[0] >> 2) * 4 - 0xC;
     *(u16*)&D_800E4D98[0] = *(u16*)(mim + 4);
     *(u16*)&D_800E4D9A[0] = *(u16*)(mim + 6);
     *(u16*)&D_800E4D9C[0] = *(u16*)(mim + 8);
@@ -853,15 +851,14 @@ void FieldLoadMimToVram(s32 arg0, u8* mim) {
     mim += next;
 
     /* First texture page block. */
-    size = *(u32*)mim;
-    next = (size >> 2) * 4 - 0xC;
-    *(u32*)&D_800E4DA8[0] = size;
+    *(u32*)&D_800E4DA8[0] = *(u32*)mim;
+    next = (*(u32*)&D_800E4DA8[0] >> 2) * 4 - 0xC;
     mim += 4;
     *(u16*)&D_800E4DAC[0] = *(u16*)mim;
     *(u16*)&D_800E4DAE[0] = *(u16*)(mim + 2);
     mim += 4;
     *(u16*)&D_800E4DB0[0] = *(u16*)mim * 2;
-    *(u16*)&D_800E4DB2[0] = *(u16*)(mim + 2);
+    *(u16*)((u8*)D_800E4DB0 + 2) = *(u16*)(mim + 2);
     mim += 4;
     *(u8**)&D_800E4DA4[0] = mim;
     mim += next;
@@ -873,7 +870,7 @@ void FieldLoadMimToVram(s32 arg0, u8* mim) {
     *(u16*)&D_800E4DDE[0] = *(u16*)(mim + 2);
     mim += 4;
     *(u16*)&D_800E4DE0[0] = *(u16*)mim * 2;
-    *(u16*)&D_800E4DE2[0] = *(u16*)(mim + 2);
+    *(u16*)((u8*)D_800E4DE0 + 2) = *(u16*)(mim + 2);
     mim += 4;
     *(u8**)&D_800E4DD4[0] = mim;
 
@@ -897,7 +894,6 @@ void FieldLoadMimToVram(s32 arg0, u8* mim) {
     }
     DrawSync(0);
 }
-#endif
 
 /* Latch both pads: keep the raw state, the previous state, and the edges
  * (newly pressed / newly released) derived from the two, and hand the caller

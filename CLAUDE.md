@@ -1109,6 +1109,38 @@ a near-miss, in rough order of frequency:
   `src/field/field2.c` needed exactly this, and the tell is unmistakable: every
   `li <reg>,-1` in the failure paths names a caller-saved register that is not
   `$v0`.
+* **A value stored to a global and then needed again is read back out of the
+  global, not held in a local.** With a local the pseudo is still live at the
+  second use, so the arithmetic needs its own registers and sched2 cannot lift
+  it into the load-delay slots of the stores around it — you get a column of
+  `nop`s where the target has the computation spread through them. Written as
+  `*(u32*)&D_800E4D94[0] = *(u32*)mim;` and then
+  `next = (*(u32*)&D_800E4D94[0] >> 2) * 4 - 0xC;`, cse hands the just-stored
+  register straight back, the shift is done *in place* in it, and the slots
+  fill. `FieldLoadMimToVram` in `src/field/field.c` does this three times and
+  it was worth 15 rows; no declaration order, variable count, or spelling of
+  the arithmetic reaches it. Re-reading the *source* word instead of the
+  destination is a different thing and costs 18 — it is the store's register
+  that has to be reused.
+* **Two references to a global at offset 0 promote its address to a register;
+  reaching one of them through a neighbour keeps the `$at` macro.** The
+  companion to the `$at` rematerialisation idiom above: `*(u8**)&D_800E4D90[0]
+  = mim;` followed later by a read of the same address makes cse relate them,
+  gcc parks `%hi`/`%lo` in a callee-saved register and the frame grows (7 rows
+  in `FieldLoadMimToVram`). Spelling the read `*(u_long**)((u8*)D_800E4D94 - 4)`
+  — the same address, reached through the *next* object — leaves both as `$at`
+  expansions. The relocation then names `D_800E4D94` with a −4 addend where the
+  `.s` names `D_800E4D90`; the linked bytes are identical, and `checkfn.py`
+  resolves negative addends the same way it already resolved positive ones.
+* **`extern u8 D_800E4DB2[];` for an address inside another object links only
+  while nothing references it, and `checkfn.py` will not warn you.** The
+  interior label is in the symbol *config*, so checkfn resolves it and discounts
+  `%lo(D_800E4DB2)` against the target's `%lo(D_800E4DB0+0x2)` as an alias —
+  MATCH, with no hint that the symbol has no definition. The linker is the first
+  thing to notice: `undefined reference to 'D_800E4DB2'`. Write the interior
+  field as an offset from the object that owns it (`*(u16*)((u8*)D_800E4DB0 +
+  2)`) and delete the extern. This is a third way a clean-looking verdict lies,
+  and it only shows up in `make build`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
