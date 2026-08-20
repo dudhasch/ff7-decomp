@@ -199,7 +199,12 @@ Rebuild the one object and get a verdict:
 `checkfn.py` rebuilds the object, then compares only the instructions the target
 `.s` actually declares, discounting differences that are purely a symbol *name*
 (the `.s` says `D_800722C4`, your C says `g_CurrentEntity`; same address, same
-bytes). It exits non-zero unless every function named matched. Prefer it to
+bytes). It exits non-zero unless every function named matched. Pass `--rows`
+and it prints *every* differing instruction rather than just the first, with
+the alias rows already filtered out — which is what you want on a near-miss,
+since separating the real rows from the aliases in `diff.py` output by eye is
+the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
+aliases). Prefer it to
 reading `diff.py` by eye — see *Two ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
@@ -1238,6 +1243,16 @@ a near-miss, in rough order of frequency:
   about seven minutes on five workers. The converse holds too: no amount of
   reading the target suggests *un-naming* a variable, which is what the last
   22 rows were.
+* **`(u8)x` vanishes into a narrowing store; `x & 0xFF` does not.** Storing to
+  an `s16` array element, `quality[i] = (u8)(a - b);` emits no mask — `sh`
+  truncates anyway, so combine deletes the `andi` and maspsx fills the slot
+  with a nop — while `quality[i] = (a - b) & 0xFF;` is arithmetic on the
+  promoted `int` and survives to the store. Same value, one instruction apart.
+  When the target masks a value it is about to store narrowly, the mask comes
+  from the *expression*, not from any declaration: `FieldEntityCheckTalk` had
+  every type for the subtrahend measured (u8, s16, u16, u32, s32, with and
+  without a cast at the use) and all five compile identically, because none of
+  them is where the `andi` comes from.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -1351,7 +1366,14 @@ Some functions cannot be decompiled alone, and the failure shows up as a red
 
 * **BORROWS** — the function prints a string that another `.s` owns. Writing the
   literal makes gcc emit a *second* copy, shifting every later `.rodata` offset
-  and breaking the overlay. Decompile the owner in the same change, or skip.
+  and breaking the overlay. **Pass the borrowed string by name instead**:
+  `extern char D_800A02B8[];` and `f(g_DebugMessageBuffer, D_800A02B8)` emits no
+  literal at all and resolves against the owner's still-assembled `.s`, so the
+  function lands on its own. Turn it back into `"/"` when the owner becomes C —
+  gcc folds identical literals within one translation unit, so the two then
+  share the one definition. `FieldEventRequest` in `src/field/field4.c` matched
+  on exactly this, and it had been carrying a "depends on decomp of
+  DebugUpdateActor" comment for as long as anyone had looked at it.
 * **LENDS** — the function owns a label other `.s` files still reference.
   Decompiling it alone deletes the definition and the link fails with an
   undefined reference. `IfCheck` owns the `"ope err="` that both `If2Check*` use,
