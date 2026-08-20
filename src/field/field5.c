@@ -1950,71 +1950,91 @@ void SystemMessageSetCharName(s16 battleCharId, s16 stringId) {
 // Begin of field_debug.c
 /////////////////////////////////////////////////
 
-/* Initialise the debug renderer's GPU buffers: blank the per-page ordering
- * table flags, then build both framebuffers' primitive arrays (sprites, tiles,
- * lines) with their packet codes and semi-transparency bits, the CLUT table,
- * and the two draw-mode blocks. The $at-rematerialisation wall: the original
- * rebuilds each buffer base through $at on every store where gcc CSEs it into
- * a register. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
- */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugInitBuffers);
-#else
+/* Initialise the debug renderer's GPU buffers: hide all six pages, then build
+ * both framebuffers' primitive arrays (sprites, lines, tiles) with their packet
+ * codes and blend bits, the CLUT table, and the two draw-mode blocks.
+ *
+ * Four things this needed, all of them structural:
+ *
+ *   - one pointer pair per loop, not one pair reused four times. A single pair
+ *     is live across GetGraphType/SetDrawMode, so gcc gives it a callee-saved
+ *     register and every buffer base is set up in one; the original's first
+ *     three bases die in their own preheader and sit in $v0.
+ *   - each element addressed as `&base[i * stride]`, not by bumping the
+ *     pointer. Bumped, `base` is a biv and gcc strength-reduces the three
+ *     references to byte 7 onto a second base register biased by +7, so the
+ *     stores come out `-4(a0)`/`0(a0)` instead of `3(v1)`/`7(v1)`.
+ *   - the sprite loop sets the shade-texture bit, not semi-transparency:
+ *     `ori 0x1`, not `ori 0x2`. The line loop really is setSemiTrans.
+ *   - `tpage` is a u16 -- the `andi $s3,$a3,0xffff` at the join of the
+ *     GetGraphType tests is the widening, and an s32 has none.
+ *
+ * `unusedLocals` is not a placeholder for something better understood: the
+ * original's frame is 0x50 against 0x30 for the same code, and the 0x20 sits
+ * between the outgoing-argument area and the register saves, which is where
+ * gcc puts locals. Some aggregate local was declared, given a slot by
+ * `expand_decl`, and had all of its uses optimised away; nothing in the
+ * emitted code names it. The frame size is part of the match, so the slot has
+ * to be reserved. */
 void FieldDebugInitBuffers(void) {
     s32 i;
-    u8* p0;
-    u8* p1;
-    s32 tpage;
+    s32 off;
+    u8* sprt0;
+    u8* sprt1;
+    u8* line0;
+    u8* line1;
+    u8* tile0;
+    u8* tile1;
+    u8* dm0;
+    u8* dm1;
+    u16 tpage;
+    s32 hide;
+    u8 unusedLocals[0x20];
 
-    for (i = 0x762; i >= 0; i -= 0x17A) {
-        D_800E08C0[i] = 1;
+    hide = 1;
+    for (off = 0x762; off >= 0; off -= 0x17A) {
+        D_800E08C0[off] = hide;
     }
     D_8009D824 = 1;
     g_FieldDebugRb = 0;
     g_FieldDebugCurPage = 0;
     g_FieldDebugTransp = 0;
 
-    p0 = (u8*)&D_800E1028[0];
-    p1 = p0 + 0x1580;
+    sprt0 = (u8*)&D_800E1028[0];
+    sprt1 = sprt0 + 0x1580;
     for (i = 0; i < 0x158; i++) {
-        setlen(p0, 3);
-        setcode(p0, 0x74);
-        setlen(p1, 3);
-        setcode(p1, 0x74);
-        setSemiTrans(p0, 1);
-        setSemiTrans(p1, 1);
-        p0 += 0x10;
-        p1 += 0x10;
+        setlen(&sprt0[i * 0x10], 3);
+        setcode(&sprt0[i * 0x10], 0x74);
+        setlen(&sprt1[i * 0x10], 3);
+        setcode(&sprt1[i * 0x10], 0x74);
+        setShadeTex(&sprt0[i * 0x10], 1);
+        setShadeTex(&sprt1[i * 0x10], 1);
     }
 
     for (i = 0; i < 8; i++) {
         D_800E4200[i] = ((0x1E7 - i) << 6) | 0x10;
     }
 
-    p0 = (u8*)&D_800E3FA8[0];
-    p1 = p0 + 0xC0;
+    line0 = (u8*)&D_800E3FA8[0];
+    line1 = line0 + 0xC0;
     for (i = 0; i < 0xC; i++) {
-        setlen(p0, 3);
-        setcode(p0, 0x60);
-        setlen(p1, 3);
-        setcode(p1, 0x60);
-        setSemiTrans(p0, 1);
-        setSemiTrans(p1, 1);
-        p0 += 0x10;
-        p1 += 0x10;
+        setlen(&line0[i * 0x10], 3);
+        setcode(&line0[i * 0x10], 0x60);
+        setlen(&line1[i * 0x10], 3);
+        setcode(&line1[i * 0x10], 0x60);
+        setSemiTrans(&line0[i * 0x10], 1);
+        setSemiTrans(&line1[i * 0x10], 1);
     }
 
-    p0 = (u8*)&D_800E3B28[0];
-    p1 = p0 + 0x240;
+    tile0 = (u8*)&D_800E3B28[0];
+    tile1 = tile0 + 0x240;
     for (i = 0; i < 0x18; i++) {
-        setlen(p0, 5);
-        setcode(p0, 0x48);
-        *(u32*)(p0 + 0x14) = 0x55555555;
-        setlen(p1, 5);
-        setcode(p1, 0x48);
-        *(u32*)(p1 + 0x14) = 0x55555555;
-        p0 += 0x18;
-        p1 += 0x18;
+        setlen(&tile0[i * 0x18], 5);
+        setcode(&tile0[i * 0x18], 0x48);
+        *(u32*)((u8*)&tile0[i * 0x18] + 0x14) = 0x55555555;
+        setlen(&tile1[i * 0x18], 5);
+        setcode(&tile1[i * 0x18], 0x48);
+        *(u32*)((u8*)&tile1[i * 0x18] + 0x14) = 0x55555555;
     }
 
     if (GetGraphType() == 1 || GetGraphType() == 2) {
@@ -2022,16 +2042,13 @@ void FieldDebugInitBuffers(void) {
     } else {
         tpage = 0x1F;
     }
-    p0 = (u8*)&D_800E4128[0];
-    p1 = p0 + 0x48;
+    dm0 = (u8*)&D_800E4128[0];
+    dm1 = dm0 + 0x48;
     for (i = 0; i < 6; i++) {
-        SetDrawMode((DR_MODE*)p0, 0, 0, tpage, NULL);
-        SetDrawMode((DR_MODE*)p1, 0, 0, tpage, NULL);
-        p0 += 0xC;
-        p1 += 0xC;
+        SetDrawMode((DR_MODE*)&dm0[i * 0xC], 0, 0, tpage, NULL);
+        SetDrawMode((DR_MODE*)&dm1[i * 0xC], 0, 0, tpage, NULL);
     }
 }
-#endif
 
 void InitFieldDebugPages(void) {
     FieldDebugPageInit(5, 0x6C, 0, 0x6C, 0x52);
@@ -2116,31 +2133,40 @@ void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
     D_8009D824 = 1;
 }
 
-/* gcc hoists the array's %hi/%lo into a register because the same address is
- * read and written; the original rematerialises it through $at each time.
- * Codegen pinned via MASPSX_OVERRIDE: the #else body is the verified-correct
- * C, its bytes come from the reference .s (the $at-rematerialisation wall). */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugPageAddPos);
-#else
+/* The byte offset has to be a named local and the elements reached through a
+ * `u8*` cast: written as `D_800E0748[page * 189] += x` the index needs a
+ * scaling `sll`, and gcc folds the symbol's %hi/%lo into that same `addu`, so
+ * one base register serves both the load and the store. With `off` already
+ * holding the byte offset the address stays `(symbol)(reg)` in all four mems
+ * and the assembler rematerialises it through $at each time, which is what the
+ * original does. Splitting the `+=` into a load and a store is needed too --
+ * a compound assignment computes the address once by construction. */
 void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
-    D_8009D824 = 1;
-    D_800E0748[page * 189] += x;
-    D_800E074A[page * 189] += y;
-}
-#endif
+    s32 off;
+    s16 px;
+    s16 py;
 
-/* Same $at rematerialisation residue as FieldDebugPageAddPos above. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugPageAddSize);
-#else
+    D_8009D824 = 1;
+    off = page * 378;
+    px = *(s16*)((u8*)D_800E0748 + off);
+    py = *(s16*)((u8*)D_800E074A + off);
+    *(s16*)((u8*)D_800E0748 + off) = px + x;
+    *(s16*)((u8*)D_800E074A + off) = py + y;
+}
+
+/* Same shape as FieldDebugPageAddPos above; see the note there. */
 void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
-    D_8009D824 = 1;
-    D_800E074C[page * 189] += w;
-    D_800E074E[page * 189] += h;
-}
-#endif
+    s32 off;
+    s16 pw;
+    s16 ph;
 
+    D_8009D824 = 1;
+    off = page * 378;
+    pw = *(s16*)((u8*)D_800E074C + off);
+    ph = *(s16*)((u8*)D_800E074E + off);
+    *(s16*)((u8*)D_800E074C + off) = pw + w;
+    *(s16*)((u8*)D_800E074E + off) = ph + h;
+}
 bool FieldDebugPageIsRender(s16 arg0) { return D_800E08C0[arg0 * 378] == 0; }
 
 /* Blank all 24 rows of a debug page and restore its default colour. The row
@@ -2321,47 +2347,88 @@ void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
 }
 #endif
 
-/* Append a line to a debug page (no colour), wrapping back to the top row once
- * the page's pixel height can no longer hold another 10-pixel row. Same
- * $at-rematerialisation wall as AddColorStrNextDebugRow below: the original
- * rebuilds `&D_800E0754 + page*378` through $at on each access where gcc CSEs
- * it. Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", AddStrNextDebugRow);
-#else
-s32 AddStrNextDebugRow(s16 page, const char* str) {
-    char* rows = D_800E0758 + page * 378;
+/* The debug pages are a 378-byte record: a 0x10-byte header whose fields have
+ * their own splat symbols (D_800E0748 = x, 074A = y, 074C = w, 074E = h,
+ * 0754 = headRow) followed by 362 bytes of row text at D_800E0758. Only the
+ * header offsets the two Add*NextDebugRow functions reach off `rows` are given
+ * names here; everything else keeps its D_ symbol. */
+typedef struct {
+    s16 unk00[6];
+    s16 headRow;
+    s16 unk0E;
+} FieldDebugPageHdr;
 
-    FieldDebugStringCopy(&rows[D_800E0754[page * 189] * 14], str);
-    D_800E0754[page * 189]++;
-    if ((D_800E074E[page * 189] - 8) / 10 < D_800E0754[page * 189]) {
-        D_800E0754[page * 189] = 0;
+/* Append a line to a debug page (no colour), wrapping back to the top row once
+ * the page's pixel height can no longer hold another 10-pixel row.
+ *
+ * Two spellings carry this function, and neither is optional:
+ *
+ *   - the header fields are reached as `*(s16*)((u8*)D_800E0754 + off)` with
+ *     `off` already a *byte* offset. Indexed as `D_800E0754[page * 189]` the
+ *     element needs a scaling `sll`, and gcc folds the symbol's %hi/%lo into
+ *     that same `addu`, so one base register then serves every access. With
+ *     `off` already scaled the address stays `(symbol)(reg)` in the mem and
+ *     the assembler rebuilds it through $at each time, which is what the
+ *     original does.
+ *   - the store of the incremented head row goes through `hdr`, a pointer to
+ *     the record header derived from the *text* symbol (`D_800E0758 - 0x10`).
+ *     That is where `addiu s0,s0,-0x10` / `sh v0,0xc(s0)` comes from: `rows`
+ *     keeps the bare symbol live in a callee-saved register across the call,
+ *     and the header base is that register adjusted, not a fresh %hi/%lo.
+ *     Writing the store as `*(s16*)(rows - 4)` folds the two constants in the
+ *     tree and gives `sh v0,-4(s0)` instead -- 9 rows out. */
+s32 AddStrNextDebugRow(s16 page, const char* str) {
+    s32 off;
+    char* rows;
+    FieldDebugPageHdr* hdr;
+
+    off = page * 378;
+    rows = D_800E0758 + off;
+    FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
+    hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
+    hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
+    if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
+        *(s16*)((u8*)D_800E0754 + off)) {
+        *(s16*)((u8*)D_800E0754 + off) = 0;
     }
     D_8009D824 = 1;
     return 1;
 }
-#endif
 
 /* Append a coloured line to a debug page, wrapping back to the top row once the
- * page's pixel height can no longer hold another 10-pixel row.
+ * page's pixel height can no longer hold another 10-pixel row. Same two
+ * spellings as AddStrNextDebugRow above, plus the colour byte reached as
+ * `D_800E0758 + 0x150 + off` so that its base is the live `rows` register too.
  *
- * Semantically right, not yet matching. One root cause behind the register
- * renames: the original keeps only `page * 378` in a callee-saved register and
- * lets the assembler rebuild `&D_800E0754 + that` through $at on each of the
- * five accesses, where gcc CSEs the whole address into a second callee-saved
- * register. Dropping the `colors` local removed three spurious instructions and
- * fixed the frame size; the address CSE is what is left. */
+ * 1 row out, and it is pure post-reload scheduling: the `lui a0,0x6666` that
+ * materialises the /10 magic constant is issued in the first slot after the
+ * call's delay slot, where the target issues it two slots later, behind
+ * `addiu v0,s0,0x150` / `addu v0,s2,v0`. Both orders are legal and the
+ * dependency chains are identical, so the priority tie breaks the other way.
+ * Measured and rejected: declaring `colors` after `hdr`, computing `hdr`
+ * before the colour store, `*(colors + row)` instead of `colors[row]`,
+ * hoisting the quotient into an `s32 limit` local, and reversing the
+ * comparison -- all six produce the identical 1-row residue. Codegen pinned
+ * via MASPSX_OVERRIDE; the #else body is the verified-correct C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", AddColorStrNextDebugRow);
 #else
 s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
-    char* rows = D_800E0758 + page * 378;
+    s32 off;
+    char* rows;
+    u8* colors;
+    FieldDebugPageHdr* hdr;
 
-    FieldDebugStringCopy(&rows[D_800E0754[page * 189] * 14], str);
-    D_800E08A8[page * 378 + D_800E0754[page * 189]] = color;
-    D_800E0754[page * 189]++;
-    if ((D_800E074E[page * 189] - 8) / 10 < D_800E0754[page * 189]) {
-        D_800E0754[page * 189] = 0;
+    off = page * 378;
+    rows = D_800E0758 + off;
+    FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
+    colors = (u8*)(D_800E0758 + 0x150 + off);
+    colors[*(s16*)((u8*)D_800E0754 + off)] = color;
+    hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
+    hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
+    if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
+        *(s16*)((u8*)D_800E0754 + off)) {
+        *(s16*)((u8*)D_800E0754 + off) = 0;
     }
     D_8009D824 = 1;
     return 1;

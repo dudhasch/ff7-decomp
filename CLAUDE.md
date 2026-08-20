@@ -713,13 +713,94 @@ a near-miss, in rough order of frequency:
   have all been measured and do *not* move it: scalar `extern`, one-element
   array, struct member, `volatile` on the object, and a `volatile` store
   through a cast.
+* **A scaled subscript folds the symbol into the address register; a
+  pre-scaled byte offset does not.** This is the whole of the "`$at`
+  rematerialisation wall" that a dozen park notes in `src/field/` describe.
+  `arr[i * 189]` makes the address `(plus (symbol) (mult (reg) 2))`, so gcc has
+  to compute the scaled index into a pseudo anyway and folds `%hi`/`%lo` of the
+  symbol into that same `addu` — one base register then serves every access in
+  the function. Hand gcc the byte offset instead and the address stays
+  `(plus (symbol) (reg))`, which it leaves in the `mem`; the assembler then
+  rebuilds it through the `$at` macro at each use, three instructions a time,
+  which is what the original does:
+
+  ```c
+  off = page * 378;                              /* bytes, not elements */
+  px = *(s16*)((u8*)D_800E0748 + off);
+  *(s16*)((u8*)D_800E0748 + off) = px + x;
+  ```
+
+  The tell is `lui at / addiu at / addu at,at,<reg> / op 0(at)` repeated in the
+  target where your build has one `lui`/`addiu` pair and an `addu` into a
+  named register. Measured on `FieldDebugPageAddPos`: 26 rows as
+  `D_800E0748[page * 189] += x`, 0 in the form above. It also unblocked
+  `AddStrNextDebugRow`, which CLAUDE.md previously recorded as having no known
+  fix.
+* **A compound assignment computes the address once, by construction.**
+  `a[i] += x` expands the lvalue a single time and reuses the result for the
+  load and the store, so no spelling of the index can give you two `$at`
+  expansions. Split it into a load into a named local and a separate store
+  first, then apply the byte-offset form above; on `FieldDebugPageAddPos` the
+  split alone was worth an instruction count (26 changed / 3 inserted → 25
+  changed / 0 inserted) before the addressing was touched at all.
+* **A base an already-live symbol register can be adjusted to is written as an
+  offset from *that* symbol, and it needs a struct to keep the two constants
+  apart.** `addiu s0,s0,-0x10` / `addu s0,s1,s0` / `sh v0,0xc(s0)` is not cse
+  relating two symbols — it is one source expression `D_800E0758 - 0x10 + off`
+  reaching a field at `+0xC`. Spelled as pointer arithmetic (`rows - 4`) the
+  front end folds both constants in the tree and you get `sh v0,-4(s0)`
+  instead; the split survives only when the `+0xC` arrives at RTL as a
+  `COMPONENT_REF` on top of an address that already is `(plus (const) (reg))`,
+  because `plus_constant` will not fold a constant past a register. So declare
+  the record and cast to it:
+
+  ```c
+  hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
+  hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
+  ```
+
+  A named local for the pointer is required as well — inline, the same
+  expression folds. This is what `AddStrNextDebugRow` needs and it is worth 9
+  rows; `AddColorStrNextDebugRow` reaches its colour byte the same way, as
+  `D_800E0758 + 0x150 + off`.
+* **One pointer pair per loop, even for loops that do unrelated work.** A
+  single `p0`/`p1` pair reused by four setup loops is live across every call
+  between them, so gcc gives it a callee-saved register and every buffer base
+  is materialised into one; the original's first bases die in their own
+  preheader and sit in `$v0`. Separate variables per loop is the fix, and in
+  `FieldDebugInitBuffers` it was the difference between 59 rows and 12. Pair it
+  with the `&base[i * stride]` addressing from the `FieldModelLoadBcx` bullet
+  above — bumped pointers are bivs and gcc biases the reduced base to whichever
+  byte offset is referenced most (here `+7`, from `setcode` plus
+  `setShadeTex`'s read-modify-write), which turns `3(v1)`/`7(v1)` into
+  `-4(a0)`/`0(a0)` and is invisible in the loop body.
+* **A frame that is larger than your code needs, with the extra between the
+  outgoing-argument area and the register saves, is a local you cannot see.**
+  gcc's `expand_decl` gives every aggregate local a stack slot whether or not
+  any use of it survives, so a function can carry dead bytes that no
+  instruction names. Read the saved-register offsets: `sw ra,0x48(sp)` against
+  your `sw ra,0x28(sp)`, with the same five registers saved, means exactly 0x20
+  of locals you have not declared. Reserve the slot — `u8 unusedLocals[0x20];`
+  — and say in the comment that its identity is not recoverable, rather than
+  inventing a type for it. `FieldDebugInitBuffers` needs 0x20 this way, and the
+  frame alone was 12 of its 70 rows.
+* **`andi <reg>,<reg>,0xffff` on a value that is only ever passed on is a `u16`
+  local.** An `s32` has no widening node and emits nothing; the mask is the
+  declaration. `FieldDebugInitBuffers`' `tpage` is the case, and reading it as
+  noise costs the whole tail of the function.
+* **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
+  read-modify-write of byte 7 of the packet and look identical in a diff except
+  for the constant; do not assume a primitive-setup loop sets transparency
+  because the neighbouring loop does.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
-One near-miss that currently has no known fix: gcc hoists a global array's
-address out of a loop where the original re-materialises it through the
-assembler's `$at` macro each time. The C is otherwise byte-for-byte correct, so
-`AddStrNextDebugRow` stays `INCLUDE_ASM`. Its former twin
-`FieldDebugPagesResetPosSize` has since been solved and is plain C.
+The `$at` rematerialisation wall this section used to call unsolved -- gcc
+hoisting a global array's address where the original rebuilds it through the
+assembler's `$at` macro at each use -- is the scaled-subscript bullet above.
+`AddStrNextDebugRow`, `FieldDebugPageAddPos`, `FieldDebugPageAddSize`,
+`FieldDebugPagesResetPosSize` and `FieldDebugInitBuffers` are all plain
+matching C now. Every park note that names that wall is worth re-reading
+against those three bullets before spending a budget on the function.
 
 #### Four ways a clean-looking diff lies
 
