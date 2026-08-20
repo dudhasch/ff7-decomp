@@ -1052,29 +1052,7 @@ extern s32 D_800E0200;
 
 /* Build the 30 splash-sprite packet pairs for one field model's render slot:
  * two sprites per part, both 0x2C-coded semi-transparent, sharing the texture
- * page and CLUT, with the part's y offset negated into the second sprite.
- *
- * 12 rows out, and all twelve are one thing: the packet base is
- * strength-reduced onto `pkt + 0x58` (`addiu a0,s0,0xb4` and negative
- * displacements throughout) where the original keeps the plain base. That is
- * combine_givs picking the last address in the body as its representative --
- * the `-*parts` store at +0x58 -- and it happens for every spelling measured:
- * `pkt = &base[i * 0x5C]` at the top of the body, the same index written
- * inline at all 22 accesses with no pointer local at all, and a walked
- * `pkt += 0x5C`. The walked form gets the loop bound into a register
- * (`li t3,0x1f` / `slt`, which the target has and the indexed form's `slti`
- * does not) but costs a fourth saved register, so it measures 31 rows against
- * 12; a named `count` local for the bound made it 42.
- *
- * What the same pass did fix, from 43 rows: `tex` is a local holding 0x6C2C
- * assigned before the GetGraphType tests, which is what makes it live across
- * the second call and puts it in $s1 -- read back out of the asm as a literal
- * in the loop it lands in a caller-saved register and the whole preheader
- * renumbers. And the packet address must be indexed off the counter, not
- * walked, for the frame and saved-register list to come out right. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiInitSplashPkts);
-#else
+ * page and CLUT, with the part's y offset negated into the second sprite. */
 void KawaiInitSplashPkts(void* arg0, s32 arg1) {
     s16 clut;
     s16 tex;
@@ -1082,6 +1060,7 @@ void KawaiInitSplashPkts(void* arg0, s32 arg1) {
     u8* pkt;
     u16* parts;
     u8* base;
+    s32 count;
 
     base = (u8*)D_800E0200 + arg1 * 0xAC8;
     tex = 0x6C2C;
@@ -1090,13 +1069,14 @@ void KawaiInitSplashPkts(void* arg0, s32 arg1) {
     } else {
         clut = 0x9B;
     }
+    count = 0x1F;
     parts = (u16*)(*(u32*)((u8*)arg0 + 0x1C) + 4);
-    for (i = 1; i < 0x1F; i++) {
+    for (i = 1; i < count; i++) {
         pkt = &base[i * 0x5C];
-        pkt[0x7] = 0x2C;
-        pkt[0x2F] = 0x2C;
         pkt[0x3] = 9;
         pkt[0x2B] = 9;
+        pkt[0x7] = 0x2C;
+        pkt[0x2F] = 0x2C;
         pkt[0x2E] = 0x80;
         pkt[0x6] = 0x80;
         pkt[0x2D] = 0x80;
@@ -1112,12 +1092,11 @@ void KawaiInitSplashPkts(void* arg0, s32 arg1) {
         *(s16*)(pkt + 0x54) = 0;
         pkt[0x7] |= 2;
         pkt[0x2F] |= 2;
-        *(s16*)(pkt + 0x5A) = 0;
         *(s16*)(pkt + 0x58) = -*(s16*)parts;
+        *(s16*)(pkt + 0x5A) = 0;
         parts += 2;
     }
 }
-#endif
 
 s32 KawaiSetPartAttribute(FieldModelEntry* model, u8* data) {
     u8* parts;
@@ -9150,35 +9129,13 @@ s32 OpcodeFuncNfade(void) {
     return 0;
 }
 
-/* PARKED: 9 rows, all in one switch arm. The jump table and all four loads
- * match; what is left is cross-jumping. The original keeps the case 1/5/7/9
- * arm as its own block (lhu / nop / beqz / li 1 / j); gcc merges it into the
- * case 2/6/8/10 arm because both end in the same `return 1'. Not an alignment
- * problem -- this function's table is correctly placed since the split.
- *
- * Rejected, all 22 rows: switching on a plain (s16) cast of the member, on an
- * s32 temp, and on an s16 temp. All three let gcc fold the lhu + sll + sra
- * into a single lh. Only the volatile u16 read below reproduces the load form,
- * and it is what took the diff from 22 rows to 9.
- *
- * Next step is the permuter, not another hand-shaped attempt. */
-/* FADEW: block the script until the fade started by FADE/NFADE has finished.
- * What counts as finished depends on the fade's direction, so the switch is on
- * fadeType and the eleven arms collapse to three tests: a fade to black is done
- * when fadeAdjust has run down to 0, a fade from black when it has run up to
- * 0xFF, and the NFADE forms when it has reached fadeSpeed. Types 0 and 4 are
- * not fades and fall straight through.
- *
- * Every read of the three fields goes through a volatile u16. The original
- * loads each one zero-extended and then sign-extends it in registers
- * (lhu / sll / sra); reading the s16 members directly lets gcc fold the two
- * into a single lh, which is a byte shorter everywhere it appears. volatile is
- * the one thing that keeps the load in the form the member's own type implies.
- * The `!= 0` arm takes no cast because the original does not sign-extend
- * there -- a zero test does not need it. */
-#ifndef NON_MATCHINGS
 /* FADEW (0x6C): block the script until the active screen fade completes.
- * Returns 1 while waiting, 0 (advancing the PC) once done.
+ * Returns 1 while waiting, 0 (advancing the PC) once done. What counts as
+ * "complete" depends on the fade's direction, so the switch on fadeType
+ * collapses to three tests: a fade to black is done when fadeAdjust has run
+ * down to 0, a fade from black when it has reached 0xFF, and the NFADE forms
+ * when it equals fadeSpeed. Types 0 and 4 are not fades and fall straight
+ * through to the PC_INC.
  *
  * 26 rows -> 4, and three of the four corrections were semantic, read straight
  * off the jump table rather than guessed:
@@ -9193,13 +9150,31 @@ s32 OpcodeFuncNfade(void) {
  *     the load and gives `lh`; volatile pins the load as `lhu` and leaves the
  *     `sll`/`sra` as separate insns, which is what the target has -- and only
  *     where a signed compare needs them, so the `!= 0` arm keeps its bare
- *     `beqz`. This is the global-volatile idiom from CLAUDE.md applied to a
- *     struct member through a pointer.
+ *     `beqz`.
  *
- * The four rows left are one register: `adjust` gets $v1 where the target uses
- * $v0. Measured and rejected: all four declaration orders, block-scoped locals
- * per arm (9 rows), inline volatile reads with no local at all (9), reusing
- * `type` as the temp (6), and `s32 adjust` (11). Permuter food. */
+ * The four rows left are one register -- the first two arms load fadeAdjust
+ * into $v1 where the target uses $v0 -- and that register is not reachable,
+ * because it is what stops gcc cross-jumping. Both arms end
+ * `beqz <reg>,<PC_INC> / li v0,1 / j <epilogue>`; the moment the compare
+ * register agrees, those three insns are identical hard-register patterns and
+ * the post-reload jump_optimize merges arm 1 into arm 2, deleting them and
+ * leaving a bare `j` into the middle of arm 2. So every spelling that fixes
+ * the register costs 3 insns and measures 9 rows, and the parked body's
+ * "wrong" register is the only thing holding the two blocks apart.
+ *
+ * Measured and rejected, all 9 rows: both arms read inline with no local;
+ * arms 1-2 inline with arm 3 keeping locals; a second local for arm 3;
+ * block-scoped locals inside arm 3; all three arms inline. Distinct `goto`
+ * labels for the two arms' exits do not help either (one, the other, or both,
+ * with the labels placed immediately before the PC_INC) -- jump_optimize
+ * collapses labels that resolve to the same address before cross-jumping ever
+ * looks at the blocks. Also rejected earlier, at 22 rows: switching on a plain
+ * (s16) cast of the member, on an s32 temp, and on an s16 temp, all three of
+ * which fold the lhu/sll/sra into a single lh.
+ *
+ * Permuter food: what is needed is a shape that keeps the two arms apart for
+ * some reason other than the register, not another spelling of the same two
+ * tests. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFadew);
 #else
@@ -9239,42 +9214,6 @@ s32 OpcodeFuncFadew(void) {
         adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
         speed = ((volatile FieldState*)g_FieldState)->fadeSpeed;
         if (adjust != speed) {
-            return 1;
-        }
-        break;
-    }
-    PC_INC(1);
-    return 0;
-}
-#endif
-#else
-s32 OpcodeFuncFadew(void) {
-    if (g_DebugLevel & 3) {
-        DebugPrintOpcode("fadew", 0);
-    }
-    switch ((s16) * (volatile u16*)&g_FieldState->fadeType) {
-    case 1:
-    case 5:
-    case 7:
-    case 9:
-        if (*(volatile u16*)&g_FieldState->fadeAdjust != 0) {
-            return 1;
-        }
-        break;
-    case 2:
-    case 6:
-    case 8:
-    case 10:
-        if ((s16) * (volatile u16*)&g_FieldState->fadeAdjust < 0xFF) {
-            return 1;
-        }
-        break;
-    case 0:
-    case 4:
-        break;
-    default:
-        if ((s16) * (volatile u16*)&g_FieldState->fadeAdjust !=
-            (s16) * (volatile u16*)&g_FieldState->fadeSpeed) {
             return 1;
         }
         break;

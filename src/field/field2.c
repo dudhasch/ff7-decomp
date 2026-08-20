@@ -792,17 +792,13 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
  * the end of the line" apart from "near it". The line parameter runs in 8-bit
  * fixed point, so the projection stays in integer arithmetic throughout.
  *
- * 6 rows, and all six are the same thing: the original keeps the return value
- * in a0 and copies it to v0 in the `jr ra` delay slot, where gcc coalesces the
- * pseudo straight into v0 and leaves the slot empty. Every path -- the three
- * `li -1` delay slots and the final `addu` -- follows that one choice.
- * Measured and rejected: a separate `s32 d` for the squared distance (either
- * declaration order) and returning the sum expression without a variable, all
- * three of which score 22. Reusing `t` for both the line parameter and the
- * distance is right. Permuter food. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntitySqrDistToLine);
-#else
+ * The `goto out` is the whole function: the original returns through a single
+ * exit, so the value lives in a pseudo ($a0) and is copied to $v0 in the
+ * `jr ra` delay slot. Written as two `return` statements gcc coalesces each
+ * one straight into $v0, the delay slot stays empty, and the three `li -1`
+ * paths and the final `addu` all name the wrong register -- 6 rows. It has to
+ * be the *same* variable that held the line parameter, too: a second local for
+ * the distance measures 22, and pre-setting it to -1 above the tests 30. */
 s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
     s32 t;
 
@@ -825,12 +821,13 @@ s32 FieldEntitySqrDistToLine(FieldLine* line, s32* point, s32* nearest) {
             t = (nearest[0] - point[0]) * (nearest[0] - point[0]) +
                 (nearest[1] - point[1]) * (nearest[1] - point[1]) +
                 (nearest[2] - point[2]) * (nearest[2] - point[2]);
-            return t;
+            goto out;
         }
     }
-    return -1;
+    t = -1;
+out:
+    return t;
 }
-#endif
 
 /* Walk the map's 32 trigger lines against one entity and raise the script
  * requests each is due. Entering a line's radius arms touch-on (and, if the
@@ -919,10 +916,23 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
  * pad2 current has the bit and pad2 previous does not. An entity under script
  * control (scriptedMoveMode) triggers nothing.
  *
- * Not matching: register assignment only. The original keeps the walking line
- * pointer in s2 and the constant 1 in s3; gcc allocates them the other way
- * round. Neither declaration order, statement order, nor indexing with
- * `line[i]` instead of a walking pointer shifts the tie. */
+ * 19 rows, and all but one of them are a single tie-break: the original keeps
+ * the walking line pointer in s2 and the hoisted constant 1 in s3, gcc the
+ * other way round, and every use of either follows. global-alloc orders
+ * allocnos by roughly log2(refs) * refs / live_length, and the 1 has seven
+ * references against the pointer's three, so the constant is allocated first
+ * and takes s2. Nothing tried moves it: declaration order, statement order,
+ * indexing `line[i]` instead of walking, and assigning `pad2` before or after
+ * the `from[]` stores (22 rows) were all measured. The one row that did move
+ * is the facing test -- `(u8)(...) >= 0x40` written inline gives `sltiu`,
+ * because combine folds the zero-extension into the compare and proves the
+ * sign bit clear; through the `s32 diff` local below the extension stays its
+ * own `andi` and the compare is `slti`, which is what the target has.
+ *
+ * The remaining tell is that `&g_FieldPad2State` is materialised early here
+ * and late in the target, after the `li 1`. Reading the two words inline as
+ * `(&g_FieldPad2State)[0]` and `[1]`, so the address becomes a movable rather
+ * than a source statement, is worse (49 rows) -- the local is right. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineInteract);
 #else
@@ -931,6 +941,7 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
     s32* nearest;
     s32 i;
     s32 sqrDist;
+    s32 diff;
     u32* pad2;
 
     from = (s32*)0x1F800000;
@@ -962,7 +973,8 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
         if (line->isOnLine != 1) {
             continue;
         }
-        if ((u8)(line->proximityAngle - entity->MoveDir + 0x20) >= 0x40) {
+        diff = (u8)(line->proximityAngle - entity->MoveDir + 0x20);
+        if (diff >= 0x40) {
             continue;
         }
         if (!(pad2[0] & 0x20)) {
@@ -1279,7 +1291,24 @@ extern u8 D_801144D8; // blink RNG cursor
  * order, but the allocator then gives `blinkClosed` s5 and `faceSel` s6 where
  * the target has them the other way round: 13 rows. Measured both ways at s32
  * and u8; the type changes nothing except that a u8 `blinkOpen` folds back
- * into the compare and disappears. Declaration order is inert, as ever. */
+ * into the compare and disappears. Declaration order is inert, as ever.
+ *
+ * Re-measured against the current body, four more spellings, all of them
+ * dead ends and all of them cheap to re-try by accident:
+ *   - `blinkOpen = 1;` as an extra loop-top local, in either declaration
+ *     order, used in the guard, in the else-arm stores, or in both: 2 rows,
+ *     byte-identical to the body below. cse folds the local straight back into
+ *     its uses, so no second movable is ever created and the order does not
+ *     move. It is not that the spelling is wrong -- it compiles to nothing.
+ *   - `blinkClosed = 2;` moved below the first `continue`, or below both: 55.
+ *     One conditional jump ahead of it is enough to lose the hoist.
+ *   - no local at all, the literal 2 written twice inside the arm: 55.
+ *   - a loop-top local holding 1 with the literal 2 left in the arm: 55.
+ * So the 2 is hoistable only from the loop top, and the 1's first use is the
+ * `BlinkOn` guard below it; in insn order the 2 therefore always comes first
+ * and no rewriting of these two statements reverses it. Whatever the original
+ * did, it did not put a plain constant assignment at the top of this loop --
+ * look for a third statement there that materialises the 1. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else

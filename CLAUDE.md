@@ -1074,6 +1074,41 @@ a near-miss, in rough order of frequency:
   `base` is dead afterwards matches either way, because gcc drops the biv
   increment entirely — so a run of loops where all but the last are two rows
   out is this.
+* **`slt` against a register where you emit `slti` means the loop bound is a
+  named local — and where you assign it decides everything.** A literal bound
+  is folded into the compare immediate and no spelling of the loop reaches
+  `slt`; a local does, because cse stops at the loop-top label (it has a second
+  reference, the back edge) and never propagates the constant into the body.
+  But the local has to be assigned *after* the last call before the loop:
+  written as an initialiser, or anywhere above the calls, it is live across
+  them, takes a callee-saved register and rewrites the whole frame — 42 rows
+  against 12 on `KawaiInitSplashPkts`, which is what made this look like a dead
+  end for two sessions. Assigned at the join right below the `if`/`else` it is
+  7. A walked pointer reaches the same `slt` (the end pointer is a register by
+  construction) but costs a fourth saved register, so it measures worse; the
+  bound local is the cheap way to get there.
+* **A store whose value is read back later in the same loop body is pulled to
+  the top by the scheduler, so its emitted position says nothing about source
+  order.** `pkt[7] = 0x2C; … pkt[7] |= 2;` comes out as `sb` at the very top
+  with the `lbu` for the read-modify-write right behind it, whatever order the
+  source used. What *does* carry the source order is the run of hoisted
+  loop-invariant constants in the preheader: `move_movables` emits them in insn
+  order, so `li t2,0x9` before `li t1,0x2c` means the 9-stores are written
+  first even though the 0x2C-stores are emitted first. Read the preheader, not
+  the body, when a diff is nothing but two constants swapping registers — it
+  was 6 of `KawaiInitSplashPkts`' last 7 rows.
+* **`move v0,<reg>` in the `jr ra` delay slot means one `return`, not two.**
+  Two `return` statements let gcc coalesce each value straight into `$v0`, and
+  the delay slot stays empty; a single exit keeps the value in an ordinary
+  pseudo until the very end, so the copy into `$v0` is a real insn and the
+  slot-filler takes it. Write the success path as `goto out;` with the failure
+  value assigned below it and one `return` at `out:`. It has to be the *same*
+  variable that held whatever the function computed on the way — a fresh
+  `result` local measures 22 rows and pre-setting it before the tests 30, where
+  reusing the existing one matches. `FieldEntitySqrDistToLine` in
+  `src/field/field2.c` needed exactly this, and the tell is unmistakable: every
+  `li <reg>,-1` in the failure paths names a caller-saved register that is not
+  `$v0`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
