@@ -511,6 +511,30 @@ a near-miss, in rough order of frequency:
   twice inside an `if` in its third loop; taking `flip = &D_800DF114;` before
   the loop and writing `*flip ^= 1;` hoists the address the way the target has
   it, and is worth 19 rows.
+* **A hardware address used a dozen times wants a named pointer local; gcc
+  will not spend a callee-saved register on a constant by itself.** Written as
+  `*(s32*)0x1F800004` at every access, gcc rematerialises `lui <t>,0x1f80`
+  ahead of each one -- `CONST_COSTS` makes a two-instruction constant cheaper
+  than a register that has to be saved and restored -- so a function that
+  touches the PS1 scratchpad fifteen times pays fifteen `lui`s where the target
+  pays one and addresses everything as `N($s0)`. `s32* scratch =
+  (s32*)0x1F800000;` in front of the loop is worth 51 rows in
+  `FieldEntityWalkmechCross`. Where the local is *assigned* is load-bearing in
+  the other direction: accesses written before the assignment keep the `$at`
+  macro form, which is exactly what the target has for the two stores that
+  precede its first use.
+* **m2c's nested reconstruction of an if/else-if chain is not the source, and
+  transcribing it lets cse delete the target's redundant tests.** A chain
+  `if (a) X else if (b) Y else if (c) Z else W` behind a fast-path
+  `if (!a && !b && !c) goto done;` compiles with each fast-path branch
+  *threaded* straight at its arm, leaving the chain's own tests behind as
+  apparently-redundant re-tests of the same registers. m2c reads that CFG back
+  as a nest in which the re-tests sit inside the arm that already proved them,
+  and written that way cse folds them and the arms come out in a different
+  order -- 19 rows in `FieldEntityWalkmechCross`, and the give-away is an arm
+  falling through immediately after the tests where the target has a different
+  one there. When m2c produces a nest with a test that looks obviously
+  redundant, try the flat chain first.
 * **The counter-merging rule scales to a whole function, and the partition is
   outer-versus-inner, not adjacent-versus-distant.** `FieldInitDefaultValues`
   in `src/field/field4.c` runs eleven loops over three hundred lines, and the

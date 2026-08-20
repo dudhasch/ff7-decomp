@@ -732,148 +732,168 @@ s32 FieldEntityAutoMove(FieldEntity* entity, s16 range) {
     return 1;
 }
 
-extern /*?*/ s32 D_8009ACA6;
+extern u8 D_8009ACA6[]; // per-triangle edge access bits, one bit per link
 extern u16 D_80113F28;
-extern s32 D_80114458;
+extern u16* D_80114458; // per-triangle edge links, three u16 per triangle
 extern s16 D_801144CC;
 
 /* Detect when a moving entity crosses a walkmesh triangle edge: walk the
  * triangle's edges, compute the cross products against the entity's position,
  * and return which edge (if any) the entity is crossing plus the resulting Z.
- * Uses the 0x1F8000xx scratchpad for the per-edge vectors. m2c seed; residual
- * is the cross-product regalloc and the scratchpad access ordering. Pinned
- * pending a permuter pass. */
+ *
+ * The scratchpad at 0x1F800000 holds the three edge vectors (0x00, 0x10, 0x20,
+ * three s32 each) and the entity's position in mesh units at 0x30/0x34, with
+ * 0x38 zeroed. D_80114458 is a pointer to three u16 per triangle -- the
+ * neighbouring triangle across each edge, or a negative value for none -- and
+ * D_8009ACA6 is the per-link access bitmap, one bit per link id, indexed
+ * `link >> 3` and shifted by `link - (link >> 3) * 8`. Crossing an edge whose
+ * bit is clear just moves to the neighbour and starts over; crossing one whose
+ * bit is set (or which has no neighbour) is a real collision and returns +-8
+ * according to the sign of the edge dotted with the movement delta.
+ *
+ * 141 rows, 4 inserted, from an m2c seed that did not compile. Two things got
+ * it there and both are general:
+ *
+ *   - A named `s32* scratch = (s32*)0x1F800000;` assigned in front of the
+ *     loop. Written as raw `*(s32*)0x1F8000NN` casts at every access, gcc
+ *     rematerialises `lui <t>,0x1f80` before each one -- fifteen extra
+ *     instructions -- because a two-instruction constant is cheaper than a
+ *     callee-saved register by CONST_COSTS. The target holds the base in $s0
+ *     across the whole function, which is what the local produces. The two
+ *     stores *before* the loop stay as raw casts: the target reaches them
+ *     through the `$at` macro, and it does so precisely because they precede
+ *     the first use that creates the pseudo. 211 rows to 160.
+ *   - The three arms as a flat `if (c0 < 0) ... else if (c1 < 0) ... else if
+ *     (c2 < 0) ... else goto loop;` chain behind a fast-path
+ *     `if (c0 >= 0 && c1 >= 0 && c2 >= 0) goto done;`. m2c reconstructs this
+ *     as a nest whose inner arms re-test c1 and c2 -- which is what the target
+ *     does, since jump threading redirects each fast-path branch straight at
+ *     its arm and leaves the chain's own tests behind -- but transcribed
+ *     literally the nest lets cse fold the re-tests, and the edge-2 arm then
+ *     falls through where the target has edge 0. 160 rows to 141.
+ *
+ * Measured and rejected:
+ *   - the mesh address as a byte offset, `(s16*)(id * 0x18 + 8 +
+ *     (s32)D_800E4274)` rather than `D_800E4274 + id * 0xC + 4`: 148 (and 167
+ *     against the pre-chain body). The target does add the constant before the
+ *     base -- `addiu a1,a2,0x10` then `addu a1,a1,v0` -- so the CLAUDE.md
+ *     `n + (s32)p` rule points the right way and still measures worse; the
+ *     cost is elsewhere in the same block.
+ *   - m2c's arm polarity, accept-in-the-then-arm for edges 0 and 1 and
+ *     retry-in-the-then-arm for edge 2: 162.
+ *   - every declaration order of the locals, including `result` first and
+ *     last: all exactly 141.
+ *   - the fast path as `!(c0 >= 0 && c1 >= 0 && c2 >= 0)` and as
+ *     `c0 < 0 || c1 < 0 || c2 < 0`: both exactly 141, so fold normalises the
+ *     three spellings and the remaining branch-polarity row is not reachable
+ *     from the condition.
+ *
+ * What is left is 96 rows of pure register naming and nothing else: `triId`
+ * and `result` swap $s2/$s3, and the three cross products and their operand
+ * temporaries rotate with them. A permuter target. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
-s32 FieldEntityWalkmechCross(u16* arg0, void* arg1, void* arg2, void* arg3) {
-    s16 var_v0_3;
-    s32 temp_a0_2;
-    s32 temp_a1;
-    s32 temp_a2;
-    s32 temp_a2_2;
-    s32 temp_a2_3;
-    s32 temp_a2_4;
-    s32 temp_t1;
-    s32 temp_v0;
-    s32 temp_v0_2;
-    s32 temp_v0_3;
-    s32 var_s3;
-    s32 var_v0;
-    s32 var_v0_2;
-    u16 temp_v1;
-    u16 var_a0;
-    void* temp_a0;
+s32 FieldEntityWalkmechCross(
+    u16* triId, VECTOR* pos, VECTOR* delta, VECTOR* outEdge) {
+    s16* v;
+    s32 cross0;
+    s32 cross1;
+    s32 cross2;
+    s32 px;
+    s32 py;
+    s32* scratch;
+    s32 result;
+    s32 shift;
+    s16 link;
+    s16 edge;
 
-    var_s3 = 0;
-    var_v0 = arg1->unk0;
-    if (var_v0 < 0) {
-        var_v0 += 0xFFF;
+    result = 0;
+    px = pos->vx;
+    if (px < 0) {
+        px += 0xFFF;
     }
-    *(s32*)0x1F800030 = var_v0 >> 0xC;
-    var_v0_2 = arg1->unk4;
-    if (var_v0_2 < 0) {
-        var_v0_2 += 0xFFF;
+    *(s32*)0x1F800030 = px >> 12;
+    px = pos->vy;
+    if (px < 0) {
+        px += 0xFFF;
     }
-    *(s32*)0x1F800034 = var_v0_2 >> 0xC;
+    *(s32*)0x1F800034 = px >> 12;
     *(s32*)0x1F800038 = 0;
     D_80113F28 = 0xFFFF;
-loop_5:
-    temp_a2 = *arg0 * 0x18;
+    scratch = (s32*)0x1F800000;
+loop:
     FieldEntityVectorSub(
-        (s32*)0x1F800000, temp_a2 + 8 + D_800E4274, temp_a2 + D_800E4274);
-    temp_a2_2 = *arg0 * 0x18;
-    FieldEntityVectorSub((s32*)0x1F800000, temp_a2_2 + 0x10 + D_800E4274,
-                         temp_a2_2 + 8 + D_800E4274);
-    temp_a2_3 = *arg0 * 0x18;
-    FieldEntityVectorSub((s32*)0x1F800000, temp_a2_3 + D_800E4274,
-                         temp_a2_3 + 0x10 + D_800E4274);
-    temp_v1 = *arg0;
-    temp_a1 = *(s32*)0x1F800030;
-    temp_a0 = (temp_v1 * 0x18) + D_800E4274;
-    temp_a2_4 = *(s32*)0x1F800034;
-    temp_t1 = ((temp_a1 - temp_a0->unk8) * *(s32*)0x1F800014) -
-              ((temp_a2_4 - temp_a0->unkA) * *(s32*)0x1F800010);
-    temp_a0_2 = ((temp_a1 - temp_a0->unk10) * *(s32*)0x1F800024) -
-                ((temp_a2_4 - temp_a0->unk12) * *(s32*)0x1F800020);
-    if ((((temp_a1 - temp_a0->unk0) * *(s32*)0x1F800004) -
-         ((temp_a2_4 - temp_a0->unk2) * *(s32*)0x1F800000)) >= 0) {
-        if (temp_t1 >= 0) {
-            if (temp_a0_2 < 0) {
-                if (temp_t1 < 0) {
-                    goto block_15;
-                }
-                if (temp_a0_2 < 0) {
-                    var_a0 = ((temp_v1 * 6) + D_80114458)->unk4;
-                    temp_v0 = (s32)(var_a0 << 0x10) >> 0x13;
-                    if (((s16)var_a0 >= 0) &&
-                        !(((s32) * (&D_8009ACA6 + temp_v0) >>
-                           ((s16)var_a0 - (temp_v0 * 8))) &
-                          1)) {
-                        goto block_23;
-                    }
-                    arg3->unk0 = (s32) * (s32*)0x1F800020;
-                    arg3->unk4 = (s32) * (s32*)0x1F800024;
-                    arg3->unk8 = (s32) * (s32*)0x1F800028;
-                    var_s3 = -8;
-                    if (((*(s32*)0x1F800020 * arg2->unk0) +
-                         (*(s32*)0x1F800024 * arg2->unk4)) >= 0) {
-                        var_s3 = 8;
-                    }
-                    var_v0_3 = 2;
-                    goto block_27;
-                }
-                goto loop_5;
-            }
-        } else {
-        block_15:
-            var_a0 = ((temp_v1 * 6) + D_80114458)->unk2;
-            temp_v0_2 = (s32)(var_a0 << 0x10) >> 0x13;
-            if (((s16)var_a0 < 0) || (((s32) * (&D_8009ACA6 + temp_v0_2) >>
-                                       ((s16)var_a0 - (temp_v0_2 * 8))) &
-                                      1)) {
-                arg3->unk0 = (s32) * (s32*)0x1F800010;
-                arg3->unk4 = (s32) * (s32*)0x1F800014;
-                arg3->unk8 = (s32) * (s32*)0x1F800018;
-                var_s3 = -8;
-                if (((*(s32*)0x1F800010 * arg2->unk0) +
-                     (*(s32*)0x1F800014 * arg2->unk4)) >= 0) {
-                    var_s3 = 8;
-                }
-                var_v0_3 = 1;
-            block_27:
-                D_801144CC = var_v0_3;
-                D_80113F28 = *arg0;
-            } else {
-                goto block_23;
-            }
-        }
-    } else {
-        var_a0 = *((temp_v1 * 6) + D_80114458);
-        temp_v0_3 = (s32)(var_a0 << 0x10) >> 0x13;
-        if (((s16)var_a0 < 0) || (((s32) * (&D_8009ACA6 + temp_v0_3) >>
-                                   ((s16)var_a0 - (temp_v0_3 * 8))) &
-                                  1)) {
-            arg3->unk0 = (s32) * (s32*)0x1F800000;
-            arg3->unk4 = (s32) * (s32*)0x1F800004;
-            arg3->unk8 = (s32) * (s32*)0x1F800008;
-            var_s3 = -8;
-            if (((*(s32*)0x1F800000 * arg2->unk0) +
-                 (*(s32*)0x1F800004 * arg2->unk4)) >= 0) {
-                var_s3 = 8;
-            }
-            D_801144CC = 0;
-            D_80113F28 = *arg0;
-        } else {
-        block_23:
-            *arg0 = var_a0;
-            goto loop_5;
-        }
+        scratch, D_800E4274 + *triId * 0xC + 4, D_800E4274 + *triId * 0xC);
+    FieldEntityVectorSub(scratch + 4, D_800E4274 + *triId * 0xC + 8,
+                         D_800E4274 + *triId * 0xC + 4);
+    FieldEntityVectorSub(
+        scratch + 8, D_800E4274 + *triId * 0xC, D_800E4274 + *triId * 0xC + 8);
+    v = D_800E4274 + *triId * 0xC;
+    px = scratch[12];
+    py = scratch[13];
+    cross0 = (px - v[0]) * scratch[1] - (py - v[1]) * scratch[0];
+    cross1 = (px - v[4]) * scratch[5] - (py - v[5]) * scratch[4];
+    cross2 = (px - v[8]) * scratch[9] - (py - v[9]) * scratch[8];
+    if (cross0 >= 0 && cross1 >= 0 && cross2 >= 0) {
+        goto done;
     }
-    arg1->unk8 = FieldEntityCalculateZ(
-        (s32*)0x1F800000, (s32*)0x1F800010, (s32*)0x1F800030,
-        (*arg0 * 0x18) + D_800E4274);
-    return var_s3;
+    if (cross0 < 0) {
+        link = D_80114458[*triId * 3];
+        shift = link >> 3;
+        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
+            goto retry;
+        }
+        outEdge->vx = scratch[0];
+        outEdge->vy = scratch[1];
+        outEdge->vz = scratch[2];
+        result = -8;
+        if (scratch[0] * delta->vx + scratch[1] * delta->vy >= 0) {
+            result = 8;
+        }
+        D_801144CC = 0;
+        D_80113F28 = *triId;
+    } else if (cross1 < 0) {
+        link = D_80114458[*triId * 3 + 1];
+        shift = link >> 3;
+        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
+            goto retry;
+        }
+        outEdge->vx = scratch[4];
+        outEdge->vy = scratch[5];
+        outEdge->vz = scratch[6];
+        result = -8;
+        if (scratch[4] * delta->vx + scratch[5] * delta->vy >= 0) {
+            result = 8;
+        }
+        edge = 1;
+        goto store;
+    } else if (cross2 < 0) {
+        link = D_80114458[*triId * 3 + 2];
+        shift = link >> 3;
+        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
+        retry:
+            *triId = link;
+            goto loop;
+        }
+        outEdge->vx = scratch[8];
+        outEdge->vy = scratch[9];
+        outEdge->vz = scratch[10];
+        result = -8;
+        if (scratch[8] * delta->vx + scratch[9] * delta->vy >= 0) {
+            result = 8;
+        }
+        edge = 2;
+    store:
+        D_801144CC = edge;
+        D_80113F28 = *triId;
+    } else {
+        goto loop;
+    }
+done:
+    pos->vz = FieldEntityCalculateZ(
+        scratch, scratch + 4, scratch + 12, D_800E4274 + *triId * 0xC);
+    return result;
 }
 #endif
 
