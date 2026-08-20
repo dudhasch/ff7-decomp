@@ -816,23 +816,27 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
 }
 
 /* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
- * copies the 0x1E-byte descriptor into the slot: 11 GTE params (colour matrix
- * data[0..2], light matrix data[3..0xA]) then eight LE u16 light/vertex colour
- * pairs. data[0]==1 expands the slot into the D_800DFE1C scratch buffer (the
- * pairs byte-wise, lo then hi) and calls the handwritten GTE driver. The slot
- * reuses the KawaiFadeModelColor table's 0x3C stride but a flat lighting-blob
- * layout. The apply arm re-materialises each scratch byte store through $at
- * (the scratch-quad $at remat wall, same as KawaiFadeModelColor); codegen
- * pinned via MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiSetCustomLighting);
-#else
+ * copies the 0x1E-byte descriptor into the slot -- twelve loose bytes, then
+ * nine LE u16 words -- and returns 1; data[0]==1 expands the slot into the
+ * D_800DFE1C scratch buffer and calls the handwritten GTE driver, returning 0;
+ * any other sub-command returns 0. The slot reuses the KawaiFadeModelColor
+ * table's 0x3C stride with a flat lighting-blob layout.
+ *
+ * Same recipe as KawaiFadeModelColor: a switch rather than two ifs, the table
+ * reached as `D_800DFE1C + 0x20` so cse can hand the scratch quad's address
+ * back as `-0x20($a3)`, and 0x38 of stack reserved for locals the original
+ * allocates and never uses. The seed also had the byte/word boundary one byte
+ * short in both arms, and read each pair through a `u16 pair` local: the
+ * target reads the low half as a byte (`lbu`) and the high half through its
+ * own `lhu` plus `srl`, which is what two separate reads of the same u16
+ * field give -- assigning a u16 into a u8 narrows the load. */
 s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
     u8* slot;
-    u16 pair;
+    u8 unusedLocals[0x38];
 
-    slot = (u8*)&D_800DFE3C[data[1]];
-    if (data[0] == 0) {
+    slot = (u8*)&KawaiFadeSlots[data[1]];
+    switch (data[0]) {
+    case 0:
         slot[0x00] = data[0x02];
         slot[0x01] = data[0x03];
         slot[0x02] = data[0x04];
@@ -844,6 +848,7 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
         slot[0x08] = data[0x0A];
         slot[0x09] = data[0x0B];
         slot[0x0A] = data[0x0C];
+        slot[0x0B] = data[0x0D];
         *(u16*)(slot + 0x0C) = data[0x0E] | (data[0x0F] << 8);
         *(u16*)(slot + 0x0E) = data[0x10] | (data[0x11] << 8);
         *(u16*)(slot + 0x10) = data[0x12] | (data[0x13] << 8);
@@ -851,63 +856,69 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
         *(u16*)(slot + 0x14) = data[0x16] | (data[0x17] << 8);
         *(u16*)(slot + 0x16) = data[0x18] | (data[0x19] << 8);
         *(u16*)(slot + 0x18) = data[0x1A] | (data[0x1B] << 8);
+        *(u16*)(slot + 0x1A) = data[0x1C] | (data[0x1D] << 8);
         *(u16*)(slot + 0x1C) = data[0x1E] | (data[0x1F] << 8);
-        return 0;
-    }
-    if (data[0] == 1) {
-        D_800DFE1C[0] = slot[0];
-        D_800DFE1C[1] = slot[1];
-        D_800DFE1C[2] = slot[2];
-        D_800DFE1C[3] = slot[3];
-        D_800DFE1C[4] = slot[4];
-        D_800DFE1C[5] = slot[5];
-        D_800DFE1C[6] = slot[6];
-        D_800DFE1C[7] = slot[7];
-        D_800DFE1C[8] = slot[8];
-        D_800DFE1C[9] = slot[9];
+        return 1;
+    case 1:
+        D_800DFE1C[0x00] = slot[0x00];
+        D_800DFE1C[0x01] = slot[0x01];
+        D_800DFE1C[0x02] = slot[0x02];
+        D_800DFE1C[0x03] = slot[0x03];
+        D_800DFE1C[0x04] = slot[0x04];
+        D_800DFE1C[0x05] = slot[0x05];
+        D_800DFE1C[0x06] = slot[0x06];
+        D_800DFE1C[0x07] = slot[0x07];
+        D_800DFE1C[0x08] = slot[0x08];
+        D_800DFE1C[0x09] = slot[0x09];
         D_800DFE1C[0x0A] = slot[0x0A];
-        pair = *(u16*)(slot + 0x0C);
-        D_800DFE1C[0x0B] = pair;
-        D_800DFE1C[0x0C] = pair >> 8;
-        pair = *(u16*)(slot + 0x0E);
-        D_800DFE1C[0x0D] = pair;
-        D_800DFE1C[0x0E] = pair >> 8;
-        pair = *(u16*)(slot + 0x10);
-        D_800DFE1C[0x0F] = pair;
-        D_800DFE1C[0x10] = pair >> 8;
-        pair = *(u16*)(slot + 0x12);
-        D_800DFE1C[0x11] = pair;
-        D_800DFE1C[0x12] = pair >> 8;
-        pair = *(u16*)(slot + 0x14);
-        D_800DFE1C[0x13] = pair;
-        D_800DFE1C[0x14] = pair >> 8;
-        pair = *(u16*)(slot + 0x16);
-        D_800DFE1C[0x15] = pair;
-        D_800DFE1C[0x16] = pair >> 8;
-        pair = *(u16*)(slot + 0x18);
-        D_800DFE1C[0x17] = pair;
-        D_800DFE1C[0x18] = pair >> 8;
-        D_800DFE1C[0x1B] = slot[0x1C];
+        D_800DFE1C[0x0B] = slot[0x0B];
+        D_800DFE1C[0x0C] = *(u16*)(slot + 0x0C);
+        D_800DFE1C[0x0D] = *(u16*)(slot + 0x0C) >> 8;
+        D_800DFE1C[0x0E] = *(u16*)(slot + 0x0E);
+        D_800DFE1C[0x0F] = *(u16*)(slot + 0x0E) >> 8;
+        D_800DFE1C[0x10] = *(u16*)(slot + 0x10);
+        D_800DFE1C[0x11] = *(u16*)(slot + 0x10) >> 8;
+        D_800DFE1C[0x12] = *(u16*)(slot + 0x12);
+        D_800DFE1C[0x13] = *(u16*)(slot + 0x12) >> 8;
+        D_800DFE1C[0x14] = *(u16*)(slot + 0x14);
+        D_800DFE1C[0x15] = *(u16*)(slot + 0x14) >> 8;
+        D_800DFE1C[0x16] = *(u16*)(slot + 0x16);
+        D_800DFE1C[0x17] = *(u16*)(slot + 0x16) >> 8;
+        D_800DFE1C[0x18] = *(u16*)(slot + 0x18);
+        D_800DFE1C[0x19] = *(u16*)(slot + 0x18) >> 8;
+        D_800DFE1C[0x1A] = *(u16*)(slot + 0x1A);
+        D_800DFE1C[0x1B] = *(u16*)(slot + 0x1A) >> 8;
+        D_800DFE1C[0x1C] = *(u16*)(slot + 0x1C);
+        D_800DFE1C[0x1D] = *(u16*)(slot + 0x1C) >> 8;
         KawaiSetCustomLightToModelPkts(model, D_800DFE1C);
         return 0;
     }
     return 0;
 }
-#endif
 
 /* Fade a model's vertex colour over time below a light level (KAWAI
  * sub-command). Four channels (cur@0/2/4/6, target@8/A/C/E, delta@10/12/14/16,
  * unk18@0x18, done@0x19 in the 0x3C-stride slot table). data[0]==0 inits the
- * slot from twelve LE u16 descriptor words; data[0]==1 exports the four cur
- * channels + unk18 to the D_800DFE1C scratch buffer, pushes them to the
- * below-level packets, then advances each channel toward its target with the
- * sign-aware clamp and bumps done once all four reach 0xF. Returns 1 while
- * fading, 0 when done. The scratch-quad $at remat in the apply arm is the wall
- * (same as KawaiFadeModelColor); codegen pinned via MASPSX_OVERRIDE, #else is
- * the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiColorFadeBelowLvl);
-#else
+ * slot from twelve LE u16 descriptor words and returns 1; data[0]==1 exports
+ * the four cur channels + unk18 to the D_800DFE1C scratch buffer, pushes them
+ * to the below-level packets, advances each channel toward its target with the
+ * sign-aware clamp, bumps done once all four reach 0xF, and returns 0; any
+ * other sub-command returns 1.
+ *
+ * The four-channel twin of KawaiFadeModelColor and it needs every one of that
+ * function's spellings: the switch, the table reached as `D_800DFE1C + 0x20`,
+ * `done = 0` at the top of the arm so it lives across the packet push, one
+ * shared clamp block per channel reached by two gotos, and the last channel's
+ * positive arm written out as an explicit `goto cur3clamp` / `goto cur3done`
+ * pair. 0x50 of dead locals here rather than 0x38.
+ *
+ * One extra: the init arm writes `slot->unk18` before `slot->done`, even
+ * though the target stores 0x19 before 0x18. Two stores through the same
+ * pointer at different constant offsets do not alias, so sched2 reorders them
+ * freely -- reading the store order back out of the target and writing it down
+ * puts the `lbu` of data[0x1A] one slot too late, and is the only row that
+ * separates the two spellings.
+ */
 typedef struct {
     /* 0x00 */ u16 cur0;
     /* 0x02 */ u16 cur1;
@@ -928,9 +939,11 @@ typedef struct {
 s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
     KawaiFadeBelowLvlSlot* slot;
     s32 done;
+    u8 unusedLocals[0x50];
 
-    slot = (KawaiFadeBelowLvlSlot*)&D_800DFE3C[data[1]];
-    if (data[0] == 0) {
+    slot = (KawaiFadeBelowLvlSlot*)&KawaiFadeSlots[data[1]];
+    switch (data[0]) {
+    case 0:
         slot->cur0 = data[0x02] | (data[0x03] << 8);
         slot->cur1 = data[0x04] | (data[0x05] << 8);
         slot->cur2 = data[0x06] | (data[0x07] << 8);
@@ -943,11 +956,11 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
         slot->delta1 = data[0x14] | (data[0x15] << 8);
         slot->delta2 = data[0x16] | (data[0x17] << 8);
         slot->delta3 = data[0x18] | (data[0x19] << 8);
-        slot->done = 0;
         slot->unk18 = data[0x1A];
-        return 0;
-    }
-    if (data[0] == 1) {
+        slot->done = 0;
+        return 1;
+    case 1:
+        done = 0;
         D_800DFE1C[0] = slot->cur0;
         D_800DFE1C[1] = slot->cur0 >> 8;
         D_800DFE1C[2] = slot->cur1;
@@ -961,13 +974,12 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
         if (slot->done != 0) {
             return 1;
         }
-        done = 0;
         slot->cur0 += slot->delta0;
         if (slot->delta0 >= 0) {
             if ((s16)slot->cur0 < slot->target0) {
                 goto cur0done;
             }
-        } else if (slot->target0 < (s16)slot->cur0) {
+        } else if ((s16)slot->cur0 > slot->target0) {
             goto cur0done;
         }
         slot->cur0 = slot->target0;
@@ -978,7 +990,7 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
             if ((s16)slot->cur1 < slot->target1) {
                 goto cur1done;
             }
-        } else if (slot->target1 < (s16)slot->cur1) {
+        } else if ((s16)slot->cur1 > slot->target1) {
             goto cur1done;
         }
         slot->cur1 = slot->target1;
@@ -989,7 +1001,7 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
             if ((s16)slot->cur2 < slot->target2) {
                 goto cur2done;
             }
-        } else if (slot->target2 < (s16)slot->cur2) {
+        } else if ((s16)slot->cur2 > slot->target2) {
             goto cur2done;
         }
         slot->cur2 = slot->target2;
@@ -997,12 +1009,14 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
     cur2done:
         slot->cur3 += slot->delta3;
         if (slot->delta3 >= 0) {
-            if ((s16)slot->cur3 < slot->target3) {
-                goto cur3done;
+            if ((s16)slot->cur3 >= slot->target3) {
+                goto cur3clamp;
             }
-        } else if (slot->target3 < (s16)slot->cur3) {
+            goto cur3done;
+        } else if ((s16)slot->cur3 > slot->target3) {
             goto cur3done;
         }
+    cur3clamp:
         slot->cur3 = slot->target3;
         done |= 8;
     cur3done:
@@ -1011,9 +1025,8 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
         }
         return 0;
     }
-    return 0;
+    return 1;
 }
-#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetLightingToModelPkts);
 
