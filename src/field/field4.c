@@ -687,26 +687,66 @@ typedef struct {
     /* 0x10 */ s16 deltaB;
     /* 0x12 */ u8 unk12;
     /* 0x13 */ u8 done;
+    /* 0x14 */ u8 unused[0x28];
 } KawaiColorFadeSlot;
 
-extern KawaiColorFadeSlot D_800DFE3C[16];
 extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
+extern KawaiColorFadeSlot D_800DFE3C[16];
+
+/* The slot table starts 0x20 past the scratch quad. Reaching it that way,
+ * rather than through its own D_800DFE3C symbol, is what lets cse hand the
+ * scratch's own address back as `-0x20($a2)` off the table base register. */
+#define KawaiFadeSlots ((KawaiColorFadeSlot*)(D_800DFE1C + 0x20))
 
 /* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
- * the slot from the descriptor; data[0]==1 exports the current colour to the
- * scratch quad, pushes it to the packets, and advances each channel toward its
- * target, clamping. Returns 1 while fading, 0 when done. The scratch-quad $at
- * remat and the slot*0x3C strength reduction are the wall; codegen pinned via
- * MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiFadeModelColor);
-#else
+ * the slot from the descriptor and returns 1; data[0]==1 exports the current
+ * colour to the scratch quad, pushes it to the packets, advances each channel
+ * toward its target with clamping, and returns 0 (1 if the slot was already
+ * finished); any other sub-command returns 1.
+ *
+ * Six things this needed, and the first three were semantics, not codegen:
+ *
+ *   - the slot stride is 0x3C, not the 0x14 of live fields. The target's
+ *     `sll v0,v1,4 / subu v0,v0,v1 / sll v0,v0,2` is x*60; a 0x14 struct gives
+ *     x*20 and every later offset is wrong.
+ *   - the dispatch is a `switch`, not two `if`s. `beqz v1,case0` /
+ *     `li v0,1` / `beq v1,v0,case1` / `j default` is exactly what
+ *     expand_end_case emits for a two-case compare chain, and it reads
+ *     data[0] once.
+ *   - the return values are 1 / 0 / 1, not 1 / 1 / 0. The default's `1` is the
+ *     `li v0,0x1` the switch already materialised as its compare constant.
+ *   - the slot table is reached as `D_800DFE1C + 0x20`, not through its own
+ *     D_800DFE3C symbol. cse links two constants only when they share a
+ *     symbol_ref base, so spelling it this way is what lets it hand the
+ *     scratch quad's own address back as `-0x20($a2)` off the table base
+ *     register -- both for the first scratch store and for the call argument.
+ *     Named through D_800DFE3C, gcc materialises a second base register.
+ *   - `done = 0` sits at the top of the arm, before the packet push. It is
+ *     dead there, but it makes the variable live across the call, which is
+ *     what puts it in $s1 rather than a caller-saved register -- and the whole
+ *     frame layout follows. sched2 then sinks the `move s1,zero` into the
+ *     delay slot of the already-finished test, which is where the target has
+ *     it.
+ *   - each channel's clamp is one block reached by two `goto`s, not a body
+ *     duplicated in both arms. Duplicated, cross-jumping merges only the tail
+ *     and cse folds `done |= 1` to `li a1,1` because it can still see that
+ *     `done` is 0; shared, the block has two predecessors, cse knows nothing,
+ *     and the `ori s1,s1,0x1` the target has survives.
+ *
+ * The blue channel needs its `goto` written out the long way. R and G take
+ * the natural `if (cur < target) goto skip;` and come out with the branch
+ * inverted around a jump to the clamp, which is what the target has; B with
+ * the same spelling gets the direct `bnez` instead, and no operand order or
+ * ternary rewrite moves it. Spelling B's positive arm as an explicit
+ * `goto clampB` plus `goto skipB` reproduces the target's polarity. */
 s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
     KawaiColorFadeSlot* slot;
     s32 done;
+    u8 unusedLocals[0x38];
 
-    slot = &D_800DFE3C[data[1]];
-    if (data[0] == 0) {
+    slot = &KawaiFadeSlots[data[1]];
+    switch (data[0]) {
+    case 0:
         slot->curR = data[0x02] | (data[0x03] << 8);
         slot->curG = data[0x04] | (data[0x05] << 8);
         slot->curB = data[0x06] | (data[0x07] << 8);
@@ -719,8 +759,8 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
         slot->unk12 = data[0x14];
         slot->done = 0;
         return 1;
-    }
-    if (data[0] == 1) {
+    case 1:
+        done = 0;
         D_800DFE1C[0] = slot->curR;
         D_800DFE1C[1] = slot->curR >> 8;
         D_800DFE1C[2] = slot->curG;
@@ -732,45 +772,48 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
         if (slot->done != 0) {
             return 1;
         }
-        done = 0;
         slot->curR += slot->deltaR;
         if (slot->deltaR >= 0) {
-            if (slot->curR >= slot->targetR) {
-                slot->curR = slot->targetR;
-                done |= 1;
+            if (slot->curR < slot->targetR) {
+                goto skipR;
             }
-        } else if (slot->curR <= slot->targetR) {
-            slot->curR = slot->targetR;
-            done |= 1;
+        } else if (slot->curR > slot->targetR) {
+            goto skipR;
         }
+        slot->curR = slot->targetR;
+        done |= 1;
+    skipR:
         slot->curG += slot->deltaG;
         if (slot->deltaG >= 0) {
-            if (slot->curG >= slot->targetG) {
-                slot->curG = slot->targetG;
-                done |= 2;
+            if (slot->curG < slot->targetG) {
+                goto skipG;
             }
-        } else if (slot->curG <= slot->targetG) {
-            slot->curG = slot->targetG;
-            done |= 2;
+        } else if (slot->curG > slot->targetG) {
+            goto skipG;
         }
+        slot->curG = slot->targetG;
+        done |= 2;
+    skipG:
         slot->curB += slot->deltaB;
         if (slot->deltaB >= 0) {
             if (slot->curB >= slot->targetB) {
-                slot->curB = slot->targetB;
-                done |= 4;
+                goto clampB;
             }
-        } else if (slot->curB <= slot->targetB) {
-            slot->curB = slot->targetB;
-            done |= 4;
+            goto skipB;
+        } else if (slot->curB > slot->targetB) {
+            goto skipB;
         }
+    clampB:
+        slot->curB = slot->targetB;
+        done |= 4;
+    skipB:
         if (done == 7) {
             slot->done++;
         }
-        return 1;
+        return 0;
     }
-    return 0;
+    return 1;
 }
-#endif
 
 /* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
  * copies the 0x1E-byte descriptor into the slot: 11 GTE params (colour matrix
