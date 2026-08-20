@@ -4894,14 +4894,25 @@ block_17:
 }
 #endif
 
-/* FMOVE (0xAD): move the current entity to a target while keeping its facing.
- * If a move is in flight (scriptedMoveMode 1), poll it (return 1) until
- * ActionState 2 marks it done, then clear the mode. Otherwise start the move.
- * Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE (the
- * g_FieldModels *0x84 base regalloc wall). */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFmove);
-#else
+/* FMOVE (0xAD): walk the current entity to a target point, letting it turn to
+ * face the way it is going -- it clears DirLock, where CMOVE below sets it.
+ * If a move is in flight (scriptedMoveMode 1) it polls: ActionState 1 means
+ * still walking (return 1), 2 means arrived (clear the mode and step the PC),
+ * and anything else falls through to the same block the not-in-flight path
+ * reaches, which arms a fresh move.
+ *
+ * The parked body this replaces was three separate programs' worth of wrong,
+ * and none of it was visible as anything but register noise: it read the two
+ * coordinates from (2,4)/(3,6) instead of (1,2)/(2,4), cleared MoveDirAdd
+ * (0x35) instead of DirLock (0x37), and -- the 25-row one -- wrote the
+ * ActionState dispatch as `if (state == 1) state = 2; else if (state == 2)
+ * ...' with its own `return 1', where the target sets nothing in the first
+ * arm and sends its *default* into the shared tail block. That is the
+ * "block reached by both a failed test and a switch default is a
+ * fallthrough" idiom: two predecessors mean cse knows nothing on entry, which
+ * is why the target rebuilds the whole g_FieldModels *0x84 index there
+ * instead of reusing the base it already had. Read the branch structure off
+ * the target before blaming that rebuild on register allocation. */
 s32 OpcodeFuncFmove(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("fmove", 5);
@@ -4911,38 +4922,35 @@ s32 OpcodeFuncFmove(void) {
         return 0;
     }
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
-    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveDirAdd = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
-        (s32)FieldEventReadMemoryS16(2, 4) << 12;
+        (s32)FieldEventReadMemoryS16(1, 2) << 12;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
-        (s32)FieldEventReadMemoryS16(3, 6) << 12;
+        (s32)FieldEventReadMemoryS16(2, 4) << 12;
     if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 2;
-        } else if (
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+        switch (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState) {
+        case 1:
+            return 1;
+        case 2:
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
                 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
             PC_INC(6);
             return 0;
         }
-        return 1;
     }
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
     return 1;
 }
-#endif
 
-/* CMOVE (0xA9): start (or continue) a scripted walk of the current entity to a
- * target point. Unlike JUMP it never blocks -- it arms the walk mode and steps
- * over its own 6 bytes every call; the field model update drives the walk
- * per-frame. The g_FieldModels *0x84 base regalloc is the wall; codegen pinned
- * via MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCmove);
-#else
+/* CMOVE (0xA9): walk the current entity to a target point holding its facing
+ * -- it sets DirLock, where FMOVE below clears it, and clears it again on
+ * arrival. Same three-way poll as FMOVE: ActionState 1 keeps waiting, 2
+ * finishes and steps the PC, anything else falls into the shared block that
+ * arms a fresh move. Landed from FMOVE's reading of the target; see that
+ * function's note for why the default has to reach the tail block rather than
+ * return on its own. */
 s32 OpcodeFuncCmove(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("cmove", 5);
@@ -4958,11 +4966,10 @@ s32 OpcodeFuncCmove(void) {
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
         (s32)FieldEventReadMemoryS16(2, 4) << 12;
     if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode == 1) {
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
-            PC_INC(6);
-            return 0;
-        }
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+        switch (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState) {
+        case 1:
+            return 1;
+        case 2:
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
                 0;
@@ -4973,10 +4980,8 @@ s32 OpcodeFuncCmove(void) {
     }
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
-    PC_INC(6);
-    return 0;
+    return 1;
 }
-#endif
 
 s32 OpcodeFuncFcfix(void) {
     if (g_DebugLevel & 3) {
@@ -4991,14 +4996,18 @@ s32 OpcodeFuncFcfix(void) {
 }
 
 /* JUMP (0xC0): make the current entity jump to a target over a number of
- * frames. If a jump is already in flight, poll it (return 1) until ActionState
- * 2 marks it done, then clear the move mode. Otherwise start a new jump. The
- * scalar clear-stores go through the full g_FieldModels[...] indexed expression
- * (the original rematerialises the address). Codegen pinned via
- * MASPSX_OVERRIDE; the #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncJump);
-#else
+ * frames. ActionState 1 keeps polling (return 1), 2 finishes -- and *returns*,
+ * stepping the PC past the opcode -- and anything else falls through to arm a
+ * fresh jump. The parked body had the ActionState 2 arm fall through into the
+ * arming code instead of returning, which is a different program and was worth
+ * 17 of the 23 rows.
+ *
+ * The last row was the `beq' to the ActionState 1 arm having an unfilled delay
+ * slot: written as two `if's the following `li v0,2' is live on the taken path
+ * (v0 is the return register and that path returns 1), so reorg will not steal
+ * it. Written as a `switch', `expand_end_case' materialises the same constant
+ * as its own compare setup and the slot is filled. Same two arms either way --
+ * see OpcodeFuncFmove above, which needs the switch for a different reason. */
 s32 OpcodeFuncJump(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("jump", 8);
@@ -5009,13 +5018,15 @@ s32 OpcodeFuncJump(void) {
     }
     if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode ==
         SMODE_JUMP) {
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 1) {
+        switch (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState) {
+        case 1:
             return 1;
-        }
-        if (g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState == 2) {
+        case 2:
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
                 SMODE_NONE;
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            PC_INC(11);
+            return 0;
         }
     }
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode =
@@ -5031,7 +5042,6 @@ s32 OpcodeFuncJump(void) {
         FieldEventReadMemoryS16(4, 9);
     return 1;
 }
-#endif
 
 /*
  * Field-script opcode LADER: send a model up or down a ladder or climb path.
@@ -8492,7 +8502,17 @@ s32 OpcodeFuncSolid(void) {
  * result into an `s16` or `s32` local ahead of both stores (22 rows, 3
  * inserted) and swapping the two statements so the call is first (18 rows, 5
  * inserted) -- both trade changed rows for inserted ones and are worse.
- * Permuter food. */
+ *
+ * The tail merge above has now been attacked directly and all three spellings
+ * are worse, so it is not simply a matter of writing the exit twice.
+ * Duplicating `PC_INC(7); return 0;' into both arms, either inside the
+ * if/else or with the first arm as an early return, emits the whole tail
+ * twice with no cross-jumping at all (48 rows, 8 inserted, both spellings).
+ * Computing `pc = &g_FieldScriptPC[g_CurrentEntity];' per arm and doing
+ * `*pc += 7;' once after gets the shape right on paper but costs a pseudo
+ * (27 rows). Note both builds already put &g_FieldScriptPC in $s0 across the
+ * function, so the register is not the difference -- only how many copies of
+ * the four-instruction index computation survive. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
@@ -8949,12 +8969,17 @@ s32 FieldEventSplitJoinEndMove(s16 entityId) {
 
 /* Begin a party member's turn to a facing during a SPLIT or JOIN. Sets the
  * turn target and step budget, then if the raw delta would exceed half a
- * circle wraps the target the short way round. Codegen pinned via
- * MASPSX_OVERRIDE: the #else body is the verified-correct C; its bytes come
- * from the reference .s (the g_FieldModels *0x84 base register allocation). */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitJoinSetTurn);
-#else
+ * circle wraps the target the short way round.
+ *
+ * Two things that read as noise and are not. The first store goes through the
+ * array, not through `model' -- taking the pointer there makes gcc reuse the
+ * one base for the store that follows, where the original recomputes the *0x84
+ * index. And the wrap test is spelled `TurnEnd > TurnStart', not the more
+ * natural `TurnStart < TurnEnd': gcc 2.6.3 emits the two `sll'/`sra' casts in
+ * source-operand order, so the reversed spelling is the same test with the two
+ * sign-extensions -- and every register downstream of them -- the other way
+ * round. It was the whole 16-row residue. Reversing the *arms* instead
+ * (`>=' with the bodies swapped) does not do it; only the operands move. */
 void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
     FieldEntity* model;
     s16 delta;
@@ -8963,8 +8988,7 @@ void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
         FieldDebugAddParseValueToPage2("set turn=", endDir & 0xFF, 2);
     }
     if (g_EntityToModel[entityId] != 0xFF) {
-        model = &g_FieldModels[g_EntityToModel[entityId]];
-        model->TurnStart = startDir & 0xFF;
+        g_FieldModels[g_EntityToModel[entityId]].TurnStart = startDir & 0xFF;
         g_FieldModels[g_EntityToModel[entityId]].TurnType = 2;
         g_FieldModels[g_EntityToModel[entityId]].TurnStep = 0;
         g_FieldModels[g_EntityToModel[entityId]].TurnSteps = 0x10;
@@ -8975,7 +8999,7 @@ void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
             delta = ~delta + 1;
         }
         if (delta >= 0x81) {
-            if ((s16)model->TurnStart < (s16)model->TurnEnd) {
+            if ((s16)model->TurnEnd > (s16)model->TurnStart) {
                 model->TurnEnd -= 0x100;
             } else {
                 model->TurnEnd += 0x100;
@@ -8983,7 +9007,6 @@ void FieldEventSplitJoinSetTurn(s16 entityId, s16 startDir, s16 endDir) {
         }
     }
 }
-#endif
 
 /* Poll one party member's turn during a SPLIT or JOIN. Returns 1 once the
  * entity has finished turning -- or has no model to turn -- and 0 while it is
