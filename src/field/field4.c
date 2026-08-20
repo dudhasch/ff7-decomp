@@ -5537,36 +5537,40 @@ s32 OpcodeFuncOfstw(void) {
  * PC re-runs the opcode next frame; TurnType 3 means the turn just completed,
  * so clear it and fall through.
  *
- * Instruction-for-instruction identical; what is left is where gcc cross-jumps
- * the PC_INC tail. The original merges the three paths *after* the reload of
- * g_CurrentEntity, so the model == 0xFF path reuses the copy loaded at the top
- * of the function; gcc merges two instructions earlier and reloads. Writing the
- * tail out twice stops it cross-jumping at all (9 extra instructions), and
- * inverting the test to an early return flips the branch to `bne`. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnw);
-#else
+ * Every early exit writes its own `PC_INC(1); return 0;` -- three copies of
+ * the tail in the source. gcc's cross-jumping then merges the common *suffix*
+ * only, from the `%hi(g_FieldScriptPC)` on, and the two early copies reuse the
+ * `g_CurrentEntity` value that is still live in $a0 while the copy after the
+ * stores reloads it (the stores may alias). Written the other way -- one
+ * trailing tail with the body wrapped in `if (idx != 0xFF)` -- there is a
+ * single tail with a single reload, and the two branches that should enter the
+ * suffix at its second instruction enter it at its first: 26 rows. Duplicating
+ * the tail is not the same as defeating cross-jumping; it is how you choose
+ * *where* the merge point lands. */
 s32 OpcodeFuncTurnw(void) {
     FieldEntity* model;
 
-    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
-        if (g_DebugLevel & 3) {
-            DebugPrintOpcode("turnw", 0);
-        }
-        model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-        if (model->TurnType != 0) {
-            if (model->TurnType != 3) {
-                return 1;
-            }
-            model->TurnType = 0;
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
-        }
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(1);
+        return 0;
     }
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("turnw", 0);
+    }
+    model = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (model->TurnType == 0) {
+        PC_INC(1);
+        return 0;
+    }
+    if (model->TurnType != 3) {
+        return 1;
+    }
+    model->TurnType = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
     PC_INC(1);
     return 0;
 }
-#endif
 
 /* TURN (0xB5): turn the current entity to a target direction over a number of
  * steps. If the previous turn finished (TurnType 3) clear it and advance. If an
@@ -9073,49 +9077,74 @@ s32 OpcodeFuncNfade(void) {
  * The `!= 0` arm takes no cast because the original does not sign-extend
  * there -- a zero test does not need it. */
 #ifndef NON_MATCHINGS
-/* FADEW (0x6C): block the script until the active screen fade completes. The
- * wait test depends on the fade type: subtractive fades complete when
- * fadeAdjust reaches 0, the hold-colour fades when fadeAdjust reaches
- * fadeSpeed, and the rest when fadeAdjust hits 0. Returns 1 while waiting, 0
- * (advancing the PC) once done. Jump-table fadeType dispatch; the .rodata phase
- * wall. Codegen pinned via MASPSX_OVERRIDE, #else is the verified C. */
+/* FADEW (0x6C): block the script until the active screen fade completes.
+ * Returns 1 while waiting, 0 (advancing the PC) once done.
+ *
+ * 26 rows -> 4, and three of the four corrections were semantic, read straight
+ * off the jump table rather than guessed:
+ *   - the table has ELEVEN entries, 0..10, not twelve. `sltiu v0,v1,0xb`.
+ *   - FFT_INSTANT and FFT_INSTANT_BLACK advance unconditionally -- their table
+ *     slots point at the PC_INC tail itself, not at any test.
+ *   - the "to inv4 / to standard" fades wait for `fadeAdjust >= 0xFF`, not for
+ *     `== 0`. The tell is `slti v0,v0,0xff` in an arm the old body had testing
+ *     against zero, and it is a different program, not a different schedule.
+ *   - fadeType, fadeAdjust and fadeSpeed are read through a
+ *     `(volatile FieldState*)` cast. Plainly typed, gcc folds the widening into
+ *     the load and gives `lh`; volatile pins the load as `lhu` and leaves the
+ *     `sll`/`sra` as separate insns, which is what the target has -- and only
+ *     where a signed compare needs them, so the `!= 0` arm keeps its bare
+ *     `beqz`. This is the global-volatile idiom from CLAUDE.md applied to a
+ *     struct member through a pointer.
+ *
+ * The four rows left are one register: `adjust` gets $v1 where the target uses
+ * $v0. Measured and rejected: all four declaration orders, block-scoped locals
+ * per arm (9 rows), inline volatile reads with no local at all (9), reusing
+ * `type` as the temp (6), and `s32 adjust` (11). Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFadew);
 #else
 s32 OpcodeFuncFadew(void) {
+    s16 type;
+    s16 adjust;
+    s16 speed;
+
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("fadew", 0);
     }
-    switch (g_FieldState->fadeType) {
-    case FFT_INV4_TO_FIELD_SUB:
-    case FFT_FIELD_TO_INV4_SUB:
-    case FFT_STANDARD_TO_FIELD_ADD:
-    case FFT_FIELD_TO_STANDARD_ADD:
-        if (g_FieldState->fadeAdjust == 0) {
-            PC_INC(1);
-            return 0;
-        }
-        return 1;
+    type = ((volatile FieldState*)g_FieldState)->fadeType;
+    switch (type) {
     case FFT_INSTANT:
     case FFT_INSTANT_BLACK:
+        break;
+    case FFT_INV4_TO_FIELD_SUB:
+    case FFT_STANDARD_TO_FIELD_ADD:
     case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
-    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
     case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
+        adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
+        if (adjust != 0) {
+            return 1;
+        }
+        break;
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_FIELD_TO_STANDARD_ADD:
+    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
     case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
-        if (g_FieldState->fadeAdjust == 0) {
-            PC_INC(1);
-            return 0;
+        adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
+        if (adjust < 0xFF) {
+            return 1;
         }
-        return 1;
+        break;
     case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
-    case FFT_FIELD_TO_STANDARD_ADD_HOLD_COLOR:
     default:
-        if (g_FieldState->fadeAdjust == g_FieldState->fadeSpeed) {
-            PC_INC(1);
-            return 0;
+        adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
+        speed = ((volatile FieldState*)g_FieldState)->fadeSpeed;
+        if (adjust != speed) {
+            return 1;
         }
-        return 1;
+        break;
     }
+    PC_INC(1);
+    return 0;
 }
 #endif
 #else

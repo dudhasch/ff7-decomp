@@ -920,6 +920,34 @@ a near-miss, in rough order of frequency:
   followed by a padding or `unkNN` byte, means the original wrote both at once:
   `*(u16*)&state->pcDirection = GET_PARAM_U8(9);`. `OpcodeFuncMjump` and
   `FieldEntityGatewayMapLoad` both do this with `FieldState.pcDirection`.
+* **Duplicate the exit tail at every early return; cross-jumping decides where
+  the merge lands.** A function whose body is wrapped in `if (cond) { ... }`
+  with one trailing `PC_INC(1); return 0;` compiles to a single tail with a
+  single reload of whatever the tail needs. Written instead as an early
+  `if (!cond) { PC_INC(1); return 0; }` — the tail spelled out at each exit —
+  cross-jumping merges only the common *suffix*, and the early copies reuse the
+  value still live in a register while the copy after the body's stores reloads
+  it (the stores may alias). The tell is a branch that enters the shared tail
+  one or two instructions *past* its first insn. `OpcodeFuncTurnw` in
+  `src/field/field4.c` matched on exactly this, from 26 rows; note this is not
+  the same as the `KawaiFadeModelColor` bullet above, which is about *avoiding*
+  duplication so cse keeps knowing what the variables held.
+* **A struct member read through a `(volatile T*)` cast gets the global-volatile
+  treatment without touching the header.** `((volatile FieldState*)g_FieldState)
+  ->fadeAdjust` loads `lhu` and leaves the `sll`/`sra` as separate insns, where
+  the plainly-typed member folds the widening into the load and gives `lh` —
+  and it leaves a bare `beqz` where no signed compare needs the extension.
+  `OpcodeFuncFadew` needs this for three members at once. Reach for it when a
+  diff is `lh` against `lhu` plus a shift pair on a *member*, since retyping the
+  member would change every other function that touches it.
+* **Read a jump table's arm count and its arm *tests* off the target before
+  touching codegen.** `sltiu v0,v1,0xb` means eleven cases, not twelve; a table
+  slot pointing straight at the function's tail means that case does the work
+  unconditionally; and `slti v0,v0,0xff` in an arm your C tests against zero
+  means the arm is a different *program*, not a different schedule. All three
+  were wrong in `OpcodeFuncFadew`'s parked body and together were worth 22 of
+  its 26 rows. A `.rodata+0xNN` grouping line in `diff.py` output tells you
+  which table slots reach which arm — read it like a case list.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
