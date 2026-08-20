@@ -7993,7 +7993,13 @@ s32 OpcodeFuncAdpal2(void) {
  * which `move_movables' will not hoist at all: 46 rows), declaring it after
  * the `color' read (no change), u16 `color' with the products cast to u32
  * (25), and u16 mulR/mulG with u8 mulB, which is what the target's
- * `andi 0xffff' on two of the three factors looks like it wants (29). */
+ * `andi 0xffff' on two of the three factors looks like it wants (29). Also
+ * rejected, from re-reading the residue as a typing problem rather than a
+ * hoist-order one: u16 `color' alone (MPPAL 22 / MPPAL2 28), u8 for all three
+ * factors (19 / 24), and both together (26 / 29). The target's extra
+ * `andi a1,a3,0xffff' in the loop body and this build's extra
+ * `andi t1,s3,0xffff' in the preheader do look like a u16-versus-u32 pair, and
+ * they are not -- every combination is worse than the u32 body below. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal2);
 #else

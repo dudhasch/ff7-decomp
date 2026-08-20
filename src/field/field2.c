@@ -1009,34 +1009,28 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
 }
 #endif
 
-/* Walk the map's 32 trigger lines against one entity and raise the script
- * requests each one is due. Entering a line's radius arms its touch-on script
- * and leaving it arms touch-off, with `touch` holding the edge state between
- * frames. The talk request additionally needs the entity facing within +/-32
- * of the line's proximity angle and the OK button newly pressed this frame --
- * pad2 current has the bit and pad2 previous does not. An entity under script
- * control (scriptedMoveMode) triggers nothing.
+/* Walk the 32 field lines against one entity: enter/leave each line's trigger
+ * volume, and fire its on/off scripts. The `active = 1;` at the top of the loop
+ * body is load-bearing and is not a style choice.
  *
- * 19 rows, and all but one of them are a single tie-break: the original keeps
- * the walking line pointer in s2 and the hoisted constant 1 in s3, gcc the
- * other way round, and every use of either follows. global-alloc orders
- * allocnos by roughly log2(refs) * refs / live_length, and the 1 has seven
- * references against the pointer's three, so the constant is allocated first
- * and takes s2. Nothing tried moves it: declaration order, statement order,
- * indexing `line[i]` instead of walking, and assigning `pad2` before or after
- * the `from[]` stores (22 rows) were all measured. The one row that did move
- * is the facing test -- `(u8)(...) >= 0x40` written inline gives `sltiu`,
- * because combine folds the zero-extension into the compare and proves the
- * sign bit clear; through the `s32 diff` local below the extension stays its
- * own `andi` and the compare is `slti`, which is what the target has.
+ * gcc 2.6.3 hoists two loop-invariants here -- the constant 1 and the address
+ * of g_FieldPad2State -- and `move_movables` emits them in the order
+ * `scan_loop` recorded them, which is insn order in the loop body. The target
+ * has the 1 first. With `pad2 = &g_FieldPad2State;` written *above* the loop it
+ * is not a movable at all but an ordinary statement, so it lands ahead of both
+ * (19 rows); written as the loop's first statement it becomes a movable but
+ * still precedes the 1, whose first use is the `isActive` compare below it
+ * (17 rows). Naming the constant and assigning it above the pointer puts the
+ * two movables in the target's order, and the whole s2/s3 rename cascade goes
+ * with it. Placing the pointer after the two `continue` guards instead is
+ * worse (20/2): one conditional jump ahead of it is enough to lose the hoist.
  *
- * The remaining tell is that `&g_FieldPad2State` is materialised early here
- * and late in the target, after the `li 1`. Reading the two words inline as
- * `(&g_FieldPad2State)[0]` and `[1]`, so the address becomes a movable rather
- * than a source statement, is worse (49 rows) -- the local is right. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineInteract);
-#else
+ * Two earlier findings that still hold: the facing test is `(u8)(...) >= 0x40`
+ * through the `s32 diff` local, not inline -- inline, combine folds the
+ * zero-extension into the compare, proves the sign bit clear and gives `sltiu`
+ * where the target has `slti` -- and the line pointer is walked, not indexed.
+ * Reading the pad words as `(&g_FieldPad2State)[0]`/`[1]` instead of through
+ * the local is 49 rows. */
 void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
     s32* from;
     s32* nearest;
@@ -1044,15 +1038,17 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
     s32 sqrDist;
     s32 diff;
     u32* pad2;
+    s32 active;
 
     from = (s32*)0x1F800000;
     nearest = (s32*)0x1F800010;
     from[0] = entity->PosX >> 12;
     from[1] = entity->PosY >> 12;
     from[2] = entity->PosZ >> 12;
-    pad2 = &g_FieldPad2State;
     for (i = 0; i < 32; i++, line++) {
-        if (line->isActive != 1) {
+        active = 1;
+        pad2 = &g_FieldPad2State;
+        if (line->isActive != active) {
             continue;
         }
         if (entity->scriptedMoveMode != 0) {
@@ -1062,12 +1058,12 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
         if (sqrDist != -1 &&
             sqrDist < entity->SolidRange * entity->SolidRange) {
             if (line->touch == 0) {
-                line->requestTouchOnScript = 1;
+                line->requestTouchOnScript = active;
             }
-            line->touch = 1;
+            line->touch = active;
         } else {
             if (line->touch == 1) {
-                line->requestTouchOffScript = 1;
+                line->requestTouchOffScript = active;
             }
             line->touch = 0;
         }
@@ -1084,10 +1080,9 @@ void FieldEntityLineInteract(FieldEntity* entity, FieldLine* line) {
         if (pad2[1] & 0x20) {
             continue;
         }
-        line->requestTalkScript = 1;
+        line->requestTalkScript = active;
     }
 }
-#endif
 
 void FieldEntityLineClear(FieldLine* lines) {
     s32 i;

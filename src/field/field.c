@@ -73,6 +73,19 @@ extern u16 g_FieldPreloadMapId;
 extern s32 g_WmPreSector;
 extern u32 g_WmPreSize;
 
+/* 13 rows, and the shape of them is worth writing down. The target
+ * materialises `0x801B0000` once and reaches it from both paths; this build
+ * rematerialises it in each (two extra `lui a2,0x801b`), and the two gateway
+ * pointers' `addiu ...,0x18` increments come out in the other order with the
+ * argument register on the wrong one. decomp-permuter found a candidate that
+ * passes the load address through the dead loop counter -- `i = 0x801B0000;
+ * SystemLoadFileBySector(sector, size, i, 0);` -- and it measures no change at
+ * all against the overlay (13/2, byte-identical to the body below); the same
+ * run's other find, writing the scratchpad through `((s32*)0x1F800000)[n]`
+ * rather than a named pointer, is 29/5. Both are permuter noise. See the
+ * two-bivs bullet in CLAUDE.md for the increment order: the one incremented
+ * *last* keeps the incoming argument register, and this loop needs one bumped
+ * first *and* holding it, which two plain increments cannot express. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
 #else
