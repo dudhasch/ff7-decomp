@@ -1036,36 +1036,51 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetSplashToPktsBelowLvl);
 
 extern s32 D_800E0200;
 
-/* Initialise the two-primitive splash/water GPU packets for one field model.
- * Walks a 0x5C-byte packet per of 31 levels, setting the sprite code, the
- * semi-transparency/shade flags, the CLUT/tpage, and the per-level UV from the
- * model's part data. The $s0 base is computed into the `jal GetGraphType`
- * delay slot and the packet pointer strength-reduces through the loop — a
- * scheduler/strength-reduction coupling gcc cannot reproduce from C. Codegen
- * pinned via MASPSX_OVERRIDE. */
+/* Build the 30 splash-sprite packet pairs for one field model's render slot:
+ * two sprites per part, both 0x2C-coded semi-transparent, sharing the texture
+ * page and CLUT, with the part's y offset negated into the second sprite.
+ *
+ * 12 rows out, and all twelve are one thing: the packet base is
+ * strength-reduced onto `pkt + 0x58` (`addiu a0,s0,0xb4` and negative
+ * displacements throughout) where the original keeps the plain base. That is
+ * combine_givs picking the last address in the body as its representative --
+ * the `-*parts` store at +0x58 -- and it happens for every spelling measured:
+ * `pkt = &base[i * 0x5C]` at the top of the body, the same index written
+ * inline at all 22 accesses with no pointer local at all, and a walked
+ * `pkt += 0x5C`. The walked form gets the loop bound into a register
+ * (`li t3,0x1f` / `slt`, which the target has and the indexed form's `slti`
+ * does not) but costs a fourth saved register, so it measures 31 rows against
+ * 12; a named `count` local for the bound made it 42.
+ *
+ * What the same pass did fix, from 43 rows: `tex` is a local holding 0x6C2C
+ * assigned before the GetGraphType tests, which is what makes it live across
+ * the second call and puts it in $s1 -- read back out of the asm as a literal
+ * in the loop it lands in a caller-saved register and the whole preheader
+ * renumbers. And the packet address must be indexed off the counter, not
+ * walked, for the frame and saved-register list to come out right. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiInitSplashPkts);
 #else
 void KawaiInitSplashPkts(void* arg0, s32 arg1) {
     s16 clut;
+    s16 tex;
     s32 i;
     u8* pkt;
     u16* parts;
     u8* base;
 
     base = (u8*)D_800E0200 + arg1 * 0xAC8;
+    tex = 0x6C2C;
     if (GetGraphType() == 1 || GetGraphType() == 2) {
         clut = 0x22B;
     } else {
         clut = 0x9B;
     }
-    i = 1;
-    pkt = base + 0x5C;
     parts = (u16*)(*(u32*)((u8*)arg0 + 0x1C) + 4);
-    do {
+    for (i = 1; i < 0x1F; i++) {
+        pkt = &base[i * 0x5C];
         pkt[0x7] = 0x2C;
         pkt[0x2F] = 0x2C;
-        i++;
         pkt[0x3] = 9;
         pkt[0x2B] = 9;
         pkt[0x2E] = 0x80;
@@ -1074,8 +1089,8 @@ void KawaiInitSplashPkts(void* arg0, s32 arg1) {
         pkt[0x5] = 0x80;
         pkt[0x2C] = 0x80;
         pkt[0x4] = 0x80;
-        *(s16*)(pkt + 0x36) = 0x6C2C;
-        *(s16*)(pkt + 0xE) = 0x6C2C;
+        *(s16*)(pkt + 0x36) = tex;
+        *(s16*)(pkt + 0xE) = tex;
         *(s16*)(pkt + 0x3E) = clut;
         *(s16*)(pkt + 0x16) = clut;
         *(s16*)(pkt + 0x50) = 0;
@@ -1086,8 +1101,7 @@ void KawaiInitSplashPkts(void* arg0, s32 arg1) {
         *(s16*)(pkt + 0x5A) = 0;
         *(s16*)(pkt + 0x58) = -*(s16*)parts;
         parts += 2;
-        pkt += 0x5C;
-    } while (i < 0x1F);
+    }
 }
 #endif
 
