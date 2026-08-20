@@ -5188,7 +5188,7 @@ s32 OpcodeFuncLader(void) {
     return 1;
 }
 
-void OpcodeFuncPmova(void) {
+s32 OpcodeFuncPmova(void) {
     u8 partyId;
     u8 actorId;
 
@@ -5201,95 +5201,109 @@ void OpcodeFuncPmova(void) {
     } else {
         actorId = D_8009AD30[partyId];
     }
-    FieldMoveToEntityUpdate(actorId);
+    return FieldMoveToEntityUpdate(actorId);
 }
 
-void OpcodeFuncMova(void) {
+s32 OpcodeFuncMova(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("mova", 1);
     }
-    FieldMoveToEntityUpdate(GET_PARAM_U8(1));
+    return FieldMoveToEntityUpdate(GET_PARAM_U8(1));
 }
 
-/* Set up (or finish) a scripted move of the current entity toward a target
- * entity: the current entity's move destination becomes the target's current
- * position. Returns 1 while a move is being set up / is in progress, 0 when it
- * just finished or when either entity has no model. Every global access
- * re-materialises the g_EntityToModel / g_FieldModels bases through $at (the
- * $at remat wall); codegen pinned via MASPSX_OVERRIDE, #else is the verified
- * C. */
+/* MOVA/PMOVA: retarget the current entity's scripted move at another entity,
+ * every frame, so the mover follows a moving target. The destination is the
+ * target's live position and its solid radius becomes the stop distance; the
+ * rest is OpcodeFuncMove's state machine, which is why the walk/run choice
+ * and the animation restart are the same code. Returns the dispatcher's
+ * "opcode consumed" flag, so MOVA and PMOVA pass it through rather than being
+ * void.
+ *
+ * 14 rows out, from a hand-written body that did not compile and measured 154
+ * once it did. What the rewrite established:
+ *   - it returns 1 from the "start the move" tail, not 0 (the target's last
+ *     insn before the epilogue is `li v0,1`), and the two callers pass it on.
+ *   - offset 0x68 is ActionArg, not MoveEndI: the stop distance is written
+ *     where OpcodeFuncMove clears it.
+ *   - the walk/run test reads FieldState.currentFieldScale (0x10), not
+ *     currentMovieFrame.
+ *   - every model access is the full `g_FieldModels[g_EntityToModel[
+ *     g_CurrentEntity]]` expression, except the run around the
+ *     scriptedMoveMode/ActionState dispatch which is one `FieldEntity*`
+ *     local. The hand-written body cached `cur` and `target` across the whole
+ *     function and that alone was most of its 154 rows.
+ *   - the two 0xFF guards are one `||` with an early `PC_INC(2); return 0;`,
+ *     and the ActionState-2 arm duplicates that tail; cross-jumping keeps the
+ *     arm's copy and the guard jumps into it, which is what the target has.
+ *     (Contrast the turn opcodes, where the tail has to be the function's
+ *     fall-through end -- read the target for which one it wants.)
+ *
+ * The 14 rows are the model-entry allocation tie that OpcodeFuncCanim's note
+ * describes, unchanged: modelIdx / entryIdx / g_FieldModelData come out as a
+ * three-cycle away from the target. Also measured here and inert:
+ * `g_FieldModelData->modelEntries + idx` instead of `&...[idx]`, and a local
+ * for `g_FieldModelData`; a local for `modelEntries` costs 6. Four functions
+ * are now parked on this one tie. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldMoveToEntityUpdate);
 #else
 s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
-    FieldEntity* cur;
-    FieldEntity* target;
-    FieldModelEntry* entry;
-    u8 curModel;
-    u8 targetModel;
-    u8 animCount;
+    FieldEntity* moving;
+    FieldModelEntry* model;
+    u8* anims;
+    u8 modelIdx;
 
-    curModel = g_EntityToModel[g_CurrentEntity];
-    if (curModel == 0xFF) {
-        goto advance;
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF ||
+        g_EntityToModel[targetEntityId & 0xFF] == 0xFF) {
+        PC_INC(2);
+        return 0;
     }
-    targetModel = g_EntityToModel[targetEntityId & 0xFF];
-    if (targetModel == 0xFF) {
-        goto advance;
-    }
-    cur = &g_FieldModels[curModel];
-    target = &g_FieldModels[targetModel];
-    cur->MoveEndI = target->SolidRange;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg =
+        g_FieldModels[g_EntityToModel[targetEntityId & 0xFF]].SolidRange;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
-    cur->MoveEndX = target->PosX;
-    cur->MoveEndY = target->PosY;
-    cur = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-    if (cur->scriptedMoveMode != 1) {
-        goto setmode;
-    }
-    if (cur->ActionState == 1) {
-        if (g_FieldState->currentMovieFrame * 3 < cur->MoveSpeed) {
-            if (cur->activeAnimId == 2) {
-                goto done_anim;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        g_FieldModels[g_EntityToModel[targetEntityId & 0xFF]].PosX;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        g_FieldModels[g_EntityToModel[targetEntityId & 0xFF]].PosY;
+
+    moving = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (moving->scriptedMoveMode == 1) {
+        switch (moving->ActionState) {
+        case 1:
+            if (g_FieldState->currentFieldScale * 3 < moving->MoveSpeed) {
+                if (moving->activeAnimId == 2) {
+                    goto started;
+                }
+                moving->activeAnimId = 2;
+            } else {
+                if (moving->activeAnimId == 1) {
+                    goto started;
+                }
+                moving->activeAnimId = 1;
             }
-            cur->activeAnimId = 2;
-        } else {
-            if (cur->activeAnimId == 1) {
-                goto done_anim;
-            }
-            cur->activeAnimId = 1;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
+                0;
+            modelIdx = g_EntityToModel[g_CurrentEntity];
+            model =
+                &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
+                                                    .modelEntryIndex];
+            anims = model->modelData + model->animationOffset;
+            g_FieldModels[modelIdx].animLastFrame =
+                *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+        started:
+            D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
+            return 1;
+        case 2:
+            moving->scriptedMoveMode = 0;
+            D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+            PC_INC(2);
+            return 0;
         }
-        cur->animSpeed = 0x10;
-        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
-        curModel = g_EntityToModel[g_CurrentEntity];
-        entry = &g_FieldModelLoaderData[curModel];
-        animCount = D_80074F02[curModel];
-        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animLastFrame =
-            *(u16*)(g_FieldModelData->modelEntries[entry->modelEntryIndex]
-                        .animationOffset +
-                    g_FieldModelData->modelEntries[entry->modelEntryIndex]
-                        .modelData +
-                    animCount * 0x10) -
-            1;
-    done_anim:
-        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
-        return 1;
     }
-    if (cur->ActionState == 2) {
-        cur->scriptedMoveMode = 0;
-        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
-        goto advance;
-    }
-    goto out;
-setmode:
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
-    goto out;
-advance:
-    g_FieldScriptPC[g_CurrentEntity] += 2;
-    return 0;
-out:
-    return 0;
+    return 1;
 }
 #endif
 
@@ -5473,72 +5487,77 @@ extern u8 D_800722C4;
 extern /*?*/ s32 D_800831FC;
 extern u8 D_8009D820;
 
-/* OFSTD (0x?? offset-start): set up an offset animation for the current
- * entity's model. Reads the four target offsets from the script, stores the
- * mode byte, and either snapshots the current offsets as the start (mode!=0)
- * or copies the ends into the starts (mode==0). Residual is the
- * full-expression g_FieldModels[...] address CSE; pinned pending permuter. */
+/* OFSTD/OFSTL/OFSTC: start a positional offset on the current entity's model.
+ * The three names are one handler: operand 3 is the interpolation mode and
+ * also selects which name the debug print uses. Mode 0 snaps the offset to
+ * its target immediately; the others record the current offset as the start
+ * of an interpolation. The PC always advances, so this returns 0
+ * unconditionally.
+ *
+ * 11 rows out with 3 insertions, from an m2c seed that did not compile, and
+ * that is the first shot -- the body is written the way the turn opcodes
+ * wanted: everything inside `if (g_EntityToModel[g_CurrentEntity] != 0xFF)`
+ * with `PC_INC(0xC); return 0;` as the fall-through end, the mode read once
+ * into a local and both stored and tested, and every model access spelled as
+ * the full indexed expression rather than through a pointer (m2c's six
+ * separate `temp_v0` pointers are cse re-deriving the base after each store,
+ * not six source variables).
+ *
+ * The residue is scheduling around the mode read: the target interleaves the
+ * `g_EntityToModel` load, the PC load and the `modelIdx * 0x84` computation
+ * so that the `%hi`/`%lo` of g_FieldScripts lands last, and we emit the PC
+ * and the script base first. Measured and worse: storing `GET_PARAM_U8(3)`
+ * directly and re-reading it for the test (31/13). Measured and identical:
+ * passing the string literals to DebugPrintOpcode directly instead of through
+ * a `char*` local. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncOfstd);
 #else
 s32 OpcodeFuncOfstd(void) {
-    s8* var_a0;
-    u16* temp_v1_3;
-    u8 temp_v1;
-    u8 temp_v1_2;
-    void* temp_v0;
-    void* temp_v0_2;
-    void* temp_v0_3;
-    void* temp_v0_4;
-    void* temp_v0_5;
-    void* temp_v0_6;
+    u8 ofsType;
 
-    if (*(&D_8007EB98 + D_800722C4) != 0xFF) {
-        if (D_8009D820 & 3) {
-            temp_v1 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
-            switch (temp_v1) { // irregular
+    if (g_EntityToModel[g_CurrentEntity] != 0xFF) {
+        if (g_DebugLevel & 3) {
+            switch (GET_PARAM_U8(3)) {
             case 0:
-                var_a0 = "ofstd";
-            block_11:
-                DebugPrintOpcode(var_a0, 5U);
+                DebugPrintOpcode("ofstd", 5);
                 break;
             case 1:
-                var_a0 = "ofstl";
-                goto block_11;
+                DebugPrintOpcode("ofstl", 5);
+                break;
             case 2:
-                var_a0 = "ofstc";
-                goto block_11;
+                DebugPrintOpcode("ofstc", 5);
+                break;
             }
         }
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk54 = 0;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk52 =
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetSteps =
             FieldEventReadMemoryS16(4, 0xA);
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk44 =
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndX =
             FieldEventReadMemoryS16(1, 4);
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk4A =
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndY =
             FieldEventReadMemoryS16(2, 6);
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk50 =
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndZ =
             FieldEventReadMemoryS16(3, 8);
-        temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk56 = temp_v1_2;
-        if (temp_v1_2 != 0) {
-            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0->unk42 = (u16)temp_v0->unk40;
-            temp_v0_2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_2->unk48 = (u16)temp_v0_2->unk46;
-            temp_v0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_3->unk4E = (u16)temp_v0_3->unk4C;
+        ofsType = GET_PARAM_U8(3);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OfsType = ofsType;
+        if (ofsType != 0) {
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStartX =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetX;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStartY =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetY;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStartZ =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetZ;
         } else {
-            temp_v0_4 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_4->unk40 = (u16)temp_v0_4->unk44;
-            temp_v0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_5->unk46 = (u16)temp_v0_5->unk4A;
-            temp_v0_6 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_6->unk4C = (u16)temp_v0_6->unk50;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetX =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndX;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetY =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndY;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetZ =
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndZ;
         }
     }
-    temp_v1_3 = (D_800722C4 * 2) + &D_800831FC;
-    *temp_v1_3 += 0xC;
+    PC_INC(0xC);
     return 0;
 }
 #endif

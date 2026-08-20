@@ -252,7 +252,7 @@ void SystemMenuAddMpByPartyId(s32 partyId, s32 amount);
 void func_80025800(s32 partyId, s32 amount);
 void func_80025988(s32 partyId, s32 amount);
 s32 FieldEventSetDirByActorId(s16 actorId);
-void FieldMoveToEntityUpdate(u8 actorId);
+s32 FieldMoveToEntityUpdate(s32 targetEntityId);
 s32 FieldEntityTurnToEntity(s16 actorId);
 void func_80020058(s16 partyId);
 void func_8001786C(s16 partyId);

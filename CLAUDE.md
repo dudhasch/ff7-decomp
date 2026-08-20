@@ -1022,6 +1022,22 @@ a near-miss, in rough order of frequency:
   register than the one the previous run used, for the same address. This is
   the same lever as the "one pointer pair per loop" bullet, applied to
   straight-line code.
+* **Where the merged `PC_INC(n); return 0;` tail lands is a source-shape
+  decision, and it moves every branch offset in the function.** An opcode
+  handler that bails out when the entity has no model reaches that tail twice
+  — once from the `0xFF` test at the top, once from the state-machine arm —
+  and the three ways to spell it give three different layouts. Two early
+  `return 0`s: cross-jumping keeps the *later* copy, so the block sits at the
+  arm near the top. A `goto advance;` with the label after `return 1`: the
+  block moves to the end, but the label now has two jump predecessors, cse
+  knows nothing on entry, and the `g_CurrentEntity` reload moves *inside* the
+  tail. The whole body inside `if (g_EntityToModel[g_CurrentEntity] != 0xFF)
+  { ... return 1; }` with `PC_INC(n); return 0;` as the function's
+  fall-through end: the block lands after every return-1 path, entered by a
+  `j` from the arm, with the reload left behind in the arm — which is what
+  the originals do. Worth 18 rows on `OpcodeFuncTurn` and 17 on
+  `OpcodeFuncTurnr`. The tell is a `lui`/`lbu` of `D_800722C4` immediately
+  before a `j` whose delay slot is a `nop`.
 * **m2c prints a switch's case bodies in address order, and that is the
   source order.** gcc emits the bodies as the switch body is expanded, so
   their layout is the order they were written; only the compare chain is
