@@ -1155,6 +1155,26 @@ a near-miss, in rough order of frequency:
   bivs, and the emitted order and the register assignment are controlled by the
   same word, which is why a target that wants one bumped first *and* holding
   the argument register cannot be reached with two plain increments.
+* **A value conditionally adjusted is written to its destination first and
+  read back, not built in a temporary.** The array-element form of the
+  store-and-read-back idiom above, and it is worth more than it looks:
+  `quality[i] = (u8)(a - b); if (quality[i] >= 0x81) quality[i] = 0x100 -
+  quality[i];` gives two stores — the unconditional one sinks into the branch
+  delay slot and is overwritten on the other path — where an `if`/`else` over a
+  temporary gives one store, a duplicated `andi`, and a `sltiu` instead of
+  `slti` (the element is a signed `s16`, a masked temporary is a promoted
+  `u8`). On `FieldEntityCheckTalk` it also reversed the order of the loop's two
+  givs, so the two increments came out swapped as well: 15 rows to 3 on one
+  statement. When a diff shows the target storing to the same address twice,
+  stop looking for a scheduling explanation.
+* **Declaration order is inert *except* between two locals of the same type
+  that are live at the same time.** CLAUDE.md's standing rule (measured on
+  `func_801B009C`, five permutations, no change) holds for values that never
+  compete: gcc allocates by priority, not by position. Two same-type locals
+  live across the same loop *do* compete, and there the one declared first gets
+  the higher-numbered register — `s16 bestId; s16 best;` against `s16 best;
+  s16 bestId;` is 8 rows in `FieldEntityCheckTalk`. Try the swap when the diff
+  is two registers trading places and nothing else.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

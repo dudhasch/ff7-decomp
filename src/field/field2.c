@@ -417,8 +417,38 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
 
 /* Per-frame talk scan: on the rising edge of the OK button, score every entity
  * by how directly the player faces it (and how near), then request the talk
- * script of the best candidate. Verified C kept as the #else; codegen pinned
- * via MASPSX_OVERRIDE (the walking quality-array pointer regalloc wall). */
+ * script of the best candidate.
+ *
+ * 30 rows -> 3, on two lines and a declaration:
+ *   - the score is written into `quality[i]` and then read back out of it, not
+ *     computed into a temporary and stored once. `quality[i] = (u8)(Dir -
+ *     dirTo); if (quality[i] >= 0x81) quality[i] = 0x100 - quality[i];` gives
+ *     the target's two stores, with the unconditional one sunk into the branch
+ *     delay slot and overwritten on the other path; cse hands the stored
+ *     register straight back, and because it is now an `s16` element rather
+ *     than a promoted `u8` the compare is `slti`, not `sltiu`. Writing it as an
+ *     if/else over one temporary merges the two stores, needs a second `andi`,
+ *     and -- for reasons that only show up in the diff -- also reverses the
+ *     order of the two givs. Worth 12 rows and it was the whole "walking
+ *     quality-array pointer regalloc wall" this note used to describe.
+ *   - `bestId` is `s16`. As `u16` the final `bestId != g_PlayerModelId` test
+ *     zero-extends (`andi a0,a3,0xffff`) where the target sign-extends: 7 rows.
+ *   - `bestId` is declared *before* `best`. The two are the same type and both
+ *     live across the second loop, and the one declared first gets the higher
+ *     register; the target has best in a3 and bestId in a2: 8 rows. (Yes, this
+ *     contradicts the usual rule that declaration order is inert -- it is inert
+ *     for values that do not compete for the same register.)
+ *
+ * The three rows left: the target masks the FieldEntityDirByVec result with
+ * `andi v0,v0,0xff` before subtracting it from Dir, filling the load-delay slot
+ * of the `lbu` that reads Dir, where combine folds our inner mask away and
+ * maspsx emits a nop. Every type for `dirTo` (u8, s16, u16, u32, s32, with and
+ * without an explicit `(u8)` at the use) compiles identically, so the mask is
+ * not coming from the variable's declaration. The other two rows are the two
+ * `li v1,<const>` of the final test: the target issues each before the
+ * neighbouring shift pair and gcc after, which is dbr choosing a different
+ * insn for the same slot -- nesting the two conditions instead of `&&` does
+ * not change it. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
 #else
@@ -427,8 +457,8 @@ void FieldEntityCheckTalk(void) {
     VECTOR to;
     s16 quality[16];
     s32 sqrDist;
+    s16 bestId;
     s16 best;
-    u16 bestId;
     u8 dirTo;
     s32 i;
 
@@ -456,11 +486,9 @@ void FieldEntityCheckTalk(void) {
             continue;
         }
         dirTo = FieldEntityDirByVec(&from, &to, &sqrDist);
-        if ((u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo) >= 0x81) {
-            quality[i] =
-                0x100 - (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
-        } else {
-            quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        if (quality[i] >= 0x81) {
+            quality[i] = 0x100 - quality[i];
         }
         if (sqrDist >= g_FieldEntity[i].TalkRange +
                            g_FieldEntity[g_PlayerModelId].SolidRange) {
