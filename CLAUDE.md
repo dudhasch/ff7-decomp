@@ -1195,6 +1195,49 @@ a near-miss, in rough order of frequency:
   what the callers compare it against before assuming the first store is the
   only one. `FieldEntityDirByVec` returns the *distance* through a parameter
   the seed had named `sqrDist`.
+* **A pointer to a global object is spelled inline at every use, not held in
+  a local — and the same goes for a struct field read more than once.** This
+  is the inverse of the "name the temporary" idioms above and it is worth as
+  much. `block = (FieldTexBlockHeader*)D_800DFCA0;` makes the pointer live
+  across the whole arm, so gcc loads the global once and then has the *other*
+  loads in the block free to fill its load-delay slots; written as
+  `((FieldTexBlockHeader*)D_800DFCA0)->field` at each use, cse rematerialises
+  the base per reference and the slots stay empty the way the target has them.
+  22 rows to zero on `FieldModelBsxTdbModify` for what reads as a style
+  regression. `AddBackgroundToRender`'s four wrap tests are the same lever on a
+  struct field — `buf->Bg2[sprite].x0` read directly rather than through an
+  `s16 x` — and worth 40 rows there. The tell is a target that reloads a value
+  it could obviously have kept, with a nop where your build has useful work.
+  Both were found by decomp-permuter, and neither is reachable by reasoning
+  about register allocation, because the change is not about registers.
+* **A struct whose *stride* is wrong still shows every field offset correct.**
+  `rec[i].f` on a four-word record where the original is five words advances
+  by 0x10 against the target's 0x14, and the diff's field offsets agree for
+  `i == 0` — which is the row a reader checks. A park note claiming "every
+  field offset is correct (verified in diff)" is therefore evidence of
+  nothing. Read the scaled index instead: `sll v0,v1,0x3 / addu v0,v0,v1 /
+  sll v0,v0,0x2` is ×36, `addiu <r>,<r>,0x14` on a walked cursor is a 0x14
+  stride, and either one types the record outright.
+* **A park note is not evidence.** Two of this repo's notes recorded diagnoses
+  that were simply wrong and cost more than the functions did:
+  `FieldModelStructInit`'s said "-0x38 frame, six callee-saved registers,
+  needs the permuter to find the lean local set" — that frame belonged to the
+  *next* function, which `diff.py -o` renders past the end of the one you
+  asked for, and the real frame is `-0x10` with no saved registers at all.
+  `FieldModelBsxTdbModify`'s said the residue was "gcc's inlined memcpy
+  expansion, a scheduler/expansion coupling", when the record struct was the
+  wrong size. Re-derive a note's claim from the `.s` before spending a budget
+  on top of it; the rejected-spellings list in a note is worth keeping, the
+  diagnosis is worth re-checking.
+* **Correct the program first, then hand it to the permuter.** These two are
+  not alternatives and the order matters. `FieldModelBsxTdbModify` sat at
+  44 changed / 7 inserted; a permuter run on that body is hill-climbing a
+  function that computes the wrong addresses, and the four program fixes
+  (guard, indexing, struct size, absolute destination) took it to 22 by hand
+  in one sitting. Only then did the permuter close it, in 457 candidates and
+  about seven minutes on five workers. The converse holds too: no amount of
+  reading the target suggests *un-naming* a variable, which is what the last
+  22 rows were.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
