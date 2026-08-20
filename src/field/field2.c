@@ -126,15 +126,37 @@ typedef struct {
  *   - the target reserves a 0x10 frame with no saved registers and no calls,
  *     so there is a local here nobody can see. Reserving it is worth 5 rows.
  *
- * The residue is register naming: the target copies a0 into t3 where we use
- * t2, and every temporary downstream renumbers with it. Two folds also
- * survive -- `maxX - (minX + 0x140)` comes out as `(maxX - 0x140) - minX`, and
- * the closing `+ 0xA0 + minX` as `v + (minX + 0xA0)` -- but blocking either
- * with a named local measures worse overall, in all four placements (74, 75,
- * 76, 78) and 98 for the closing add. Also measured: px/py as `s16` (88),
- * dx/dy inline in the dot product (91), no locals at all (85). This is a good
- * permuter target: no calls, pure arithmetic, and the instruction count is
- * within seven. */
+ *   - the closing constant has to be added in its own statement. Written
+ *     `pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;` fold's `associate`
+ *     step lifts the literal onto the *other* variable and emits
+ *     `addiu a0,minX,0xa0` / `addu`, where the target adds 0xA0 to the
+ *     quotient and minX after it. Splitting it -- `fx = (...) + 0xA0;` then
+ *     `pos[0] = fx + minX;` -- puts the literal back where the target has it,
+ *     and is worth 74/7 -> 73/3. This is now the body.
+ *
+ * 73 rows out. Everything left is one lever plus its fallout: gcc 2.6.3's
+ * fold associates *every* `A - (B + C)` in this function, and the target has
+ * none of them associated. `maxX - (minX + 0x140)` (twice) comes out as
+ * `(maxX - 0x140) - minX` and `minY - (maxY - 0xF0)` as `(minY + 0xF0) - maxY`
+ * -- same instruction count each time, different register lifetimes, and the
+ * whole allocation cascades off them (the target copies a0 into t3 and keeps
+ * the negated numerator in t2; we use t2 and a2). fold's `split_tree` strips
+ * only conversions that keep the machine mode, so nothing spelled in SImode
+ * blocks it. Measured, all worse or neutral against 73/3:
+ *   - a named local per fold site, four sites: 75/3 (with the fx/fy split),
+ *     78/7 (without). Two sites only: 75/3 for the dx pair, 73/3 for the dy
+ *     pair -- i.e. exactly no effect.
+ *   - one shared `off` local across all sites: 78/7, 76/7, 76/7.
+ *   - flattening the sums instead (`maxX - minX - 0x140`, `minY - maxY +
+ *     0xF0`): 85/5 alone, 80/1 with the fx/fy split. Note the 1: that
+ *     spelling gets the *length* right and the registers wrong, so it is the
+ *     better permuter seed of the two if the search is scored on insertions.
+ *   - earlier rounds: px/py as `s16` (88), dx/dy inline in the dot product
+ *     (91), no locals at all (85).
+ * A `(s16)`/`(u16)` cast is the only construct that would defeat `split_tree`
+ * and it costs a truncation pair per site, so it is not the answer either.
+ * This remains a good permuter target: no calls, pure arithmetic, and the
+ * instruction count is now within three. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
@@ -148,6 +170,8 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
     s32 dy;
     s32 num;
     s32 den;
+    s32 fx;
+    s32 fy;
     u8 unusedLocals[0x10];
 
     if (limits->scrollType == 1) {
@@ -159,8 +183,10 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
         dy = limits->maxY - (minY + 0xF0);
         num = -(((minX - px) * dx) + ((minY - py) * dy));
         den = ((dx * dx) + (dy * dy)) >> 8;
-        pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;
-        pos[1] = ((num * dy / den) >> 8) + 0x78 + (u16)limits->minY;
+        fx = ((num * dx / den) >> 8) + 0xA0;
+        pos[0] = fx + minX;
+        fy = ((num * dy / den) >> 8) + 0x78;
+        pos[1] = fy + (u16)limits->minY;
     }
     if (limits->scrollType == 2) {
         px = pos[0] - 0xA0;
@@ -172,8 +198,10 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
         dy = minY - (maxY - 0xF0);
         num = -(((minX - px) * dx) + ((maxY - py) * dy));
         den = ((dx * dx) + ((minY - maxY) * dy)) >> 8;
-        pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;
-        pos[1] = ((num * dy / den) >> 8) - 0x78 + (u16)limits->maxY;
+        fx = ((num * dx / den) >> 8) + 0xA0;
+        pos[0] = fx + minX;
+        fy = ((num * dy / den) >> 8) - 0x78;
+        pos[1] = fy + (u16)limits->maxY;
     }
 }
 #endif

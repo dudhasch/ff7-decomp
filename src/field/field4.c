@@ -4644,177 +4644,169 @@ s32 OpcodeFuncAnimEx(void) {
     return 1;
 }
 
-/* CANIM (change animation): switch the current model's animation to a new id
- * read from the script, recompute the frame rate from the base speed and the
- * script's divisor, and clamp the last frame. Twin of OpcodeFuncCanmEx. m2c
- * seed; residual is the per-model address CSE and the divide scheduling.
- * Pinned pending a permuter pass. */
+/* CANIM1/CANIM2 (change animation): play an animation whose id, start frame
+ * and end frame all come from the script scaled by a divisor in operand 4,
+ * then clamp the end frame to the animation's own length. The D_800756E8
+ * state machine and the 0xB0 test are ANIME's, so the outer shape is
+ * OpcodeFuncAnime's and the body is StartModelAnimation's with the divisor
+ * threaded through. Twin of OpcodeFuncCanmEx.
+ *
+ * 10 rows out, from an m2c seed that did not compile (`void*` parameters
+ * dereferenced as `->unkNN`), so this is the first number the function has
+ * ever had. What the rewrite established:
+ *   - operand 4 is the only parameter the original caches. Operands 1, 2 and
+ *     3 are each re-read through a fresh `lhu` of the PC, which is what
+ *     GET_PARAM_U8 spells; operand 4 is loaded once into a register that
+ *     stays live across all three divisions. That is the opposite of the
+ *     house rule for opcode handlers and the `.s` is unambiguous about it.
+ *   - the divisor has to be `s16`. As `u8` gcc masks it (`andi 0xff`) and
+ *     divides *unsigned*, which also deletes the three division-overflow
+ *     checks: 40 rows and a different program. As `s32` the arithmetic is
+ *     right but the allocator ranks its pseudo below the two cse-made ones
+ *     for the script base and the PC address, and all three registers rotate
+ *     (43). `s16` is what puts them back in a1/a2/a3.
+ *   - the frame bound has to be `s16` too (`s32` measures 43, `s16` 36).
+ *   - the arm ends with `break`, not `return 1`. With the explicit return gcc
+ *     keeps $v0 reserved across the arm and the state constant 2 lands in
+ *     $v1; with `break` and the single `return 1` after the switch the
+ *     constant gets $v0, which is the documented idiom and is worth 26 rows
+ *     here (36 -> 10).
+ *
+ * The residue is two register-naming ties, both inside the last basic block
+ * and both immune to everything measured. The model-entry address puts the
+ * loader's entryIdx in $v0 and g_FieldModelData in $a0; we allocate them the
+ * other way round. The two clamp copies want $a0/$v1 where we get $v1/$a3.
+ * Measured, all still 10: declaration order of every pair of same-type
+ * locals, a named `entryIdx` local, `s16`/`s32` modelIdx, repeating
+ * `g_EntityToModel[g_CurrentEntity]` instead of the modelIdx local, a `u16`
+ * local for the raw frame count, and `- 1` against `+ 0xFFFF` (identical
+ * code -- gcc materialises the HImode constant either way). Inlining `anims`
+ * costs 11 rows and `u8 unusedLocals[8]` 4. A permuter target: the
+ * instruction sequence is already exact. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanim);
 #else
 s32 OpcodeFuncCanim(void) {
-    FieldModelEntry* temp_v1_5;
-    s16 temp_v0;
-    s32 temp_a1_4;
-    s32 temp_lo;
-    u16* temp_a0;
-    u16* temp_a3;
-    u16* temp_v1_2;
-    u8 temp_a1;
-    u8 temp_a1_2;
-    u8 temp_a1_3;
-    u8 temp_v1;
-    u8 temp_v1_4;
-    void* temp_v1_3;
+    u8 modelIdx;
+    u8* anims;
+    FieldModelEntry* model;
+    s16 divisor;
+    s16 lastFrame;
+    s16 maxFrame;
 
-    if (D_8009D820 & 3) {
-        DebugPrintOpcode("canim", 4U);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("canim", 4);
     }
-    temp_a1 = *(&D_8007EB98 + D_800722C4);
-    if (temp_a1 != 0xFF) {
-        temp_v1 = D_800756E8[temp_a1];
-        if (temp_v1 != 3) {
-            if ((s32)temp_v1 >= 4) {
-                if (temp_v1 != 4) {
-                    return 1;
-                }
-                D_800756E8[temp_a1] = 0;
-                temp_v1_2 = (D_800722C4 * 2) + &D_800831FC;
-                *temp_v1_2 += 5;
-                return 0;
-            }
-            if ((s32)temp_v1 < 2) {
-                if ((s32)temp_v1 >= 0) {
-                    goto block_10;
-                }
-                // Duplicate return node #19. Try simplifying control flow for
-                // better match
-                return 1;
-            }
-            return 1;
-        }
-    block_10:
-        temp_v1_3 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
-        temp_a1_2 = temp_v1_3->unk4;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E =
-            (u8)temp_v1_3->unk1;
-        temp_v1_4 = *(&D_8007EB98 + D_800722C4);
-        ((temp_v1_4 * 0x84) + D_8009C544)->unk60 =
-            (s16)((s16)D_8009D828[temp_v1_4] / (s32)temp_a1_2);
-        temp_a3 = (D_800722C4 * 2) + &D_800831FC;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 =
-            (s16)(((s32)(D_8009C6DC + *temp_a3)->unk2 / (s32)temp_a1_2) * 0x10);
-        temp_lo = (s32)(D_8009C6DC + *temp_a3)->unk3 / (s32)temp_a1_2;
-        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
-        temp_v1_5 =
-            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3]
-                                                .modelEntryIndex];
-        temp_a1_4 = temp_a1_3 * 0x84;
-        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) +
-                    &temp_v1_5->modelData[temp_v1_5->animationOffset]) +
-                  0xFFFF;
-        if (temp_v0 < temp_lo) {
-            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(5);
+        return 0;
+    }
+
+    switch (D_800756E8[g_EntityToModel[g_CurrentEntity]]) {
+    case 0:
+    case 1:
+    case 3:
+        divisor = GET_PARAM_U8(4);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].activeAnimId =
+            GET_PARAM_U8(1);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed =
+            D_8009D828[g_EntityToModel[g_CurrentEntity]] / divisor;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
+            (GET_PARAM_U8(2) / divisor) * 16;
+        lastFrame = GET_PARAM_U8(3) / divisor;
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
+                                                    .modelEntryIndex];
+        anims = model->modelData + model->animationOffset;
+        maxFrame = *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+        if (maxFrame < lastFrame) {
+            g_FieldModels[modelIdx].animLastFrame = maxFrame;
         } else {
-            (temp_a1_4 + D_8009C544)->unk64 = (s16)temp_lo;
+            g_FieldModels[modelIdx].animLastFrame = lastFrame;
         }
         if (g_FieldCurrentOpcode == 0xB0) {
-            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 5;
-            goto block_15;
+            D_800756E8[g_EntityToModel[g_CurrentEntity]] = 5;
+            PC_INC(5);
+            return 0;
         }
-        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
-        return 1;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 2;
+        break;
+    case 4:
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+        PC_INC(5);
+        return 0;
     }
-block_15:
-    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
-    *temp_a0 += 5;
-    return 0;
+    return 1;
 }
 #endif
 
-/* CANM! (change animation, extended): switch the current model's animation to
- * a new id read from the script, recompute the frame rate from the base speed
- * and the script's divisor, and clamp the last frame. The D_800756E8 state
- * drives the if-else chain. m2c seed; residual is the per-model address CSE
- * and the divide scheduling. Pinned pending a permuter pass. */
+/* CANM!1/CANM!2 (change animation, hold the last frame): OpcodeFuncCanim with
+ * three constants changed -- opcode 0xB1 instead of 0xB0, the asynchronous
+ * state 6 instead of 5, and state 4 resetting to 3 rather than 0, the same
+ * ANIME/ANIM! pairing one opcode down -- plus one real difference: the start
+ * frame in operand 2 is *not* divided by the divisor here, only multiplied by
+ * 16. Everything else, including the `s16` divisor and frame bound and the
+ * `break` at the end of the arm, is CANIM's; read that note for why.
+ *
+ * 10 rows out, and the residue is the same two register-naming ties, row for
+ * row -- so whatever moves one of these two moves both. Was an m2c seed that
+ * did not compile. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanmEx);
 #else
 s32 OpcodeFuncCanmEx(void) {
-    FieldModelEntry* temp_v1_4;
-    s16 temp_v0;
-    s32 temp_a1_4;
-    s32 temp_lo;
-    u16* temp_a0;
-    u16* temp_a1_2;
-    u8 temp_a1;
-    u8 temp_a1_3;
-    u8 temp_a3;
-    u8 temp_v1;
-    u8 temp_v1_3;
-    void* temp_v1_2;
+    u8 modelIdx;
+    u8* anims;
+    FieldModelEntry* model;
+    s16 divisor;
+    s16 lastFrame;
+    s16 maxFrame;
 
-    if (D_8009D820 & 3) {
-        DebugPrintOpcode("canm!", 4U);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("canm!", 4);
     }
-    temp_a1 = *(&D_8007EB98 + D_800722C4);
-    if (temp_a1 != 0xFF) {
-        temp_v1 = D_800756E8[temp_a1];
-        if (temp_v1 != 3) {
-            if ((s32)temp_v1 >= 4) {
-                if (temp_v1 != 4) {
-                    return 1;
-                }
-                D_800756E8[temp_a1] = 3;
-                goto block_17;
-            }
-            if ((s32)temp_v1 < 2) {
-                if ((s32)temp_v1 >= 0) {
-                    goto block_10;
-                }
-                // Duplicate return node #20. Try simplifying control flow for
-                // better match
-                return 1;
-            }
-            return 1;
-        }
-    block_10:
-        temp_v1_2 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2));
-        temp_a3 = temp_v1_2->unk4;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5E =
-            (u8)temp_v1_2->unk1;
-        temp_v1_3 = *(&D_8007EB98 + D_800722C4);
-        ((temp_v1_3 * 0x84) + D_8009C544)->unk60 =
-            (s16)((s16)D_8009D828[temp_v1_3] / (s32)temp_a3);
-        temp_a1_2 = (D_800722C4 * 2) + &D_800831FC;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 =
-            (s16)((D_8009C6DC + *temp_a1_2)->unk2 * 0x10);
-        temp_lo = (s32)(D_8009C6DC + *temp_a1_2)->unk3 / (s32)temp_a3;
-        temp_a1_3 = *(&D_8007EB98 + D_800722C4);
-        temp_v1_4 =
-            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a1_3]
-                                                .modelEntryIndex];
-        temp_a1_4 = temp_a1_3 * 0x84;
-        temp_v0 = *((*(&D_80074F02 + temp_a1_4) * 0x10) +
-                    &temp_v1_4->modelData[temp_v1_4->animationOffset]) +
-                  0xFFFF;
-        if (temp_v0 < temp_lo) {
-            (temp_a1_4 + D_8009C544)->unk64 = temp_v0;
+
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(5);
+        return 0;
+    }
+
+    switch (D_800756E8[g_EntityToModel[g_CurrentEntity]]) {
+    case 0:
+    case 1:
+    case 3:
+        divisor = GET_PARAM_U8(4);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].activeAnimId =
+            GET_PARAM_U8(1);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed =
+            D_8009D828[g_EntityToModel[g_CurrentEntity]] / divisor;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
+            GET_PARAM_U8(2) * 16;
+        lastFrame = GET_PARAM_U8(3) / divisor;
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
+                                                    .modelEntryIndex];
+        anims = model->modelData + model->animationOffset;
+        maxFrame = *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+        if (maxFrame < lastFrame) {
+            g_FieldModels[modelIdx].animLastFrame = maxFrame;
         } else {
-            (temp_a1_4 + D_8009C544)->unk64 = (s16)temp_lo;
+            g_FieldModels[modelIdx].animLastFrame = lastFrame;
         }
         if (g_FieldCurrentOpcode == 0xB1) {
-            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 6;
-        block_17:
-            goto block_18;
+            D_800756E8[g_EntityToModel[g_CurrentEntity]] = 6;
+            PC_INC(5);
+            return 0;
         }
-        D_800756E8[*(&D_8007EB98 + D_800722C4)] = 2;
-        return 1;
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 2;
+        break;
+    case 4:
+        D_800756E8[g_EntityToModel[g_CurrentEntity]] = 3;
+        PC_INC(5);
+        return 0;
     }
-block_18:
-    temp_a0 = (D_800722C4 * 2) + &D_800831FC;
-    *temp_a0 += 5;
-    return 0;
+    return 1;
 }
 #endif
 
@@ -4864,84 +4856,101 @@ s32 OpcodeFuncAnimb(void) {
 // Start of field_opcode_model_move.c
 /////////////////////////////////////////////////
 
-/* MOVE (0x??): start a scripted move of the current entity toward a target
- * read from the script, picking the walk/run animation by distance and setting
- * the scripted-move state machine going. m2c seed using the raw D_ symbols;
- * residual is the full-expression g_FieldModels[...] address CSE. Pinned
- * pending a permuter pass. */
+/* MOVE: walk the entity's model to an (x, y) target read from the event
+ * memory banks, in 12.4 fixed point. The animation is picked from the map's
+ * scale -- three times currentFieldScale against the model's MoveSpeed
+ * chooses run (2) over walk (1) -- and only restarted when it actually
+ * changes, which is what the two `goto started` arms are for. The tail is the
+ * per-frame half: state 1 means still walking, state 2 means arrived, and the
+ * opcode only advances the PC on arrival.
+ *
+ * 14 rows out, from an m2c seed that did not compile. What the rewrite
+ * established:
+ *   - the ActionState test is a `switch`, not two `if`s. The target loads the
+ *     halfword once and branches `beq 1` / `beq 2` / `j default`, and cse
+ *     supplies the constant 1 out of the register the mode test just proved,
+ *     which is expand_end_case's compare chain. Two `if`s cross-jump the
+ *     first arm straight into the shared epilogue instead: 27 rows and one
+ *     insertion against 21.
+ *   - the two `FieldEntity*` locals are two variables, not one reused. They
+ *     describe different things (the model being retargeted, then the model
+ *     being polled) and merging them stretches one live range across the
+ *     animation block, which costs the pointer its register and 7 rows.
+ *
+ * The residue is one register-naming tie, and it is the *same* one CANIM and
+ * CANM! are parked on: the model-entry lookup allocates modelIdx / entryIdx /
+ * g_FieldModelData as a0 / a1 / v1 in the target and a1 / v1 / a0 in ours, a
+ * three-cycle that then decides the two halves of `anims` as well. The
+ * expression is byte-for-byte the one in StartModelAnimation, which matches,
+ * so the spelling is not the problem -- the tie is broken by what else is
+ * live in the block. Measured and inert: modelIdx as u8/s16/s32, a named
+ * entryIdx local, declaration order. Inlining `anims` costs 8 rows. Solve it
+ * once and three functions land. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else
 s32 OpcodeFuncMove(void) {
-    FieldModelEntry* temp_v0;
-    s16 temp_a0_2;
-    s32 temp_v1_2;
-    s32 var_a0;
-    u16* temp_a0_3;
-    u8 temp_a0;
-    u8 temp_a1_2;
-    u8 temp_v1;
-    void* temp_a1;
-    void* temp_v1_3;
+    FieldEntity* entity;
+    FieldEntity* moving;
+    u8 modelIdx;
+    u8* anims;
+    FieldModelEntry* model;
 
-    if (D_8009D820 & 3) {
-        DebugPrintOpcode("move", 5U);
+    if (g_DebugLevel & 3) {
+        DebugPrintOpcode("move", 5);
     }
-    temp_v1 = *(&D_8007EB98 + D_800722C4);
-    if (temp_v1 == 0xFF) {
-        var_a0 = D_800722C4 * 2;
-        goto block_16;
+
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
     }
-    ((temp_v1 * 0x84) + D_8009C544)->unk68 = 0;
-    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk37 = 0;
-    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk78 =
-        (s32)((s32)(FieldEventReadMemoryS16(1, 2) << 0x10) >> 4);
-    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk7C =
-        (s32)((s32)(FieldEventReadMemoryS16(2, 4) << 0x10) >> 4);
-    temp_a1 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-    if ((D_8009C6E0->unk10 * 3) < (s32)temp_a1->unk70) {
-        if (temp_a1->unk5E != 2) {
-            temp_a1->unk5E = 2U;
-            goto block_9;
+
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionArg = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].DirLock = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndX =
+        (FieldEventReadMemoryS16(1, 2) << 16) >> 4;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].MoveEndY =
+        (FieldEventReadMemoryS16(2, 4) << 16) >> 4;
+
+    entity = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (g_FieldState->currentFieldScale * 3 < entity->MoveSpeed) {
+        if (entity->activeAnimId == 2) {
+            goto started;
         }
-    } else if (temp_a1->unk5E != 1) {
-        temp_a1->unk5E = 1U;
-    block_9:
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk60 = 0x10;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk62 = 0;
-        temp_a0 = *(&D_8007EB98 + D_800722C4);
-        temp_v0 =
-            &g_FieldModelData->modelEntries[g_FieldModelLoaderData[temp_a0]
-                                                .modelEntryIndex];
-        temp_v1_2 = temp_a0 * 0x84;
-        (temp_v1_2 + D_8009C544)->unk64 =
-            (s16)(*((*(&D_80074F02 + temp_v1_2) * 0x10) +
-                    &temp_v0->modelData[temp_v0->animationOffset]) -
-                  1);
+        entity->activeAnimId = 2;
+    } else {
+        if (entity->activeAnimId == 1) {
+            goto started;
+        }
+        entity->activeAnimId = 1;
     }
-    D_800756E8[*(&D_8007EB98 + D_800722C4)] = 1;
-    temp_v1_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-    temp_a1_2 = temp_v1_3->unk5D;
-    if (temp_a1_2 == 1) {
-        temp_a0_2 = temp_v1_3->unk6A;
-        if (temp_a0_2 != temp_a1_2) {
-            if (temp_a0_2 != 2) {
-                goto block_17;
-            }
-            temp_v1_3->unk5D = 0U;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
-            D_800756E8[*(&D_8007EB98 + D_800722C4)] = 0;
-            var_a0 = D_800722C4 * 2;
-        block_16:
-            temp_a0_3 = var_a0 + &D_800831FC;
-            *temp_a0_3 += 6;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+    modelIdx = g_EntityToModel[g_CurrentEntity];
+    model =
+        &g_FieldModelData
+             ->modelEntries[g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+    anims = model->modelData + model->animationOffset;
+    g_FieldModels[modelIdx].animLastFrame =
+        *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+
+started:
+    D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
+    moving = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (moving->scriptedMoveMode == 1) {
+        switch (moving->ActionState) {
+        case 1:
+            return 1;
+        case 2:
+            moving->scriptedMoveMode = 0;
+            g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
+            D_800756E8[g_EntityToModel[g_CurrentEntity]] = 0;
+            PC_INC(6);
             return 0;
         }
-        return 1;
     }
-block_17:
-    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk5D = 1;
-    ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk6A = 0;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].scriptedMoveMode = 1;
+    g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
     return 1;
 }
 #endif
@@ -5712,130 +5721,119 @@ step:
 }
 #endif
 
-/* TURNR (turn toward a direction, with the trnrc/trnlc turn-clockwise /
- * counter-clockwise variants): set up the current entity's turn toward a
- * target direction read from the script, choosing the short way around. The
- * turn state lives in the FieldEntity TurnStart/TurnEnd/TurnStep fields. m2c
- * seed; residual is the per-model address CSE and the turn-delta sign logic.
- * Pinned pending a permuter pass. */
+/* TURNR/TURNL/TRNRC/TRNLC: start (or restart) a turn on the current entity's
+ * model. Operand 5 selects the turn kind and operand 3 the direction --
+ * 0 clockwise, 1 anticlockwise, 2 whichever way is shorter -- which is why
+ * one handler prints four different opcode names. The turn is only restarted
+ * when the kind or the step count changed, so a script can spam the opcode
+ * every frame; TurnType 3 means the turn system reported completion, and only
+ * then does the PC advance.
+ *
+ * 77 rows out with 15 insertions, from an m2c seed that did not compile.
+ * Established:
+ *   - both the debug-name pick and the direction dispatch are `switch`es --
+ *     the target loads the operand once and branches beq/beq/j-default, which
+ *     is expand_end_case's compare chain, and the two DebugPrintOpcode calls
+ *     cross-jump into one.
+ *   - the shortest-way arm needs no casts. Writing `delta = TurnEnd -
+ *     TurnStart` into an `s16` and only bit-testing it is enough for combine
+ *     to narrow both reads to `lhu` and to keep the `nor`/`addiu 1` spelling
+ *     of the negation; `u16` locals for the two fields make it worse (79).
+ *     `delta & 0x8000` and `delta < 0` compile identically here.
+ *
+ * The 15 insertions are one thing: the target reaches `PC_INC(6); return 0;`
+ * *once*, with the TurnType-3 arm jumping into it and supplying
+ * g_CurrentEntity in a0 from its own reload, and we emit the whole seven-insn
+ * block a second time. Three spellings were measured and all are worse than
+ * simply writing the tail twice: a `goto advance` label after the `return 1`
+ * (79/23 -- the label gets two jump predecessors, so cse cannot keep
+ * g_CurrentEntity and the tail reloads it), the same with `g_CurrentEntity`
+ * cached in a local at the top (94/23, 90/30), and m2c's own shape with the
+ * whole body inside `if (... != 0xFF)` and the tail as fall-through
+ * (106/47). The remaining rows are the three direction arms coming out in a
+ * different layout order than the target's. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnr);
 #else
 s32 OpcodeFuncTurnr(void) {
-    s16 temp_v0_2;
-    s16 temp_v1_3;
-    s16 temp_v1_4;
-    s16 var_a0_2;
-    s8* var_a0;
-    u16 temp_a1_2;
-    u16 temp_a3;
-    u16* temp_a0_6;
-    u8 temp_a0;
-    u8 temp_a0_2;
-    u8 temp_a2;
-    u8 temp_v1_2;
-    void* temp_a0_3;
-    void* temp_a0_4;
-    void* temp_a0_5;
-    void* temp_a1;
-    void* temp_a2_2;
-    void* temp_v0;
-    void* temp_v1;
+    FieldEntity* entity;
+    FieldEntity* turning;
+    char* name;
+    s16 delta;
+    s16 dist;
 
-    temp_a0 = D_800722C4;
-    if (*(&D_8007EB98 + temp_a0) != 0xFF) {
-        if (D_8009D820 & 3) {
-            temp_v1 = D_8009C6DC + *(&D_800831FC + (temp_a0 * 2));
-            temp_a0_2 = temp_v1->unk5;
-            switch (temp_a0_2) { // irregular
-            case 1:
-                var_a0 = "turnr";
-                if (temp_v1->unk3 != 0) {
-                    var_a0 = "turnl";
-                }
-            block_9:
-                DebugPrintOpcode(var_a0, 5U);
-                break;
-            case 2:
-                var_a0 = "trnrc";
-                if (temp_v1->unk3 != 0) {
-                    var_a0 = "trnlc";
-                }
-                goto block_9;
-            }
-        }
-        temp_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-        temp_a2 = temp_a0_3->unk3B;
-        if (temp_a2 == 3) {
-            temp_a0_3->unk3B = 0U;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
-            goto block_30;
-        }
-        if ((temp_a0_3->unk3A == 0) ||
-            (temp_a1 = D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)),
-             (temp_a2 != temp_a1->unk5)) ||
-            (temp_a0_3->unk39 != temp_a1->unk4)) {
-            temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0->unk3C = (s16)temp_v0->unk38;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B =
-                (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk5;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 =
-                (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk4;
-            ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E =
-                (s16)(FieldEventReadMemoryU8(2, 2) & 0xFF);
-            temp_v1_2 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
-            if (temp_v1_2 != 1) {
-                if ((s32)temp_v1_2 < 2) {
-                    if (temp_v1_2 != 0) {
-                        return 1;
-                    }
-                    temp_a0_4 =
-                        (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-                    temp_v0_2 = temp_a0_4->unk3E;
-                    if (temp_v0_2 < (s32)temp_a0_4->unk38) {
-                        temp_a0_4->unk3E = (s16)(temp_v0_2 + 0x100);
-                    }
-                    goto block_31;
-                }
-                if (temp_v1_2 == 2) {
-                    temp_a2_2 =
-                        (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-                    temp_a1_2 = temp_a2_2->unk3E;
-                    temp_a3 = temp_a2_2->unk3C;
-                    temp_v1_3 = temp_a1_2 - temp_a3;
-                    var_a0_2 = temp_v1_3;
-                    if (temp_v1_3 & 0x8000) {
-                        var_a0_2 = ~temp_v1_3 + 1;
-                    }
-                    if (var_a0_2 >= 0x81) {
-                        if ((s16)temp_a3 < (s16)temp_a1_2) {
-                            temp_a2_2->unk3E = (u16)(temp_a1_2 - 0x100);
-                        } else {
-                            temp_a2_2->unk3E = (u16)(temp_a1_2 + 0x100);
-                        }
-                    }
-                }
-                // Duplicate return node #32. Try simplifying control flow for
-                // better match
-                return 1;
-            }
-            temp_a0_5 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v1_4 = temp_a0_5->unk3E;
-            if ((s32)temp_a0_5->unk38 < temp_v1_4) {
-                temp_a0_5->unk3E = (s16)(temp_v1_4 - 0x100);
-            }
-        block_31:
-            // Duplicate return node #32. Try simplifying control flow for
-            // better match
-            return 1;
-        }
-        return 1;
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF) {
+        PC_INC(6);
+        return 0;
     }
-block_30:
-    temp_a0_6 = (temp_a0 * 2) + &D_800831FC;
-    *temp_a0_6 += 6;
-    return 0;
+    if (g_DebugLevel & 3) {
+        switch (GET_PARAM_U8(5)) {
+        case 1:
+            name = "turnr";
+            if (GET_PARAM_U8(3) != 0) {
+                name = "turnl";
+            }
+            DebugPrintOpcode(name, 5);
+            break;
+        case 2:
+            name = "trnrc";
+            if (GET_PARAM_U8(3) != 0) {
+                name = "trnlc";
+            }
+            DebugPrintOpcode(name, 5);
+            break;
+        }
+    }
+
+    entity = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (entity->TurnType == 3) {
+        entity->TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        PC_INC(6);
+        return 0;
+    }
+    if (entity->TurnStep == 0 || entity->TurnType != GET_PARAM_U8(5) ||
+        entity->TurnSteps != GET_PARAM_U8(4)) {
+        turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+        turning->TurnStart = turning->Dir;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType =
+            GET_PARAM_U8(5);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps =
+            GET_PARAM_U8(4);
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd =
+            FieldEventReadMemoryU8(2, 2) & 0xFF;
+        switch (GET_PARAM_U8(3)) {
+        case 0:
+            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (turning->TurnEnd < turning->Dir) {
+                turning->TurnEnd = turning->TurnEnd + 0x100;
+            }
+            break;
+        case 1:
+            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (turning->Dir < turning->TurnEnd) {
+                turning->TurnEnd = turning->TurnEnd - 0x100;
+            }
+            break;
+        case 2:
+            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            delta = turning->TurnEnd - turning->TurnStart;
+            dist = delta;
+            if (delta & 0x8000) {
+                dist = ~delta + 1;
+            }
+            if (dist >= 0x81) {
+                if (turning->TurnStart < turning->TurnEnd) {
+                    turning->TurnEnd = turning->TurnEnd - 0x100;
+                } else {
+                    turning->TurnEnd = turning->TurnEnd + 0x100;
+                }
+            }
+            break;
+        }
+    }
+    return 1;
 }
 #endif
 
