@@ -1085,6 +1085,27 @@ a near-miss, in rough order of frequency:
   `FieldModelLoadAndInit`'s loops need this, and it is worth reading against
   the `u16`/`s16` loop-bound bullet above: there the *bound*'s type is the
   knob, here it is the counter's.
+* **A narrow-returning call's result carries a different mask for every width
+  of local you store it in, and the target tells you which.** A function
+  declared to return `u8` has its result masked at the call site only as far as
+  the destination pseudo's mode needs: a `u8` local is a plain `move`, a `u16`
+  local costs `andi 0xff` at the assignment *and* `andi 0xffff` at every
+  promotion to int, and a `u32`/`s32` local costs only the `andi 0xff`. So
+  three factors that all look interchangeable are not — in `OpcodeFuncMppal2`
+  the target masks two of them twice and the third once, which types them
+  `u16`, `u16`, `u32` with no other evidence needed. Count the `andi`s per
+  value before touching anything else.
+* **`(u16)(x << 1) & 0x3EU` reads the raw halfword; `(x << 1) & 0x3E` reads the
+  zero-extended copy.** For a `u16` local whose promotion to int is already
+  materialised (because a comparison or a right shift needed it), cse hands
+  that copy to the left shift too, and combine will not narrow it back — where
+  the target shifts the `lhu` destination directly. Casting the shift result
+  back to `u16` keeps the whole expression in HImode and the raw register is
+  used. A plain mask (`x & 0x8000`) narrows on its own and needs no cast, so a
+  diff with one shift on the wrong register and every mask on the right one is
+  this. The `U` suffix is a separate matter: two `u16` factors promote to
+  *signed* int, so a product that the target shifts with `srl` and clamps with
+  `sltiu` needs its unsignedness from the mask constant.
 * **gcc 2.6.3 promotes `unsigned short` to *unsigned* int.** One `u16` operand
   therefore makes a whole comparison unsigned — `sltu` where the target has
   `slt` — even when the other side is a plain `s32`. An explicit `(s32)` cast

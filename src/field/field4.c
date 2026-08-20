@@ -8002,35 +8002,47 @@ s32 OpcodeFuncAdpal2(void) {
  * sits eight rows further out. `r | ((b << 10) | (g << 5))' is the target's
  * or-tree; the natural `(b << 10) | (g << 5) | r' reverses one `or' operand.
  *
- * PARKED at 23 rows, and this pair has to be measured with *both* members
- * unparked: MPPAL2 owns the "mppal" literal MPPAL prints, so with either one
- * pinned the other emits a second copy and every `.rodata' offset after it
- * shifts. The 2-row and 3-row figures earlier revisions of this note quoted
- * were that artefact, not a residue.
+ * This pair has to be measured with *both* members unparked: MPPAL2 owns the
+ * "mppal" literal MPPAL prints, so with either one pinned the other emits a
+ * second copy and every `.rodata' offset after it shifts.
  *
- * What is left is one hoist-order difference and its register-rename cascade.
- * The target hoists in the order from-base, mulR mask, mulG mask, to-base --
- * i.e. the order the values are first used in the loop body -- while every
- * spelling tried computes both bases adjacently. Rejected: moving the `to'
- * declaration below the channel arithmetic (it then sits in the `if' arm,
- * which `move_movables' will not hoist at all: 46 rows), declaring it after
- * the `color' read (no change), u16 `color' with the products cast to u32
- * (25), and u16 mulR/mulG with u8 mulB, which is what the target's
- * `andi 0xffff' on two of the three factors looks like it wants (29). Also
- * rejected, from re-reading the residue as a typing problem rather than a
- * hoist-order one: u16 `color' alone (MPPAL 22 / MPPAL2 28), u8 for all three
- * factors (19 / 24), and both together (26 / 29). The target's extra
- * `andi a1,a3,0xffff' in the loop body and this build's extra
- * `andi t1,s3,0xffff' in the preheader do look like a u16-versus-u32 pair, and
- * they are not -- every combination is worse than the u32 body below. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal2);
-#else
+ * Four corrections took the pair from 23/15 rows to zero, and every one of
+ * them is a type or a placement, not a scheduling accident:
+ *   - `color' is `u16', so the promotion to int is a real `andi 0xffff' insn
+ *     that the `!= 0' test and both right shifts share. As `u32' gcc knows the
+ *     `lhu' already zero-extends and no such insn exists anywhere.
+ *   - the products are unsigned -- the target shifts them with `srl' and
+ *     clamps with `sltiu'. Two `u16' factors promote to *signed* int, so the
+ *     unsignedness has to come from the mask: `& 0x3EU', not `& 0x3E'.
+ *   - `(u16)(color << 1)' keeps the doubling in HImode, so it reads the raw
+ *     `lhu' register the way the target does; without the cast the shift takes
+ *     the zero-extended copy cse already has and the whole function is one row
+ *     out. This is the same lever as the `&0x8000' at the bottom, which
+ *     combine narrows on its own because it is a plain mask.
+ *   - `to' is computed at the store, not beside `from'. `move_movables' emits
+ *     the preheader hoists in the order the loop body first uses them, so the
+ *     to-base has to come after the two factor masks; declaring it beside
+ *     `from' puts both bases adjacent and costs seven rows plus the rename
+ *     cascade. It still has to be a *statement* in the `if' arm rather than an
+ *     initialiser inside it -- an initialiser lands before the arithmetic
+ *     again (30 rows).
+ *
+ * The factor types are not uniform and the reason is mechanical: this function
+ * returns `u8', so a `u16' local needs `andi 0xff' at the assignment and
+ * `andi 0xffff' at each promotion, a `u32' local needs only the `andi 0xff',
+ * and a `u8' local needs neither at the assignment and `andi 0xff' at the use.
+ * Read which of the three the target has and declare accordingly -- here mulR
+ * and mulG carry both masks and mulB only the first, so mulB is `u32'.
+ *
+ * MPPAL2's `count' is `s16': `i < count' is `slt', which a `u16' bound cannot
+ * produce (gcc 2.6.3 promotes unsigned short to *unsigned* int), and its
+ * zero-trip guard is `beqz' rather than `blez' because the bound also has to
+ * be a narrow type. MPPAL's is `s16' for the same reason. */
 s32 OpcodeFuncMppal2(void) {
-    u16 count;
+    s16 count;
     u8 srcPal;
     u8 dstPal;
-    u16 mulB;
+    u32 mulB;
     u16 mulG;
     u16 mulR;
     s16 i;
@@ -8048,13 +8060,13 @@ s32 OpcodeFuncMppal2(void) {
         s32 sp = srcPal;
         u8* base = D_80095DE0;
         u16* from = (u16*)(base + sp * 32);
-        u16* to = (u16*)(base + dstPal * 32);
-        u32 color = from[i];
+        u16 color = from[i];
 
         if (color != 0) {
-            u32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
-            u32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
-            u32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+            u32 r = (mulR * ((u16)(color << 1) & 0x3EU)) >> 7;
+            u32 g = (mulG * ((color >> 4) & 0x3FU)) >> 7;
+            u32 b = (mulB * ((color >> 9) & 0x3FU)) >> 7;
+            u16* to;
 
             if (b >= 0x20) {
                 b = 0x1F;
@@ -8065,6 +8077,7 @@ s32 OpcodeFuncMppal2(void) {
             if (r >= 0x20) {
                 r = 0x1F;
             }
+            to = (u16*)(base + dstPal * 32);
             to[i] = r | ((b << 10) | (g << 5)) | (color & 0x8000);
             if (to[i] == 0) {
                 to[i] = 0x8000;
@@ -8074,7 +8087,6 @@ s32 OpcodeFuncMppal2(void) {
     PC_INC(0xA);
     return 0;
 }
-#endif
 
 /* MPPAL over a sub-range; the two palettes come from the script.
  *
@@ -8083,19 +8095,17 @@ s32 OpcodeFuncMppal2(void) {
  * overlay, and this one -- the sub-range form -- is second. The addresses say
  * so, and so does the fact that MPPAL2 owns the "mppal" literal this prints.
  *
- * PARKED at 15 rows, same single cause as OpcodeFuncMppal2 above -- the
- * preheader hoist order -- and the same unsigned arithmetic and or-tree.
- * Read that note before touching this one, including its warning that the
- * pair only measures honestly with both members unparked. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal);
-#else
+ * Same body as OpcodeFuncMppal2 above; read that note for why `color' is u16,
+ * why the masks are unsigned, why the doubling carries a `(u16)' cast and why
+ * `to' is computed at the store. Here the two palette indices come from the
+ * script bytes rather than from banked memory, so they are plain `lbu' loads
+ * and need no narrowing at all. */
 s32 OpcodeFuncMppal(void) {
     s16 count;
     u8 srcPal;
     u8 dstPal;
     s16 start;
-    u16 mulB;
+    u32 mulB;
     u16 mulG;
     u16 mulR;
     s16 i;
@@ -8116,13 +8126,13 @@ s32 OpcodeFuncMppal(void) {
         s32 sp = srcPal;
         u8* base = D_80095DE0;
         u16* from = (u16*)(base + sp * 32);
-        u16* to = (u16*)(base + dstPal * 32);
-        u32 color = from[i];
+        u16 color = from[i];
 
         if (color != 0) {
-            u32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
-            u32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
-            u32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+            u32 r = (mulR * ((u16)(color << 1) & 0x3EU)) >> 7;
+            u32 g = (mulG * ((color >> 4) & 0x3FU)) >> 7;
+            u32 b = (mulB * ((color >> 9) & 0x3FU)) >> 7;
+            u16* to;
 
             if (b >= 0x20) {
                 b = 0x1F;
@@ -8133,6 +8143,7 @@ s32 OpcodeFuncMppal(void) {
             if (r >= 0x20) {
                 r = 0x1F;
             }
+            to = (u16*)(base + dstPal * 32);
             to[i] = r | ((b << 10) | (g << 5)) | (color & 0x8000);
             if (to[i] == 0) {
                 to[i] = 0x8000;
@@ -8142,7 +8153,6 @@ s32 OpcodeFuncMppal(void) {
     PC_INC(0xB);
     return 0;
 }
-#endif
 
 static void SetPcModel(void) {
     if (Savemap.memory_bank_2[9] != 0xFF &&
