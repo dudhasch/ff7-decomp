@@ -84,74 +84,99 @@ void FieldBGScrollInit(void) {
     }
 }
 
-/* Project a point onto a trigger line: for a type-1 or type-2 trigger compute
- * the closest on-line point to the entity and write it back into arg1. m2c
- * seed; the residual is regalloc across the divide-by-length-squared and the
- * two near-duplicate branches. Codegen pinned via MASPSX_OVERRIDE pending a
- * permuter pass. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
-#else
-void FieldCalcPointOnLine(void* arg0, void* arg1) {
-    s16 temp_a2_3;
-    s16 temp_t0;
-    s16 temp_t1;
-    s16 temp_v0;
-    s16 temp_v1;
-    s32 temp_a0;
-    s32 temp_a1;
-    s32 temp_a2;
-    s32 temp_a2_2;
-    s32 temp_a2_4;
-    s32 temp_t0_2;
-    s32 temp_t2;
-    s32 temp_t2_2;
-
-    if (arg0->unk14 == 1) {
-        temp_t0 = arg0->unkC;
-        temp_a2 = arg0->unk10 - (temp_t0 + 0x140);
-        temp_v0 = arg0->unkE;
-        temp_a0 = arg0->unk12 - (temp_v0 + 0xF0);
-        temp_t2 = -(((temp_t0 - (arg1->unk0 - 0xA0)) * temp_a2) +
-                    ((temp_v0 - (arg1->unk2 - 0x78)) * temp_a0));
-        temp_a2_2 = (s32)((temp_a2 * temp_a2) + (temp_a0 * temp_a0)) >> 8;
-        arg1->unk0 = (s16)(((s32)((s32)(temp_t2 * temp_a2) / temp_a2_2) >> 8) +
-                           0xA0 + temp_t0);
-        arg1->unk2 = (s16)(((s32)((s32)(temp_t2 * temp_a0) / temp_a2_2) >> 8) +
-                           0x78 + (u16)arg0->unkE);
-    }
-    if (arg0->unk14 == 2) {
-        temp_t1 = arg0->unkC;
-        temp_t0_2 = arg0->unk10 - (temp_t1 + 0x140);
-        temp_a2_3 = arg0->unk12;
-        temp_v1 = arg0->unkE;
-        temp_a1 = temp_v1 - (temp_a2_3 - 0xF0);
-        temp_t2_2 = -(((temp_t1 - (arg1->unk0 - 0xA0)) * temp_t0_2) +
-                      ((temp_a2_3 - (arg1->unk2 + 0x78)) * temp_a1));
-        temp_a2_4 = (s32)((temp_t0_2 * temp_t0_2) +
-                          ((temp_v1 - temp_a2_3) * temp_a1)) >>
-                    8;
-        arg1->unk0 =
-            (s16)(((s32)((s32)(temp_t2_2 * temp_t0_2) / temp_a2_4) >> 8) +
-                  0xA0 + temp_t1);
-        arg1->unk2 =
-            (s16)(((s32)((s32)(temp_t2_2 * temp_a1) / temp_a2_4) >> 8) - 0x78 +
-                  (u16)arg0->unk12);
-    }
-}
-#endif
-
-/* Scroll limits at the head of the field's trigger block. g_FieldTriggers is
- * typed s32 because it is assigned as a raw word on load. */
+/* Scroll limits at the head of the field's trigger block: the rectangle the
+ * background scroll position is kept inside, and how the camera is allowed to
+ * move within it. Types 1 and 2 rail the camera along the diagonal between the
+ * two corners -- see FieldCalcPointOnLine. g_FieldTriggers is typed s32
+ * because it is assigned as a raw word on load. */
 typedef struct {
     /* 0x00 */ u8 unk00[0xC];
     /* 0x0C */ s16 minX;
     /* 0x0E */ s16 minY;
     /* 0x10 */ s16 maxX;
     /* 0x12 */ s16 maxY;
+    /* 0x14 */ u8 scrollType;
 } FieldScrollLimits;
 
 #define FIELD_SCROLL_LIMITS ((FieldScrollLimits*)g_FieldTriggers)
+
+/* Rail the background scroll position onto the diagonal of the map's scroll
+ * rectangle. Scroll type 1 runs the line from the top-left corner towards
+ * (maxX, maxY) offset by a screen; type 2 runs it from the bottom-left, and is
+ * not the mirror image it looks like -- its denominator uses (minY - maxY) * dy
+ * where type 1 uses dy * dy. Both project the current position onto the line,
+ * in 8.8 fixed point, and write the foot of the perpendicular back through the
+ * pointer.
+ *
+ * The type byte is re-read for the second test because the stores through
+ * `pos` in the first arm may alias it.
+ *
+ * 74 rows out, from an m2c seed that did not compile at all (`void*`
+ * parameters dereferenced as `->unkNN`), so this is the first number the
+ * function has ever had. What the rewrite established:
+ *   - arg0 is the FieldScrollLimits at the head of the trigger block, arg1 the
+ *     same `s16*` scroll position FieldBGClampPos takes; 0x14 is a type byte
+ *     the rest of the record did not reach.
+ *   - minX, minY and maxY have to be `s32`. As `s16` locals, combine narrows
+ *     the closing `+ minX` back into a fresh `lhu` of the member rather than
+ *     reusing the sign-extended load the target keeps live: 88 rows against 79.
+ *   - `px = pos[0] - 0xA0` has to be its own local. Written inline, fold
+ *     associates the constant onto minX and the subtraction comes out as
+ *     `(minX + 0xA0) - pos[0]` where the target has `pos[0] - 0xA0` first.
+ *   - the target reserves a 0x10 frame with no saved registers and no calls,
+ *     so there is a local here nobody can see. Reserving it is worth 5 rows.
+ *
+ * The residue is register naming: the target copies a0 into t3 where we use
+ * t2, and every temporary downstream renumbers with it. Two folds also
+ * survive -- `maxX - (minX + 0x140)` comes out as `(maxX - 0x140) - minX`, and
+ * the closing `+ 0xA0 + minX` as `v + (minX + 0xA0)` -- but blocking either
+ * with a named local measures worse overall, in all four placements (74, 75,
+ * 76, 78) and 98 for the closing add. Also measured: px/py as `s16` (88),
+ * dx/dy inline in the dot product (91), no locals at all (85). This is a good
+ * permuter target: no calls, pure arithmetic, and the instruction count is
+ * within seven. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
+#else
+void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
+    s32 minX;
+    s32 minY;
+    s32 maxY;
+    s32 px;
+    s32 py;
+    s32 dx;
+    s32 dy;
+    s32 num;
+    s32 den;
+    u8 unusedLocals[0x10];
+
+    if (limits->scrollType == 1) {
+        px = pos[0] - 0xA0;
+        minX = limits->minX;
+        dx = limits->maxX - (minX + 0x140);
+        py = pos[1] - 0x78;
+        minY = limits->minY;
+        dy = limits->maxY - (minY + 0xF0);
+        num = -(((minX - px) * dx) + ((minY - py) * dy));
+        den = ((dx * dx) + (dy * dy)) >> 8;
+        pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;
+        pos[1] = ((num * dy / den) >> 8) + 0x78 + (u16)limits->minY;
+    }
+    if (limits->scrollType == 2) {
+        px = pos[0] - 0xA0;
+        minX = limits->minX;
+        dx = limits->maxX - (minX + 0x140);
+        py = pos[1] + 0x78;
+        maxY = limits->maxY;
+        minY = limits->minY;
+        dy = minY - (maxY - 0xF0);
+        num = -(((minX - px) * dx) + ((maxY - py) * dy));
+        den = ((dx * dx) + ((minY - maxY) * dy)) >> 8;
+        pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;
+        pos[1] = ((num * dy / den) >> 8) - 0x78 + (u16)limits->maxY;
+    }
+}
+#endif
 
 /* Keeps a background scroll position half a screen (0xA0 x 0x78) inside the
  * map's scroll limits. */
@@ -1151,7 +1176,7 @@ void FieldEntityGatewayCheck(
 /* One entry of the map's background-trigger block. Even `type`s arm the
  * trigger, odd ones disarm it. */
 typedef struct {
-    /* 0x00 */ u8 unk00[0xC];
+    /* 0x00 */ LinePos pos;
     /* 0x0C */ u8 entityId;
     /* 0x0D */ u8 unk0D;
     /* 0x0E */ u8 type;
@@ -1205,7 +1230,15 @@ s32 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
 }
 #endif
 
+/* The four trigger sound-effect ids. This is the .rodata blob of the local
+ * `s16 seIds[4]` initialiser inside FieldEntityTriggerCheck below, and it is
+ * spelled out here only because that function is still pinned: its .s
+ * references D_800A00BC by name, so the definition has to exist. Delete this
+ * line in the same change that unparks the function -- gcc emits the
+ * initialiser's own copy into the constant pool ahead of the function body,
+ * and two copies shift every later .rodata offset. */
 const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
+
 /* Walk the 12 background triggers against one entity and arm/disarm each it
  * crosses or comes near. In-proximity arms directly when the entity stands on
  * the line, else needs the entity facing it within +/-64; crossing types 4/5
@@ -1217,7 +1250,7 @@ MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
 #else
 void FieldEntityTriggerCheck(
     FieldEntity* entity, FieldBgTrigger* triggers, VECTOR* dest) {
-    s16 seIds[4];
+    s16 seIds[4] = {0x0, 0x36, 0x7A, 0x12A};
     s32* from;
     s32* nearest;
     FieldBgTrigger* trigger;
@@ -1226,7 +1259,6 @@ void FieldEntityTriggerCheck(
     u8 dir;
     s32 i;
 
-    memcpy(seIds, (void*)D_800A00BC, 8);
     from = (s32*)0x1F800000;
     nearest = (s32*)0x1F800020;
     from[0] = entity->PosX >> 12;
