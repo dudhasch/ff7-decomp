@@ -2445,36 +2445,24 @@ typedef struct {
  * 0x20-byte CLUT (op 2) into the shared model texture block at *D_800DFCA0, or
  * uploads an embedded image straight to VRAM (op 3).
  *
- * 22 rows, down from 44 changed / 7 inserted. Four of the corrections were
- * program, not codegen, and each is readable straight off the target:
- *   - the guard is `count == 0`, not `count <= 0` (one `beqz`, no `blez`);
- *   - the record is indexed, `rec[i].f`, not walked with `rec += 0x14` — the
- *     walking form makes `rec` a biv and costs the reduced base (see the
- *     FieldModelLoadBcx bullet in CLAUDE.md);
- *   - the struct is five words, not four. A four-word TdbRecord makes `rec[i]`
- *     stride 0x10 while the target's scaled index is 0x14, and every field
- *     offset in the diff still looks right because the *first* record's are;
- *   - op 0's destination is absolute (`(u8*)rec[i].dst`), not `tdb + off`, and
- *     op 3's RECT lives inside the record: the target sets a0 = &rec->dst in
- *     the `beq v1,v0,<case3>` delay slot, which no `tdb + off` spelling
- *     reaches.
- * The residue is one register tie-break in the case-1/case-2 arms. Target:
- *   lw a0,%lo(D_800DFCA0) / lhu v0,4(a0) / lw v0,8(a0) / nop / addu v0,a0,v0
- *   / lw a0,4(s0)
- * ours holds `block` in $a1 and issues the `lw a0,4(s0)` (srcOff) *before* the
- * addu, filling the load-delay slot the target leaves as a nop. Rejected, all
- * measured: `block` declared after `rec` (22, identical); `block` hoisted to a
- * single assignment before the loop (47/4); `block` assigned inside the
- * guarded arm (28/3); the memcpy destination named in a `u8* dst` local so the
- * dest expression is complete before the source is loaded (56/1). The nop is
- * the tell — the target has nothing to put there, so srcOff is not yet live,
- * which no reordering of these four statements produces.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelBsxTdbModify);
-#else
+ * The texture block is reached by writing the cast out at every use rather
+ * than through a `FieldTexBlockHeader* block` local. The local is the obvious
+ * spelling and it costs 7 rows: it makes the pointer live across the whole
+ * arm, so gcc loads *D_800DFCA0 into a callee-saved-style temp and can hoist
+ * the record's srcOff load into the load-delay slot the target leaves empty.
+ * Spelled inline, cse rematerialises the base per reference and the schedule
+ * is the target's. decomp-permuter found this (325 -> 0 in 457 candidates).
+ *
+ * The other four corrections are program, not codegen, and each is readable
+ * straight off the target: the guard is `count == 0`, not `count <= 0`; the
+ * record is indexed rather than walked (a walked `rec` is a biv and gcc
+ * reduces the field addresses onto it); TdbRecord is five words, so a
+ * four-word struct strode 0x10 where the target strides 0x14 and every field
+ * offset still looked right because the first record's are; and op 0's
+ * destination is absolute while op 3's RECT lives inside the record -- the
+ * target sets a0 = &rec->dst in the `beq v1,v0,<case3>` delay slot, which no
+ * `tdb + off` spelling reaches. */
 void FieldModelBsxTdbModify(u8* tdb) {
-    FieldTexBlockHeader* block;
     TdbRecord* rec;
     s32 count;
     s32 i;
@@ -2493,16 +2481,18 @@ void FieldModelBsxTdbModify(u8* tdb) {
             memcpy((u8*)rec[i].dst, tdb + rec[i].srcOff, rec[i].size);
             break;
         case 1:
-            block = (FieldTexBlockHeader*)D_800DFCA0;
-            if (rec[i].dst < block->numPages) {
-                memcpy((u8*)block + block->pageOffset + (rec[i].dst << 9),
+            if (rec[i].dst < ((FieldTexBlockHeader*)D_800DFCA0)->numPages) {
+                memcpy((u8*)D_800DFCA0 +
+                           ((FieldTexBlockHeader*)D_800DFCA0)->pageOffset +
+                           (rec[i].dst << 9),
                        tdb + rec[i].srcOff, 0x200);
             }
             break;
         case 2:
-            block = (FieldTexBlockHeader*)D_800DFCA0;
-            if (rec[i].dst < block->numCluts) {
-                memcpy((u8*)block + block->clutOffset + (rec[i].dst << 5),
+            if (rec[i].dst < ((FieldTexBlockHeader*)D_800DFCA0)->numCluts) {
+                memcpy((u8*)D_800DFCA0 +
+                           ((FieldTexBlockHeader*)D_800DFCA0)->clutOffset +
+                           (rec[i].dst << 5),
                        tdb + rec[i].srcOff, 0x20);
             }
             break;
@@ -2512,7 +2502,6 @@ void FieldModelBsxTdbModify(u8* tdb) {
         }
     }
 }
-#endif
 
 /* Build the per-model FieldModelEntry table from the loaded model-file
  * descriptor. First pass numbers the NPC-flagged records; second pass fills
