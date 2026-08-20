@@ -339,7 +339,7 @@ extern s32 g_WmPreSector;
 extern s32* g_FieldEncountersP;
 extern s32* g_FieldModelsP;
 extern s32* g_FieldTriggersP;
-extern u16 g_FieldMoviePlayed;
+extern volatile u16 g_FieldMoviePlayed;
 extern u16 g_FieldPreloadMapId;
 extern u32 g_FieldLzsInfo[];
 extern u32 g_WmPreSize;

@@ -65,8 +65,10 @@ void StopFieldMapPreload(void) {
     g_isFieldLoading = 0;
 }
 
-extern FieldFileInfo g_FieldFileTable[];
-extern u16 g_FieldMoviePlayed;
+/* 0x800DA5C4 == &g_FieldFileInfo[0].mimSize: the preload pulls the MIM, so
+ * the size is at [id * 6] and its sector one word before it. */
+extern u32 g_FieldFileTable[];
+extern volatile u16 g_FieldMoviePlayed;
 extern u16 g_FieldPreloadMapId;
 extern s32 g_WmPreSector;
 extern u32 g_WmPreSize;
@@ -75,6 +77,53 @@ extern u32 g_WmPreSize;
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
 #else
 
+/* Pick the nearest gateway on this map and start streaming its MIM off the CD,
+ * so a map transition does not have to wait for the read. The gateway table is
+ * twelve 0x18-byte records; destFieldId == 0x7FFF marks an unused slot. The
+ * distance is squared, in map units, from the player position stashed in the
+ * scratchpad at 0x1F800000.
+ *
+ * 28 rows out, and 27 of them are one register naming cascade downstream of the
+ * remaining structural row:
+ *
+ *     want: move a3,a1        (ptrPos = gateway, then the parameter advances)
+ *     got:  <
+ *
+ * The target keeps the *advanced* walker in the parameter's own register a1 and
+ * pays one `move` to copy the un-advanced value into a3; this build keeps the
+ * un-advanced value in a1 and puts the advanced walker in a2, which needs no
+ * copy and is one instruction shorter. Both are legal and the C is the same
+ * either way -- it is the allocator picking a different pseudo for the incoming
+ * argument register, the same coin-flip as KawaiLightingApplyToPolyColor's
+ * t2/t3. Everything else in the loop is instruction-for-instruction identical.
+ *
+ * Measured and rejected: making the second parameter `u16*` and advancing it in
+ * place rather than deriving a third pointer (no change); swapping the two
+ * pointer declarations (no change -- and note CLAUDE.md's rule that declaration
+ * order does nothing for gcc 2.6.3, against the ADPAL/MPPAL bullet that says it
+ * does; this function is evidence for the former); a `do/while` loop with the
+ * increments written out at the bottom instead of a `for` with a comma
+ * increment (no change, byte-identical output).
+ *
+ * Four things that WERE worth rows, all of them type errors rather than
+ * codegen, and all of them now folded in (53 rows -> 28):
+ *   - the m2c seed did its pointer arithmetic in FieldGateway units, so
+ *     `gateway + 0x12` compiled to `+0x1b0`. The walk needs BYTE offsets: one
+ *     s16* at the record base for pos.x1/pos.y1 and one u16* at +0x12 for
+ *     destFieldId, with pos.y1 reached as `((s16*)gateway)[-8]` off the
+ * *second* base -- which is what the target's `lh v0,-0x10(a1)` says gcc did.
+ *   - g_FieldFileTable (0x800DA5C4) is not the head of the table: it is
+ *     &g_FieldFileInfo[0].mimSize. The preload pulls the MIM, so the size is
+ *     `table[id * 6]` and its sector is the word before it, `table[id * 6 -
+ * 1]`. Typed as FieldFileInfo* and indexed `.datSize`, every offset is 4 out.
+ *   - g_FieldMoviePlayed has to be `volatile u16`. Non-volatile, combine folds
+ *     the (s16) conversion into the load and emits `lh`; the target loads `lhu`
+ *     and sign-extends in two separate insns, which only survives if the MEM is
+ *     volatile. The other users of the symbol only ever store constants to it,
+ *     so the qualifier costs nothing elsewhere.
+ *   - the (s16) cast on g_FieldPreloadMapId has to appear on the table index as
+ *     well as on the comparison, or gcc reloads the global unsigned for the
+ *     index and the two uses stop sharing a register. */
 // External Declarations
 extern u8 D_8009ABF5;
 extern u8 g_FieldAnimLock;
@@ -82,62 +131,51 @@ extern s16 D_80071A5C;
 
 // D_8009ABF5 = g_FieldState -> command
 
-void PreloadNextFieldMap(FieldEntity* Player, FieldLine* gateway) {
-    s16* ptr_a3;
+void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
+    s16* ptrPos;
     s32* scratchpad;
-    s32 min_dist;
-    s32 counter;
-    s16* ptr_a1;
-    s32 term_val;
-    s32 diff_x, diff_y, dist;
-    s16 map_id;
-    FieldFileInfo* table;
+    s32 minDist;
+    s32 i;
+    s32 diffX, diffY, dist;
+    u32* table;
     s32 sector;
     u32 size;
 
-    ptr_a3 = gateway;
-    min_dist = 0x7FFFFFFF;
+    ptrPos = (s16*)gateway;
+    minDist = 0x7FFFFFFF;
 
-    scratchpad = 0x1F800000;
+    scratchpad = (s32*)0x1F800000;
     scratchpad[0] = Player->PosX >> 12;
     scratchpad[1] = Player->PosY >> 12;
     scratchpad[2] = Player->PosZ >> 12;
 
     if (g_FieldAnimLock == 0) {
-        counter = 0;
-        term_val = 0x7FFF;
-        ptr_a1 = (gateway + 0x12);
+        gateway += 9;
 
-        do {
-            map_id = ptr_a1[0];
-            if (map_id != term_val) {
-                diff_x = ptr_a3[0] - scratchpad[0];
-                diff_y = ptr_a1[-8] - scratchpad[1];
-                dist = (diff_x * diff_x) + (diff_y * diff_y);
-
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    g_FieldPreloadMapId = map_id;
+        for (i = 0; i < 12; i++, gateway += 12, ptrPos += 12) {
+            if (gateway[0] != 0x7FFF) {
+                diffX = ptrPos[0] - scratchpad[0];
+                diffY = ((s16*)gateway)[-8] - scratchpad[1];
+                dist = diffX * diffX + diffY * diffY;
+                if (dist < minDist) {
+                    minDist = dist;
+                    g_FieldPreloadMapId = gateway[0];
                 }
             }
-
-            counter++;
-            ptr_a1 = (ptr_a1 + 0x18);
-            ptr_a3 = (ptr_a3 + 0x18);
-        } while (counter < 12);
+        }
     }
 
-    if (D_8009ABF5 == 3 || (g_FieldMoviePlayed == 1) || D_8009ABF5 == 2) {
+    if (D_8009ABF5 == 3 || (s16)g_FieldMoviePlayed == 1 || D_8009ABF5 == 2) {
         StopFieldMapPreload();
         return;
     }
 
-    if (D_80071A5C == g_FieldPreloadMapId) {
+    if (D_80071A5C == (s16)g_FieldPreloadMapId) {
         return;
     }
 
     table = g_FieldFileTable;
-    if (0x4DFFF < table[g_FieldPreloadMapId].datSize) {
+    if (0x4DFFF < table[(s16)g_FieldPreloadMapId * 6]) {
         return;
     }
 
@@ -145,8 +183,8 @@ void PreloadNextFieldMap(FieldEntity* Player, FieldLine* gateway) {
     D_80071A5C = g_FieldPreloadMapId;
 
     if (D_80071A5C >= 0x41) {
-        sector = table[D_80071A5C].datSector;
-        size = table[D_80071A5C].datSize;
+        sector = table[D_80071A5C * 6 - 1];
+        size = table[D_80071A5C * 6];
     } else {
         sector = g_WmPreSector;
         size = g_WmPreSize;
@@ -483,13 +521,19 @@ void FieldLoadMimToVram(s32 arg0, u8* mim) {
 #endif
 
 /* Latch both pads: keep the raw state, the previous state, and the edges
- * (newly pressed / newly released) derived from the two. */
-/* Two instructions out, both register choices; see the comment on the second
- * pad's release computation below. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldButtonsUpdate);
-#else
-void FieldButtonsUpdate(void) {
+ * (newly pressed / newly released) derived from the two, and hand the caller
+ * back pad 2's raw state.
+ *
+ * The return value is not decoration -- it is what makes the function match.
+ * Declared void, gcc puts `~pad2` in v0 (the dying source of the `nor`) and
+ * the last two instructions come out as `nor v0,zero,v0` / `and v1,v1,v0`.
+ * The target writes `nor a0,zero,v0`, reusing a0 freed by the
+ * g_FieldPad2Pressed store one instruction earlier, which it can only do
+ * because v0 must still hold pad2 at the epilogue. The identical pad-1 block,
+ * whose pad1 really is dead, does use v0 -- so the two halves being allocated
+ * differently is the tell. FieldMainLoop's call site agrees: it stores the
+ * result into g_FieldPadRaw. */
+u32 FieldButtonsUpdate(void) {
     u32 pad1;
     u32 pad2;
     u32 old1;
@@ -509,16 +553,9 @@ void FieldButtonsUpdate(void) {
     g_FieldPad2State = pad2;
     g_FieldPad2PrevState = old2;
     g_FieldPad2Pressed = (pad2 ^ old2) & pad2;
-    /* The do/while is not cosmetic: without the statement boundary gcc hoists
-     * this whole expression above the g_FieldPad2Pressed store. It is most
-     * likely a macro in the original. What is left is one register choice --
-     * the original puts the `nor` in $a0, freed by the store just above, where
-     * gcc reuses $v0. */
-    do {
-        g_FieldPad2Released = (pad2 ^ old2) & ~pad2;
-    } while (0);
+    g_FieldPad2Released = (pad2 ^ old2) & ~pad2;
+    return pad2;
 }
-#endif
 
 extern FieldBgData** D_8009D848;
 extern FieldBgTile3* D_8007EBD4;
