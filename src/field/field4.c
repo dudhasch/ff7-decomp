@@ -1584,18 +1584,30 @@ void FieldEventRunInit(void) {
 
 /* Enable the loaded field models that correspond to party members, then
  * disable (make non-solid, non-talkable, invisible) every model whose loader
- * slot was not claimed. Codegen pinned via MASPSX_OVERRIDE: the #else body is
- * the verified-correct C; its bytes come from the reference .s (the
- * s16-walking-counter strength-reduction wall). */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEnablePartyModels);
-#else
+ * slot was not claimed.
+ *
+ * Four things, and only the last is codegen. The second loop's bound is read
+ * from memory on every iteration -- caching it in a `modelCount' local and
+ * guarding the loop with `if (modelCount != 0)' is 35 rows, because the
+ * hand-written guard is not the same code as the `for's own zero-trip test.
+ * The inner loop walks *entities*, so its bound is `numEntities' (offset 2),
+ * not `numModels' (offset 3); the two are adjacent `u8's and the whole
+ * function still diffs to two rows with the wrong one. And the redundant
+ * `if (i < numModels)' wrapper around it is not in the original -- the target
+ * reaches the inner loop through its own zero-trip guard, which it spells
+ * `slt v0,v1,v0' against the npcFlag register it has just proved to be zero.
+ *
+ * The codegen one: `g_EntityToModel[modelId]' has to go through an `s32'
+ * local. Read inline it is re-loaded for the second test (three rows) and the
+ * comparison against the u16 `count' comes out `sltu' -- gcc 2.6.3 promotes
+ * unsigned short to *unsigned* int, so one unsigned operand makes the whole
+ * comparison unsigned. The `(s32)' cast on `count' is what puts `slt' back. */
 void FieldEnablePartyModels(void) {
     s16 i;
     s16 j;
-    s16 modelCount;
     u8 charId;
     u8 modelId;
+    s32 entityModel;
 
     /* Mark the loader slot of each present party member's model as an NPC. */
     for (i = 0; i < 3; i++) {
@@ -1607,35 +1619,29 @@ void FieldEnablePartyModels(void) {
         if (modelId == 0xFF) {
             continue;
         }
-        if (g_EntityToModel[modelId] == 0xFF) {
+        entityModel = g_EntityToModel[modelId];
+        if (entityModel == 0xFF) {
             continue;
         }
-        if (g_EntityToModel[modelId] <
-            ((FieldModelFileDesc*)D_8007E770)->count) {
-            g_FieldModelLoaderData[g_EntityToModel[modelId]].npcFlag = 1;
+        if (entityModel < (s32)((FieldModelFileDesc*)D_8007E770)->count) {
+            g_FieldModelLoaderData[entityModel].npcFlag = 1;
         }
     }
 
     /* Disable every model whose loader slot was not claimed above. */
-    modelCount = ((FieldModelFileDesc*)D_8007E770)->count;
-    if (modelCount != 0) {
-        for (i = 0; i < modelCount; i++) {
-            if (g_FieldModelLoaderData[i].npcFlag == 0) {
-                if (i < g_FieldScripts->numModels) {
-                    for (j = 0; j < g_FieldScripts->numModels; j++) {
-                        if (g_EntityToModel[j] == i) {
-                            g_EntityToModel[j] = 0xFF;
-                            g_FieldModels[i].visible = 0;
-                            g_FieldModels[i].SolidOff = 1;
-                            g_FieldModels[i].TalkOff = 1;
-                        }
-                    }
+    for (i = 0; i < ((FieldModelFileDesc*)D_8007E770)->count; i++) {
+        if (g_FieldModelLoaderData[i].npcFlag == 0) {
+            for (j = 0; j < g_FieldScripts->numEntities; j++) {
+                if (g_EntityToModel[j] == i) {
+                    g_EntityToModel[j] = 0xFF;
+                    g_FieldModels[i].visible = 0;
+                    g_FieldModels[i].SolidOff = 1;
+                    g_FieldModels[i].TalkOff = 1;
                 }
             }
         }
     }
 }
-#endif
 
 // Inline as empty string when more is decompiled. Checksum fails now.
 const char D_800A013C[8] = {0};
@@ -7655,20 +7661,20 @@ s32 OpcodeFuncCppal2(void) {
  * around to entry 0. Two passes, both walking the same pair of indices -- `i`
  * the source entry, `j` the destination one.
  *
- * The base-address recipe from ADPAL below (widen the id, then `u8* base =
- * D_80095DE0;`, then the two pointers off `base`) fixes both preheaders and
- * takes this from 13 rows to 11. What is left is the *second* loop, and it is
- * the same shape in both RTPAL and RTPAL2: the target expands the load index
- * before the store index (`sll a0,a2,0x10` on the `for` counter first, then
- * the body-incremented one), gcc expands the store index first, and the two
- * scaled addresses then swap $a0 and $v1 all the way to the `lhu`/`sh`. The
- * first loop, whose `for` counter is the *store* index, matches exactly.
- * Measured and rejected: hoisting the load into a `u16 color` temp before the
- * store, in the second loop alone and in both loops -- neither changes a row,
- * and doing it in both makes RTPAL2 worse. Permuter food. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncRtpal);
-#else
+ * Two things beyond the base-address recipe from ADPAL below (widen the id,
+ * then `u8* base = D_80095DE0;`, then the two pointers off `base`), which is
+ * what fixes both preheaders.
+ *
+ * The first loop's `for` counter is the store index and its body increments
+ * the load index; the second loop's is the other way round. Spelled that way
+ * -- `j++` as the last statement of the body -- the second loop expands its
+ * two scaled addresses in the opposite order to the target and swaps $a0 and
+ * $v1 all the way to the `lhu`/`sh`. gcc emits the body's increment before the
+ * `for`'s, so the body form puts them in the order j, i where the target has
+ * i, j; moving it into the `for` (`i++, j++`) puts both in the increment list,
+ * in written order, and the whole loop falls into place. Hoisting the load
+ * into a `u16` temp ahead of the store -- the obvious way to force the load
+ * index first -- does not move a single row: cse folds the temp away. */
 s32 OpcodeFuncRtpal(void) {
     s16 count;
     u8 src;
@@ -7695,31 +7701,23 @@ s32 OpcodeFuncRtpal(void) {
         i++;
     }
     j = 0;
-    for (i = count - start; i <= count; i++) {
+    for (i = count - start; i <= count; i++, j++) {
         s32 dp = dst;
         u8* base = D_80095DE0;
         u16* to = (u16*)(base + dp * 32);
         u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
-        j++;
     }
     PC_INC(7);
     return 0;
 }
-#endif
 
 /* As RTPAL, but source and destination each get their own start entry, so the
  * rotation can move a run between two palettes as well as within one.
  *
- * One row, the same &D_80095DE0 placement as OpcodeFuncRtpal above. Here the
- * named-base spelling is the better of the two (11 rows against 23) and is
- * kept, so the pair lands one slot early rather than one slot late. Both
- * palettes come from the script here rather than from event memory, so there
- * is no `andi` to straddle in the second preheader and only one row is left. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncRtpal2);
-#else
+ * Identical in shape to OpcodeFuncRtpal above and wants exactly the same two
+ * fixes; read that note. */
 s32 OpcodeFuncRtpal2(void) {
     s16 end;
     u8 src;
@@ -7749,19 +7747,17 @@ s32 OpcodeFuncRtpal2(void) {
         i++;
     }
     j = srcStart;
-    for (i = end - dstStart; i <= end; i++) {
+    for (i = end - dstStart; i <= end; i++, j++) {
         s32 dp = dst;
         u8* base = D_80095DE0;
         u16* to = (u16*)(base + dp * 32);
         u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
-        j++;
     }
     PC_INC(8);
     return 0;
 }
-#endif
 
 /* Add a signed per-channel delta to every colour of a palette. The three
  * deltas arrive as bytes, so a set sign bit is widened by hand -- `x ^= 0xFF00`

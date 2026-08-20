@@ -1018,6 +1018,32 @@ a near-miss, in rough order of frequency:
   constant goes in `$v1`; with `break` and a single `return 0` after the
   switch, the constant gets `$v0` and is re-zeroed on the way out, which is
   what the target does. `FieldEventSplitSet`'s last four rows.
+* **Two counters walking together: put both increments in the `for`.** gcc
+  emits the body's `i++` before the `for`'s `j++`, so `for (j = ...; ...; j++)
+  { d[j] = s[i]; i++; }` hands `expand` the increments in the order j, i — and
+  with them the two scaled addresses, which then swap registers all the way to
+  the `lhu`/`sh`. `for (i = ...; ...; i++, j++)` puts both in the increment
+  list in written order and the loop falls into place. The tell is a loop whose
+  only fault is that its two index computations are in the opposite order to
+  the target; forcing the load first with a named temp does *not* work, because
+  cse folds the temp away. Both `OpcodeFuncRtpal` and `OpcodeFuncRtpal2` needed
+  this, and only in their second loop — the first, whose `for` counter is the
+  store index, matched all along.
+* **A loop bound read from memory is not the same as a cached one, and a
+  hand-written zero-trip guard is not the same as the `for`'s.**
+  `count = hdr->count; if (count != 0) for (i = 0; i < count; i++)` looks like
+  what `for (i = 0; i < hdr->count; i++)` compiles to and is 35 rows away from
+  it — this is the exact inverse of the `FieldModelLoadBcx` bullet above, so
+  read the target for which one it wants: the bound reloaded inside the loop
+  means write the member, hoisted into the preheader means write the local. A
+  redundant `if (i < bound)` in front of an inner loop is the same trap seen
+  from the other side: the target reaches the loop through its own guard, and
+  spells it against whatever register it has just proved to be zero.
+* **gcc 2.6.3 promotes `unsigned short` to *unsigned* int.** One `u16` operand
+  therefore makes a whole comparison unsigned — `sltu` where the target has
+  `slt` — even when the other side is a plain `s32`. An explicit `(s32)` cast
+  on the `u16` is what puts the signed compare back; it costs no instruction,
+  because the value is already zero-extended by its `lhu`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
