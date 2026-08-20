@@ -2240,18 +2240,17 @@ void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
 // Begin of field_event_memory_bank.c
 /////////////////////////////////////////////////
 
-/* The #else body is a VERIFIED MATCH -- checkfn reports MATCH for it -- but it
- * cannot land alone. This function LENDS: its `.s` owns D_800A032C, the
- * "bank" diagnostic that FieldEventWriteMemoryU8, FieldEventReadMemoryS16 and
- * FieldEventWriteMemoryS16 all print, and all three are still pinned. Writing
- * the literal here emits a second copy under a local label and the link fails
- * with `undefined reference to D_800A032C`. The four have to land together;
- * the other three are at 16, 22 and 22 rows. (rodata_owner.py says SAFE, which
- * is its MASPSX_OVERRIDE blind spot -- it reads the `#else` bodies and cannot
- * tell that the pinned siblings still assemble their `.s`.) */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventReadMemoryU8);
-#else
+/* The four FieldEvent*Memory* accessors are one unit and had to be unparked in
+ * the same change. They share a dozen debug strings, and while any of them was
+ * still pinned its `.s` supplied those strings under `D_` symbols while the
+ * unparked ones emitted their own local copies -- so each looked 16 to 22 rows
+ * out for reasons that were entirely about which copy of "S indx=" the
+ * relocation named. Unparked together the literals fold and all four are
+ * byte-identical with no source change at all.
+ *
+ * The lesson generalises: when a group of near-clone functions all print the
+ * same diagnostics, measure them together before believing any one of their
+ * residues. Doing them one at a time reads as four separate regalloc walls. */
 u8 FieldEventReadMemoryU8(s16 mb_half, s16 offset) {
     s32 indx;
     u8 value;
@@ -2346,11 +2345,7 @@ u8 FieldEventReadMemoryU8(s16 mb_half, s16 offset) {
     FieldEventDebugError("Bad Event arg!");
     return 0;
 }
-#endif
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventWriteMemoryU8);
-#else
 void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value) {
     u8 bankId;
     s32 indx;
@@ -2437,11 +2432,7 @@ void FieldEventWriteMemoryU8(s16 arg0, s16 arg1, u8 value) {
     }
     FieldEventDebugError("Bad Event arg!");
 }
-#endif
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventReadMemoryS16);
-#else
 s16 FieldEventReadMemoryS16(s16 bank_id, s16 offset) {
     u8 bankId;
     s32 indx;
@@ -2584,11 +2575,7 @@ s16 FieldEventReadMemoryS16(s16 bank_id, s16 offset) {
     FieldEventDebugError("Bad Event arg!");
     return 0;
 }
-#endif
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventWriteMemoryS16);
-#else
 void FieldEventWriteMemoryS16(s16 arg0, s16 arg1, s16 value) {
     u8 bankId;
     s32 indx;
@@ -2723,7 +2710,6 @@ void FieldEventWriteMemoryS16(s16 arg0, s16 arg1, s16 value) {
     }
     FieldEventDebugError("Bad Event arg!");
 }
-#endif
 
 //////////////////////////////////////////////////
 // Start of field_opcode_system.c

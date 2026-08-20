@@ -930,6 +930,18 @@ assembler's `$at` macro at each use -- is the scaled-subscript bullet above.
 matching C now. Every park note that names that wall is worth re-reading
 against those three bullets before spending a budget on the function.
 
+**Measure a group of near-clone functions together, not one at a time.** When
+several parked functions print the same diagnostics, whichever ones are still
+`MASPSX_OVERRIDE` supply those strings from their `.s` under `D_` symbols while
+the unparked ones emit their own local copies — so every relocation names a
+different label and `checkfn.py` cannot alias them. Each function then reads as
+16–22 rows of what looks like register allocation and is nothing of the kind.
+The four `FieldEvent*Memory*` accessors in `src/field/field4.c` measured 0, 16,
+22 and 22 rows individually and **all four MATCH with no source change at all**
+once unparked in the same build. Before spending a budget on any member of a
+clone family — the `Opcode*` palette ops, the `FieldEvent*` accessors, the
+`Kawai*` handlers — unpark the whole family and re-measure.
+
 #### Four ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
