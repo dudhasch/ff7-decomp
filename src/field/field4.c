@@ -3610,10 +3610,12 @@ s32 OpcodeFuncPrqew(void) {
                              GET_SCRIPTID(GET_PARAM_U8(2)));
 }
 
-// Depends on decomp of DebugUpdateActor due to shared string.
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRequest);
-#else
+/* "/" lives at 0x800A02B8, in DebugUpdateActor's .s, and is passed by name
+ * rather than written as a literal: a second copy would be emitted into this
+ * unit's pool and shift every later .rodata offset. Turn it back into "/" when
+ * DebugUpdateActor becomes C -- gcc folds identical literals within one
+ * translation unit, so the two would then share the one definition. */
+extern char D_800A02B8[];
 s32 FieldEventRequest(s16 type, u8 target, u8 priority, u8 scriptId) {
     s32 scriptOffset;
     s32 entityDataSize;
@@ -3632,7 +3634,7 @@ s32 FieldEventRequest(s16 type, u8 target, u8 priority, u8 scriptId) {
         FieldDebugStringConcat(
             g_DebugMessageBuffer, (char*)((s32)g_FieldScripts) +
                                       sizeof(FieldScriptHeader) + (target * 8));
-        FieldDebugStringConcat(g_DebugMessageBuffer, "/");
+        FieldDebugStringConcat(g_DebugMessageBuffer, D_800A02B8);
         FieldDebugAddParseValueToPage2(g_DebugMessageBuffer, scriptId, 2);
     }
 
@@ -3788,7 +3790,6 @@ s32 FieldEventRequest(s16 type, u8 target, u8 priority, u8 scriptId) {
     }
     return 1;
 }
-#endif
 
 s32 OpcodeFuncRet(void) {
     u16* fieldScriptPC;
@@ -9152,7 +9153,11 @@ s32 OpcodeFuncNfade(void) {
  * collapses labels that resolve to the same address before cross-jumping ever
  * looks at the blocks. Also rejected earlier, at 22 rows: switching on a plain
  * (s16) cast of the member, on an s32 temp, and on an s16 temp, all three of
- * which fold the lhu/sll/sra into a single lh.
+ * which fold the lhu/sll/sra into a single lh. And two that do not touch the
+ * arms at all: declaring `adjust` ahead of `type` is byte-identical (4 rows --
+ * the two do not compete, so declaration order is inert here as usual), and an
+ * `s32 adjust` is 11, because the widening node disappears and the `< 0xFF`
+ * compare loses its sll/sra pair.
  *
  * Permuter food: what is needed is a shape that keeps the two arms apart for
  * some reason other than the register, not another spelling of the same two

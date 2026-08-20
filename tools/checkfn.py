@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Decide whether decompiled functions assemble to the target bytes.
 
-    .venv/bin/python3 tools/checkfn.py src/field/field.c OpcodeFuncSwcol ...
+    .venv/bin/python3 tools/checkfn.py [--rows] src/field/field.c OpcodeFuncSwcol ...
 
 Prints one verdict line per function and exits non-zero unless every one of
 them matched. Run it after every edit; only run `make build` once it is happy.
+
+`--rows` prints every differing instruction rather than just the first, with
+the symbol-alias rows already filtered out -- which is the whole reason to
+reach for it on a near-miss, since reading them out of `diff.py` by hand means
+separating them from the aliases by eye.
 
 Why this exists rather than reading `diff.py` output by eye:
 
@@ -232,7 +237,7 @@ def calibrate_sections(rows, syms):
     return {sect: max(cands, key=cands.get) for sect, cands in votes.items()}
 
 
-def check(source, func, syms):
+def check(source, func, syms, show_rows=False):
     want = target_insn_count(source, func)
     # diff.py truncates at --max-lines, which defaults to 1024. A function
     # longer than that would silently be judged on its first 1024 instructions
@@ -269,18 +274,22 @@ def check(source, func, syms):
     bases = calibrate_sections(scoped, syms)
     real, alias, ins, dele = 0, 0, 0, 0
     first = None
+    bad_rows = []
     for row in scoped:
         b, c = text_of(row.get("base")), text_of(row.get("current"))
         if b is None:
             ins += 1
+            bad_rows.append(("+", "", c))
         elif c is None:
             dele += 1
+            bad_rows.append(("-", b, ""))
         elif b == c:
             continue
         elif normalise(b, syms, bases) == normalise(c, syms, bases):
             alias += 1
         else:
             real += 1
+            bad_rows.append(("!", b, c))
             if first is None:
                 first = (b, c)
 
@@ -298,7 +307,10 @@ def check(source, func, syms):
     if dele:
         detail.append("%d deleted" % dele)
     print("MISMATCH %s  %s%s" % (func, ", ".join(detail), note))
-    if first:
+    if show_rows:
+        for kind, b, c in bad_rows:
+            print("        %s want: %-38s got: %s" % (kind, b, c))
+    elif first:
         print("           want: %s" % first[0])
         print("           got:  %s" % first[1])
     return False
@@ -308,12 +320,19 @@ def main(argv):
     if len(argv) < 3:
         sys.stderr.write(__doc__)
         return 2
+    argv = list(argv)
+    show_rows = "--rows" in argv
+    if show_rows:
+        argv.remove("--rows")
+    if len(argv) < 3:
+        sys.stderr.write(__doc__)
+        return 2
     source, funcs = argv[1], argv[2:]
     if not os.path.exists(source):
         die("no such source file: %s" % source)
     rebuild(source)
     syms = load_symbols()
-    return 0 if all([check(source, f, syms) for f in funcs]) else 1
+    return 0 if all([check(source, f, syms, show_rows) for f in funcs]) else 1
 
 
 if __name__ == "__main__":

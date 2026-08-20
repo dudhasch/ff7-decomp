@@ -439,16 +439,25 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
  *     contradicts the usual rule that declaration order is inert -- it is inert
  *     for values that do not compete for the same register.)
  *
- * The three rows left: the target masks the FieldEntityDirByVec result with
- * `andi v0,v0,0xff` before subtracting it from Dir, filling the load-delay slot
- * of the `lbu` that reads Dir, where combine folds our inner mask away and
- * maspsx emits a nop. Every type for `dirTo` (u8, s16, u16, u32, s32, with and
- * without an explicit `(u8)` at the use) compiles identically, so the mask is
- * not coming from the variable's declaration. The other two rows are the two
- * `li v1,<const>` of the final test: the target issues each before the
- * neighbouring shift pair and gcc after, which is dbr choosing a different
- * insn for the same slot -- nesting the two conditions instead of `&&` does
- * not change it. Codegen pinned via MASPSX_OVERRIDE. */
+ * The mask row is fixed: `(Dir - dirTo) & 0xFF`, not `(u8)(Dir - dirTo)`. The
+ * cast is folded into the halfword store -- `sh` truncates anyway, so combine
+ * drops the `andi` and maspsx fills the slot with a nop -- while the explicit
+ * `& 0xFF` is an arithmetic operation on the promoted `int` that survives to
+ * the store. The two forms are the same value and one instruction apart; this
+ * note previously recorded every *type* for `dirTo` as compiling identically,
+ * which is true and was the wrong place to look, because the mask comes from
+ * the expression, not the declaration.
+ *
+ * The two rows left are the two `li v1,<const>` of the final test -- the 0x40
+ * of `best != 0x40` and the 1 of `requestTalkScript = 1`. The target issues
+ * each two instructions earlier than this build, into slots gcc fills with the
+ * neighbouring shift pair instead; same instructions, same registers, one
+ * permutation of the tail. Measured and rejected: `bestId` and `best`
+ * initialised in the other order (no change); nesting the two conditions
+ * instead of `&&` (no change); swapping the conditions to `best != 0x40 &&
+ * bestId != g_PlayerModelId` (15 changed / 1 inserted -- it also swaps a2 and
+ * a3 for the whole tail, so the `&&` order is load-bearing and correct as
+ * written). Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
 #else
@@ -486,7 +495,7 @@ void FieldEntityCheckTalk(void) {
             continue;
         }
         dirTo = FieldEntityDirByVec(&from, &to, &sqrDist);
-        quality[i] = (u8)(g_FieldEntity[g_PlayerModelId].Dir - dirTo);
+        quality[i] = (g_FieldEntity[g_PlayerModelId].Dir - dirTo) & 0xFF;
         if (quality[i] >= 0x81) {
             quality[i] = 0x100 - quality[i];
         }
