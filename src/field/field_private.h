@@ -403,4 +403,19 @@ typedef struct {
     /* 0x10 */ s16 runs[0]; // variable length
 } FieldBgData;
 
+/* Header of the shared field-model texture block at *D_800DFCA0. */
+typedef struct {
+    /* 0x0 */ u32 magic;
+    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
+    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
+    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
+    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
+} FieldTexBlockHeader;
+
+/* The block itself is loaded to 0x80128000; the pointer is set by
+ * FieldModelLoadAndInit and read from both field2.c and field4.c, so the type
+ * has to live here -- an extern whose type is declared in one unit becomes a
+ * tentative definition in the other and only fails at link time. */
+extern FieldTexBlockHeader* D_800DFCA0;
+
 #endif /* FIELD_PRIVATE_H */

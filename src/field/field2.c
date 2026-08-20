@@ -1313,6 +1313,15 @@ void FieldEntityBgTriggerInit(FieldBgTrigger* triggers) {
 /////////////////////////////////////////////////
 
 const u32 D_800A00DC[] = {0x00000000};
+
+/* The two scratchpad slots FieldModelLoadGlobalModels reads its part and
+ * animation staging buffers from. Declared here rather than inside the #else
+ * below: an extern that only exists in a NON_MATCHINGS arm is not compiled
+ * into the matching build, so gcc substitutes 0 for the identifier, keeps
+ * generating code, and the assembler at the end of the pipe still exits 0. */
+extern u8 D_800DF08C[];
+extern u8 D_800DF0D4[];
+
 /* Top-level field model loader: build the FieldModelData from the loaded model
  * header, stream the field's model set off the CD, load the global and local
  * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
@@ -2093,15 +2102,6 @@ typedef struct {
     /* 0x8 */ BsxTexEntry entries[1];
 } BsxTexHeader;
 
-/* Header of the shared field-model texture block at *D_800DFCA0. */
-typedef struct {
-    /* 0x0 */ u32 magic;
-    /* 0x4 */ u16 numPages;   // 0x200-byte texture pages
-    /* 0x6 */ u16 numCluts;   // 0x20-byte CLUTs
-    /* 0x8 */ u32 pageOffset; // offset of the pages within the block
-    /* 0xC */ u32 clutOffset; // offset of the CLUTs within the block
-} FieldTexBlockHeader;
-
 /* One model's record inside a BSX model file. The bone, part and animation
  * blocks all live at dataOffset, back to back, and each says where in the
  * destination model it belongs; the four colour groups are the KAWAI lighting
@@ -2140,7 +2140,6 @@ typedef struct {
     /* 0x10 */ BsxModelRecord models[1];
 } BsxModelBlock;
 
-extern FieldTexBlockHeader* D_800DFCA0;
 extern u8* D_800E0200;
 extern u8* D_800E0204;
 
