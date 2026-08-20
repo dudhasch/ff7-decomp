@@ -915,6 +915,38 @@ a near-miss, in rough order of frequency:
   strictly cheaper. Write `*p` in the tests as well and all five fold into one
   load, 16 rows out. The tell is a `lbu` of the same address at the top of a
   block *and* again in each arm.
+* **A narrowed addend is not just a wrong constant, it is a hoisted register.**
+  The `force_to_mode` trap above has a second, louder form inside a loop:
+  `dst->animLastFrame = *(u16*)&anims[...] - 1;` narrows the `-1` against the
+  `s16` store, and −1 in HImode is 0xFFFF, which is not a legal `addiu`
+  immediate — so gcc materialises it with `li`, `move_movables` lifts that out
+  of the loop as an invariant, and the frame gains a register that renames
+  everything. The fix is an `s32` local **assigned immediately before the
+  store**: `lastFrame = *(u16*)&anims[...] - 1; dst->animLastFrame = lastFrame;`.
+  Assigned earlier, with other statements in between, it does not help — that is
+  what makes the same idiom inert in `FieldDebugRenderString`'s `- 0x80`.
+  `FieldUpdateAnimationState` needed it twice.
+* **`x >> 4` on a signed `s16` member and `(s32)((u16)x << 16) >> 20` are the
+  same value and different code.** Read through the plainly-signed member gcc
+  folds the sign-extending load and the two shifts into `lh` plus one `sra 4`;
+  read through a `u16` view the extension is a `zero_extend` that cannot be
+  folded past the `ashift`, so the target's `lhu` / `sll 16` / `sra 20` triple
+  survives. When a fixed-point counter's compare is three instructions in the
+  target and two in your build, it is the *view* that is wrong, not the shift
+  count. `FieldUpdateAnimationState` reads `animCurrentFrame` this way five
+  times; retyping the member instead would touch every other user of it.
+* **Split the model-entry lookup into an `s32` index local — but only where it
+  measures.** `model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData
+  [modelIdx].modelEntryIndex];` compiles to the same instructions as the
+  matching `StartModelAnimation` and still puts `entryIdx` and
+  `g_FieldModelData` in each other's registers. Writing it as two statements
+  with `s32 entryIdx` (a `u8` local is inert — the widening is the lever, not
+  the split) fixed it in `FieldUpdateAnimationState` together with `s32
+  modelIdx`. It is **not** a general fix for that expression: applied to
+  `OpcodeFuncCanim`, `OpcodeFuncCanmEx`, `OpcodeFuncMove` and
+  `FieldMoveToEntityUpdate`, which are parked on a residue that looks
+  identical, both levers measure to the row. Whatever those four need is a
+  different thing that only looks like this one.
 * **A store to a symbol at a variable offset invalidates every scalar global in
   cse.** `*(u16*)(SYM + rbOff + charOff) = v;` is `(plus (symbol) (reg))`, which
   `memrefs_conflict_p` cannot disambiguate from anything, so every global read
