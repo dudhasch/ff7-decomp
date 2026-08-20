@@ -2238,111 +2238,157 @@ void FieldDebugRender(u_long* ot) {
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
 
-extern /*?*/ s32 D_800E1036;
+extern u8 D_800E1036[];
 
-/* Render one debug-page string's characters as GPU sprites into the render
- * buffer. Decodes each FF7 text char to a glyph index (the switch is the
- * jump table), computes the UV coords, links the packet into the OT. m2c
- * seed, semantically close; the residual is regalloc across the jump-table
- * dispatch and the OT-link store ordering. Codegen pinned via MASPSX_OVERRIDE
- * pending a permuter pass. */
+/* Render one debug-page string's characters as GPU sprites into this frame's
+ * half of the debug render buffer, advancing `x` by 8 per glyph and stopping
+ * at the page's right edge or when the 0x158-sprite buffer is full. The
+ * switch is the jump table at .rodata+0x3D8; the default arm maps digits,
+ * upper case and lower case by three additive ranges.
+ *
+ * 94 changed / 6 inserted, from a raw m2c seed that did not compile. What is
+ * settled, each measured against the alternative:
+ *
+ *   - `x` and `y` are `s32`, not `s16`: the target copies a3 with a plain
+ *     `move` and never sign-extends it.
+ *   - the 8-byte frame holds a local nothing names. `s32 unusedLocal` and
+ *     `u8 unusedLocals[1]` are both optimised away and give no frame at all;
+ *     `u8 unusedLocals[4]` is the smallest that reserves the slot, and [8]
+ *     and `s32[2]` give the same 8 bytes.
+ *   - the default arm's two range tests read a `u8` local and the three
+ *     additions re-read `*str`. Written with `*str` in the tests as well,
+ *     cse folds all five reads into one and the arm is 16 rows out: a QImode
+ *     pseudo costs an `andi` to widen, which ties `lbu` on cost, so cse keeps
+ *     the load -- but only when the tested value is a *variable*.
+ *   - the two u0/v0 index expressions are spelled
+ *     `g_FieldDebugRChars * 0x10 + g_FieldDebugRb * 0x1580`, i.e. with the
+ *     operands in the *opposite* order to the emitted code. fold swaps them,
+ *     and writing them the way the target reads costs 35 rows.
+ *   - `rb` and `chars` are locals read once, and the OT slot is
+ *     `&D_800E41C8[rb][page]`. Reading the globals again after the clut store
+ *     costs two reloads: that store is `(plus (symbol) (reg))`, an unknown
+ *     offset from a symbol, which cse cannot disambiguate from a scalar
+ *     global. `g_FieldDebugRChars = chars + 1` for the same reason -- `++`
+ *     after the clut store reloads with `lhu`.
+ *   - the clut goes through its own symbol `D_800E1036` (= D_800E1028 + 0xE).
+ *     Reached as `&D_800E1028[0xE] + idx` cse relates the two and hoists a
+ *     second base out of the loop; `sprite->clut` gives `sh 0xE(a2)`, which
+ *     is a third wrong answer.
+ *
+ * The residue is two constants and two hoisting placements, and the register
+ * naming cascades off them:
+ *
+ *   - `addiu v1,v1,0x80` where the target has `-0x80`, twice. combine's
+ *     force_to_mode masks the addend against the QImode store, turning -128
+ *     into +128. Measured and inert: `(s8)` cast on the expression, `s32`
+ *     glyph (which also turns the `srl` into `sra` and is wrong), `s16` and
+ *     `s32` temporaries for the two values (both much worse).
+ *   - `page * 378` is only half hoisted: gcc lifts the `*3` subexpression
+ *     into the preheader and leaves `*63` and `*2` at the loop top, where the
+ *     target has all five insns in the preheader. Computing `off` before the
+ *     `while` puts them there but costs 8 extra instructions elsewhere;
+ *     inlining `page * 378` at the three use sites costs 5.
+ *   - `%hi/%lo(D_800E08A8)` is hoisted here and is not in the target, which
+ *     rebuilds it in the loop and adds `off` before `row`. Both subscript and
+ *     pointer-arithmetic spellings measure identically, and an index local is
+ *     6 rows worse.
+ *
+ * Also measured and rejected: a guarded `do`/`while` (the shape m2c prints)
+ * at +29 instructions, the whole guard written as a `&&` chain in the `while`
+ * condition at +3, `g_FieldDebugRChars++` before the sprite stores at +8, and
+ * `addPrim`'s second argument spelled `D_800E1028 + charOff + rbOff` to force
+ * the target's second address computation -- which does reproduce it but
+ * costs more than the two insns it buys. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderString);
 #else
-void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
-    s16 var_t3;
-    s32 temp_a0;
-    s32 temp_a1;
-    s32 temp_t0;
-    s32 temp_t5;
-    s32* temp_a0_2;
-    u32 var_a0;
-    u8 temp_v0;
-    u8 temp_v1;
-    u8* temp_a2;
-    u8* var_t2;
+void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
+    s32 off;
+    s32 rb;
+    s32 chars;
+    s32 rbOff;
+    s32 charOff;
+    u32 glyph;
+    u8 ch;
+    SPRT_16* sprite;
+    u8 unusedLocals[4];
 
-    var_t2 = arg2;
-    var_t3 = arg3;
-    if (*var_t2 != 0) {
-        temp_t5 = arg0 * 0x17A;
-    loop_2:
-        if ((((*(D_800E0748 + temp_t5) + *(D_800E074C + temp_t5)) - 8) >=
-             var_t3) &&
-            (g_FieldDebugRChars < 0x158)) {
-            temp_v0 = *var_t2;
-            switch (temp_v0) {
-            case 0x20:
-                var_a0 = 0x3F;
-                break;
-            case 0x3A:
-                var_a0 = 0xD5;
-                break;
-            case 0x2E:
-                var_a0 = 0xB2;
-                break;
-            case 0x2B:
-                var_a0 = 0xB3;
-                break;
-            case 0x2F:
-                var_a0 = 0xD4;
-                break;
-            case 0x2D:
-                var_a0 = 0xD0;
-                break;
-            case 0x2A:
-                var_a0 = 0xCF;
-                break;
-            case 0x21:
-                var_a0 = 0xAE;
-                break;
-            case 0x3F:
-                var_a0 = 0xAF;
-                break;
-            case 0x3D:
-                var_a0 = 0xDA;
-                break;
-            case 0x23:
-                var_a0 = 0xD6;
-                break;
-            case 0x3E:
-                var_a0 = 0xD9;
-                break;
-            default:
-                temp_v1 = *var_t2;
-                if (temp_v1 < 0x3AU) {
-                    var_a0 = *var_t2 + 3;
-                } else if (temp_v1 >= 0x61U) {
-                    var_a0 = *var_t2 + 0x53;
-                } else {
-                    var_a0 = *var_t2 + 0x73;
-                }
-                break;
-            }
-            var_t2 += 1;
-            D_800E1028[(g_FieldDebugRb * 0x1580) + (g_FieldDebugRChars * 0x10)]
-                .unkC = (s8)(((var_a0 & 0xF) * 8) - 0x80);
-            D_800E1028[(g_FieldDebugRb * 0x1580) + (g_FieldDebugRChars * 0x10)]
-                .unkD = (s8)(((var_a0 >> 1) & 0x78) - 0x80);
-            temp_a1 = g_FieldDebugRb * 0x1580;
-            temp_t0 = g_FieldDebugRChars * 0x10;
-            temp_a0 = temp_a1 + temp_t0;
-            temp_a2 = &D_800E1028[temp_a0];
-            temp_a2->unk8 = var_t3;
-            temp_a2->unkA = (s16)arg4;
-            *(&D_800E1036 + temp_a0) =
-                D_800E4200[*(temp_t5 + D_800E08A8 + arg1)];
-            temp_a0_2 = (g_FieldDebugRb * 0x1C) + (arg0 * 4) + D_800E41C8;
-            temp_a2->unk0 =
-                (s32)((temp_a2->unk0 & 0xFF000000) | (*temp_a0_2 & 0xFFFFFF));
-            g_FieldDebugRChars += 1;
-            *temp_a0_2 = (*temp_a0_2 & 0xFF000000) |
-                         ((s32)(temp_a1 + (temp_t0 + D_800E1028)) & 0xFFFFFF);
-            var_t3 += 8;
-            if (*var_t2 != 0) {
-                goto loop_2;
-            }
+    while (*str != 0) {
+        off = page * 378;
+        if ((*(s16*)((u8*)D_800E0748 + off) + *(s16*)((u8*)D_800E074C + off) -
+             8) < x) {
+            break;
         }
+        if (g_FieldDebugRChars >= 0x158) {
+            break;
+        }
+        switch (*str) {
+        case 0x20:
+            glyph = 0x3F;
+            break;
+        case 0x3A:
+            glyph = 0xD5;
+            break;
+        case 0x2E:
+            glyph = 0xB2;
+            break;
+        case 0x2B:
+            glyph = 0xB3;
+            break;
+        case 0x2F:
+            glyph = 0xD4;
+            break;
+        case 0x2D:
+            glyph = 0xD0;
+            break;
+        case 0x2A:
+            glyph = 0xCF;
+            break;
+        case 0x21:
+            glyph = 0xAE;
+            break;
+        case 0x3F:
+            glyph = 0xAF;
+            break;
+        case 0x3D:
+            glyph = 0xDA;
+            break;
+        case 0x23:
+            glyph = 0xD6;
+            break;
+        case 0x3E:
+            glyph = 0xD9;
+            break;
+        default:
+            ch = *str;
+            if (ch < 0x3A) {
+                glyph = *str + 3;
+            } else if (ch >= 0x61) {
+                glyph = *str + 0x53;
+            } else {
+                glyph = *str + 0x73;
+            }
+            break;
+        }
+        str++;
+        ((SPRT_16*)&D_800E1028[g_FieldDebugRChars * 0x10 +
+                               g_FieldDebugRb * 0x1580])
+            ->u0 = (glyph & 0xF) * 8 - 0x80;
+        ((SPRT_16*)&D_800E1028[g_FieldDebugRChars * 0x10 +
+                               g_FieldDebugRb * 0x1580])
+            ->v0 = ((glyph >> 1) & 0x78) - 0x80;
+        rb = g_FieldDebugRb;
+        chars = g_FieldDebugRChars;
+        rbOff = rb * 0x1580;
+        charOff = chars * 0x10;
+        sprite = (SPRT_16*)&D_800E1028[rbOff + charOff];
+        sprite->x0 = x;
+        sprite->y0 = y;
+        *(u16*)(D_800E1036 + rbOff + charOff) =
+            D_800E4200[*(D_800E08A8 + off + row)];
+        g_FieldDebugRChars = chars + 1;
+        addPrim(&D_800E41C8[rb][page], &D_800E1028[rbOff + charOff]);
+        x += 8;
     }
 }
 #endif

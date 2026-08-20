@@ -890,7 +890,40 @@ a near-miss, in rough order of frequency:
   frame is the minimum 8 bytes and your code needs none, a single unused scalar
   (`s32 unusedLocal;`) is enough, and `u8 unusedLocals[1]` gives the identical
   frame. Do not scale the array to the frame size in that case —
-  `u8 unusedLocals[8]` measures 0x10, not 8.
+  `u8 unusedLocals[8]` measures 0x10, not 8. **In a leaf function neither of
+  those reserves anything**: with no call and no saved register the prologue is
+  elided outright and a 1-byte or scalar local goes with it. `u8
+  unusedLocals[4]` is the smallest that gives the 8-byte frame there, and [8]
+  and `s32[2]` measure the same 8 — `FieldDebugRenderString` in
+  `src/field/field5.c` needs it. Read the incoming fifth argument's offset to
+  tell: `lw <r>,0x18(sp)` against your `0x10(sp)` is 8 bytes of frame you have
+  not declared.
+* **fold swaps the operands of a sum of two multiplies, so write the index the
+  other way round.** `arr[g_A * 0x1580 + g_B * 0x10]` evaluates `g_B` first —
+  the two loads, the two shift chains and every register downstream follow — and
+  no parenthesisation reaches it, because the swap happens in the tree, not in
+  expand. To get the target's order, spell the operands in the *opposite* order
+  to the emitted code. Worth 35 rows across two sites in
+  `FieldDebugRenderString`; it does not apply when the two halves are separate
+  statements assigning locals, which come out in source order.
+* **A `u8` tested through a local and used through the pointer gives one load
+  for the tests and a fresh load per use.** `c = *p; if (c < A) x = *p + 1;
+  else if (c >= B) x = *p + 2; else x = *p + 3;` compiles to one `lbu` for both
+  comparisons and three more for the arithmetic — cse substitutes the register
+  into a compare for free, but into an add it would need an `andi` to widen the
+  QImode pseudo, which ties `lbu` on cost, and cse only substitutes when
+  strictly cheaper. Write `*p` in the tests as well and all five fold into one
+  load, 16 rows out. The tell is a `lbu` of the same address at the top of a
+  block *and* again in each arm.
+* **A store to a symbol at a variable offset invalidates every scalar global in
+  cse.** `*(u16*)(SYM + rbOff + charOff) = v;` is `(plus (symbol) (reg))`, which
+  `memrefs_conflict_p` cannot disambiguate from anything, so every global read
+  after it reloads — two extra `lh`/`lhu` pairs in `FieldDebugRenderString`. The
+  fix is not to move the store: read the globals into locals *before* it and use
+  those afterwards (`rb = g_FieldDebugRb; chars = g_FieldDebugRChars;` …
+  `g_FieldDebugRChars = chars + 1;`), which is also what lets the increment
+  reuse the load the index already made. Moving `x++` above the store instead
+  drags its `sh` up with it and costs more.
 * **A symbol base shared by two sibling address expressions wants a named local
   assigned inside the first one.** `(u16*)((pal = D_80095DE0) + dstPal * 32)`
   followed by `(u16*)(pal + srcPal * 32)` gives the symbol's address a pseudo
