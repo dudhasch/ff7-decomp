@@ -1141,6 +1141,20 @@ a near-miss, in rough order of frequency:
   field as an offset from the object that owns it (`*(u16*)((u8*)D_800E4DB0 +
   2)`) and delete the extern. This is a third way a clean-looking verdict lies,
   and it only shows up in `make build`.
+* **Of two pointers walked together, the one incremented *last* keeps the
+  incoming argument register.** `for (i = 0; i < 12; i++, a += 12, b += 12)`
+  and the same loop with `a` and `b` swapped emit the two `addiu`s in source
+  order either way — but the allocator gives the parameter's own hard register
+  to whichever is written second, and the other one gets a fresh register plus
+  a `move` in the preheader to initialise it. Every use of both follows, so it
+  is worth a dozen rows of pure renaming and nothing else moves it: both
+  increments in the `for`, either one moved to the end of the body, and both
+  moved there all reduce to the same two outcomes. `PreloadNextFieldMap` in
+  `src/field/field.c` went 28 rows to 13 on this one line. Note this is a
+  *different* knob from the giv-increment order bullet below — these are two
+  bivs, and the emitted order and the register assignment are controlled by the
+  same word, which is why a target that wants one bumped first *and* holding
+  the argument register cannot be reached with two plain increments.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

@@ -83,27 +83,33 @@ MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
  * distance is squared, in map units, from the player position stashed in the
  * scratchpad at 0x1F800000.
  *
- * 28 rows out, and 27 of them are one register naming cascade downstream of the
- * remaining structural row:
+ * 13 rows, down from 28 on one line: which of the two walking pointers is
+ * incremented first. Written `i++, ptrPos += 12, gateway += 12` the parameter's
+ * own register a1 stays with the *advanced* pointer and ptrPos takes a3, which
+ * is what the target does; written the other way round the two swap and every
+ * use of either follows -- 15 rows of pure renaming. The rule that fits every
+ * spelling measured (both in the `for`, either one moved to the end of the
+ * body, both moved there) is that the pointer incremented *last* keeps the
+ * incoming argument register, while the emitted order of the two `addiu`s
+ * follows the source. The target wants gateway to keep a1 *and* to be bumped
+ * first, which no arrangement of two increments reaches; four of the thirteen
+ * rows are that. Making ptrPos a giv (`ptrPos[i * 12]`, with gateway walking)
+ * puts the increments in the right order but costs 26/5, and the mirror image
+ * 31/3.
  *
- *     want: move a3,a1        (ptrPos = gateway, then the parameter advances)
- *     got:  <
- *
- * The target keeps the *advanced* walker in the parameter's own register a1 and
- * pays one `move` to copy the un-advanced value into a3; this build keeps the
- * un-advanced value in a1 and puts the advanced walker in a2, which needs no
- * copy and is one instruction shorter. Both are legal and the C is the same
- * either way -- it is the allocator picking a different pseudo for the incoming
- * argument register, the same coin-flip as KawaiLightingApplyToPolyColor's
- * t2/t3. Everything else in the loop is instruction-for-instruction identical.
+ * The other nine rows are outside the loop. The target computes the file-table
+ * address twice, in opposite operand orders (`addu v1,s0,v0` for the sector at
+ * -4 and `addu v0,v0,s0` for the size at 0) where cse merges ours into one; and
+ * it materialises 0x801B0000 once, in the delay slot of the branch that picks
+ * the arm, where ours emits it in both arms.
  *
  * Measured and rejected: making the second parameter `u16*` and advancing it in
  * place rather than deriving a third pointer (no change); swapping the two
- * pointer declarations (no change -- and note CLAUDE.md's rule that declaration
- * order does nothing for gcc 2.6.3, against the ADPAL/MPPAL bullet that says it
- * does; this function is evidence for the former); a `do/while` loop with the
- * increments written out at the bottom instead of a `for` with a comma
- * increment (no change, byte-identical output).
+ * pointer declarations (no change); assigning ptrPos inside the guard rather
+ * than at the top (17/3); a `do/while` loop with the increments written out at
+ * the bottom instead of a `for` with a comma increment (no change,
+ * byte-identical output); indexing every access off one base with no second
+ * pointer at all (36/1), which collapses the two givs the target keeps apart.
  *
  * Four things that WERE worth rows, all of them type errors rather than
  * codegen, and all of them now folded in (53 rows -> 28):
@@ -152,7 +158,7 @@ void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
     if (g_FieldAnimLock == 0) {
         gateway += 9;
 
-        for (i = 0; i < 12; i++, gateway += 12, ptrPos += 12) {
+        for (i = 0; i < 12; i++, ptrPos += 12, gateway += 12) {
             if (gateway[0] != 0x7FFF) {
                 diffX = ptrPos[0] - scratchpad[0];
                 diffY = ((s16*)gateway)[-8] - scratchpad[1];
