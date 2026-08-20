@@ -5359,14 +5359,14 @@ s32 FieldEventSetDirByActorId(s16 actorId) {
     return 1;
 }
 
-void OpcodeFuncTura(void) {
+s32 OpcodeFuncTura(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("tura", 3);
     }
-    FieldEntityTurnToEntity(GET_PARAM_U8(1));
+    return FieldEntityTurnToEntity(GET_PARAM_U8(1));
 }
 
-void OpcodeFuncPtura(void) {
+s32 OpcodeFuncPtura(void) {
     u8 partyId;
     u8 actorId;
 
@@ -5379,141 +5379,95 @@ void OpcodeFuncPtura(void) {
     } else {
         actorId = D_8009AD30[partyId];
     }
-    FieldEntityTurnToEntity(actorId);
+    return FieldEntityTurnToEntity(actorId);
 }
 
-/* Turn the current entity to face a target entity: snapshot the current
- * direction, compute the target facing from the position delta, and set the
- * turn state machine going (choosing the short way around). m2c seed; residual
- * is the per-model address CSE and the turn-delta sign logic. Pinned pending a
- * permuter pass. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEntityTurnToEntity);
-#else
-void FieldEntityTurnToEntity(u8 actorId) {
-    s32 sp10;
-    s32 sp14;
-    s32 sp18;
-    s32 sp20;
-    s32 sp24;
-    s32 sp28;
-    s32 sp30;
-    s16 temp_v0_2;
-    s16 temp_v1_4;
-    s16 temp_v1_5;
-    s16 var_a0_2;
-    s16 var_v0;
-    s32 temp_a1_2;
-    s32 temp_a3;
-    s32 temp_t0;
-    s32 temp_t1;
-    s32 var_a0;
-    u16 temp_a1_3;
-    u16 temp_a3_2;
-    u16* temp_a0;
-    u8 temp_v1;
-    u8 temp_v1_2;
-    u8 temp_v1_3;
-    void* temp_a1;
-    void* temp_a2;
-    void* temp_v0;
-    void* var_a0_3;
+/*
+ * Turn the current entity's model to face another entity: snapshot the
+ * current direction, derive the target facing from the position delta with
+ * FieldEntityDirByVec, and hand the turn to the state machine. Operand 3
+ * picks the direction the same way TURNR's does -- 0 clockwise, 1
+ * anticlockwise, 2 whichever way is shorter. TurnType 3 means the turn
+ * finished, and only then does the PC advance; the 0/1 this returns is the
+ * dispatcher's "opcode consumed" flag, which is why TURA and PTURA pass it
+ * through rather than being void.
+ */
+s32 FieldEntityTurnToEntity(s16 actorId) {
+    VECTOR from;
+    VECTOR to;
+    s32 sqrDist;
+    FieldEntity* entity;
+    FieldEntity* snapshot;
+    FieldEntity* turning;
+    FieldEntity* stepping;
+    s16 delta;
+    s16 dist;
 
-    temp_v1 = *(&D_8007EB98 + D_800722C4);
-    if ((temp_v1 == 0xFF) || (*(&D_8007EB98 + (s16)actorId) == 0xFF)) {
-        var_a0 = D_800722C4 * 2;
-        goto block_5;
+    if (g_EntityToModel[g_CurrentEntity] == 0xFF ||
+        g_EntityToModel[actorId] == 0xFF) {
+        PC_INC(4);
+        return 0;
     }
-    temp_a1 = (temp_v1 * 0x84) + D_8009C544;
-    temp_v1_2 = temp_a1->unk3B;
-    if (temp_v1_2 == 3) {
-        temp_a1->unk3B = 0U;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3A = 0;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 = 0;
-        var_a0 = D_800722C4 * 2;
-    block_5:
-        temp_a0 = var_a0 + &D_800831FC;
-        *temp_a0 += 4;
-        return;
+    entity = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+    if (entity->TurnType == 3) {
+        entity->TurnType = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnStep = 0;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps = 0;
+        PC_INC(4);
+        return 0;
     }
-    if ((temp_a1->unk3A == 0) || (temp_v1_2 != 2) ||
-        (temp_a1->unk39 !=
-         (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2)) {
-        temp_v0 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-        temp_v0->unk3C = (s16)temp_v0->unk38;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3B = 2;
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk39 =
-            (u8)(D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk2;
-        temp_t0 =
-            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unkC >>
-            0xC;
-        sp10 = temp_t0;
-        temp_t1 =
-            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk10 >>
-            0xC;
-        sp14 = temp_t1;
-        sp18 =
-            (s32)((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk14 >>
-            0xC;
-        temp_a1_2 =
-            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unkC >>
-            0xC;
-        sp20 = temp_a1_2;
-        temp_a3 =
-            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unk10 >>
-            0xC;
-        sp24 = temp_a3;
-        sp28 =
-            (s32)((*(&D_8007EB98 + (s16)actorId) * 0x84) + D_8009C544)->unk14 >>
-            0xC;
-        if (temp_t0 == temp_a1_2) {
-            if (temp_t1 == temp_a3) {
-                sp10 = temp_t0 + 1;
+    if (entity->TurnStep == 0 || entity->TurnType != 2 ||
+        entity->TurnSteps != GET_PARAM_U8(2)) {
+        snapshot = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+        snapshot->TurnStart = snapshot->Dir;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType = 2;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps =
+            GET_PARAM_U8(2);
+        from.vx = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosX >> 12;
+        from.vy = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosY >> 12;
+        from.vz = g_FieldModels[g_EntityToModel[g_CurrentEntity]].PosZ >> 12;
+        to.vx = g_FieldModels[g_EntityToModel[actorId]].PosX >> 12;
+        to.vy = g_FieldModels[g_EntityToModel[actorId]].PosY >> 12;
+        to.vz = g_FieldModels[g_EntityToModel[actorId]].PosZ >> 12;
+        if (from.vx == to.vx) {
+            if (from.vy == to.vy) {
+                from.vx = from.vx + 1;
             }
         }
-        ((*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544)->unk3E =
-            (s16)(FieldEntityDirByVec((VECTOR*)&sp10, (VECTOR*)&sp20, &sp30) &
-                  0xFF);
-        temp_v1_3 = (D_8009C6DC + *(&D_800831FC + (D_800722C4 * 2)))->unk3;
-        switch (temp_v1_3) { // irregular
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd =
+            FieldEntityDirByVec(&from, &to, &sqrDist) & 0xFF;
+        switch (GET_PARAM_U8(3)) {
         case 2:
-            temp_a2 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_a1_3 = temp_a2->unk3E;
-            temp_a3_2 = temp_a2->unk3C;
-            temp_v1_4 = temp_a1_3 - temp_a3_2;
-            var_a0_2 = temp_v1_4;
-            if (temp_v1_4 & 0x8000) {
-                var_a0_2 = ~temp_v1_4 + 1;
+            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            delta = turning->TurnEnd - turning->TurnStart;
+            dist = delta;
+            if (delta < 0) {
+                dist = ~delta + 1;
             }
-            if (var_a0_2 >= 0x81) {
-                if ((s16)temp_a3_2 < (s16)temp_a1_3) {
-                    temp_a2->unk3E = (u16)(temp_a1_3 - 0x100);
+            if (dist >= 0x81) {
+                if (turning->TurnEnd > turning->TurnStart) {
+                    turning->TurnEnd = turning->TurnEnd - 0x100;
                 } else {
-                    temp_a2->unk3E = (u16)(temp_a1_3 + 0x100);
+                    turning->TurnEnd = turning->TurnEnd + 0x100;
                 }
             }
             break;
         case 1:
-            var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v1_5 = var_a0_3->unk3E;
-            if ((s32)var_a0_3->unk38 < temp_v1_5) {
-                var_v0 = temp_v1_5 - 0x100;
-            block_27:
-                var_a0_3->unk3E = var_v0;
+            stepping = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (stepping->Dir < stepping->TurnEnd) {
+                stepping->TurnEnd = stepping->TurnEnd - 0x100;
             }
             break;
         case 0:
-            var_a0_3 = (*(&D_8007EB98 + D_800722C4) * 0x84) + D_8009C544;
-            temp_v0_2 = var_a0_3->unk3E;
-            var_v0 = temp_v0_2 + 0x100;
-            if (temp_v0_2 < (s32)var_a0_3->unk38) {
-                goto block_27;
+            stepping = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (stepping->TurnEnd < stepping->Dir) {
+                stepping->TurnEnd = stepping->TurnEnd + 0x100;
             }
             break;
         }
     }
+    return 1;
 }
-#endif
 
 extern u8 D_800722C4;
 extern /*?*/ s32 D_800831FC;
@@ -5729,35 +5683,43 @@ step:
  * every frame; TurnType 3 means the turn system reported completion, and only
  * then does the PC advance.
  *
- * 77 rows out with 15 insertions, from an m2c seed that did not compile.
- * Established:
- *   - both the debug-name pick and the direction dispatch are `switch`es --
- *     the target loads the operand once and branches beq/beq/j-default, which
- *     is expand_end_case's compare chain, and the two DebugPrintOpcode calls
- *     cross-jump into one.
- *   - the shortest-way arm needs no casts. Writing `delta = TurnEnd -
- *     TurnStart` into an `s16` and only bit-testing it is enough for combine
- *     to narrow both reads to `lhu` and to keep the `nor`/`addiu 1` spelling
- *     of the negation; `u16` locals for the two fields make it worse (79).
- *     `delta & 0x8000` and `delta < 0` compile identically here.
+ * 35 rows out with 7 insertions, from an m2c seed that did not compile.
+ * FieldEntityTurnToEntity is the same function with the target read from an
+ * actor id instead of the script, and it MATCHES -- everything that got it
+ * there is applied here:
+ *   - both the debug-name pick and the direction dispatch are `switch`es, and
+ *     the direction arms are written in source order **2, 1, 0**. m2c prints
+ *     case bodies in address order and that is the order the original wrote
+ *     them; 0,1,2 measures 69 rows and 0,2,1 measures 53.
+ *   - the four uses of `&g_FieldModels[g_EntityToModel[g_CurrentEntity]]` are
+ *     four separate `FieldEntity*` locals, not one reused: the TurnType
+ *     checks, the TurnStart snapshot, the shortest-way arm, and the two
+ *     single-step arms. On FieldEntityTurnToEntity merging just two of them
+ *     cost 30 rows and merging three cost 42 -- splitting all four is what
+ *     took it from 42 to MATCH.
+ *   - `delta < 0`, not `delta & 0x8000`, and `TurnEnd > TurnStart`, not
+ *     `TurnStart < TurnEnd`: gcc evaluates a comparison's operands in source
+ *     order and the target reads TurnEnd first.
  *
- * The 15 insertions are one thing: the target reaches `PC_INC(6); return 0;`
- * *once*, with the TurnType-3 arm jumping into it and supplying
- * g_CurrentEntity in a0 from its own reload, and we emit the whole seven-insn
- * block a second time. Three spellings were measured and all are worse than
- * simply writing the tail twice: a `goto advance` label after the `return 1`
- * (79/23 -- the label gets two jump predecessors, so cse cannot keep
- * g_CurrentEntity and the tail reloads it), the same with `g_CurrentEntity`
- * cached in a local at the top (94/23, 90/30), and m2c's own shape with the
- * whole body inside `if (... != 0xFF)` and the tail as fall-through
- * (106/47). The remaining rows are the three direction arms coming out in a
- * different layout order than the target's. */
+ * What is left is where gcc parks the merged `PC_INC(6); return 0;` tail. The
+ * target puts the single copy after the switch, entered by a `j` from the
+ * TurnType-3 arm with g_CurrentEntity reloaded into a0 in the arm itself; we
+ * emit the identical block at the arm and jump to it from the 0xFF test
+ * instead, which shifts every branch offset in the function and is most of
+ * the 35 rows. Writing the tail once under a `goto advance` label after
+ * `return 1` moves the block to the right place but makes the label's two
+ * jump predecessors opaque to cse, so the reload lands *inside* the tail
+ * (37/3). Also measured: the tail as the fall-through of an inverted 0xFF
+ * test (35/7, same as this), and caching g_CurrentEntity in a local (94/23).
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnr);
 #else
 s32 OpcodeFuncTurnr(void) {
     FieldEntity* entity;
+    FieldEntity* snapshot;
     FieldEntity* turning;
+    FieldEntity* stepping;
     char* name;
     s16 delta;
     s16 dist;
@@ -5795,8 +5757,8 @@ s32 OpcodeFuncTurnr(void) {
     }
     if (entity->TurnStep == 0 || entity->TurnType != GET_PARAM_U8(5) ||
         entity->TurnSteps != GET_PARAM_U8(4)) {
-        turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-        turning->TurnStart = turning->Dir;
+        snapshot = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+        snapshot->TurnStart = snapshot->Dir;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnType =
             GET_PARAM_U8(5);
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps =
@@ -5804,31 +5766,31 @@ s32 OpcodeFuncTurnr(void) {
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd =
             FieldEventReadMemoryU8(2, 2) & 0xFF;
         switch (GET_PARAM_U8(3)) {
-        case 0:
-            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-            if (turning->TurnEnd < turning->Dir) {
-                turning->TurnEnd = turning->TurnEnd + 0x100;
-            }
-            break;
-        case 1:
-            turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
-            if (turning->Dir < turning->TurnEnd) {
-                turning->TurnEnd = turning->TurnEnd - 0x100;
-            }
-            break;
         case 2:
             turning = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
             delta = turning->TurnEnd - turning->TurnStart;
             dist = delta;
-            if (delta & 0x8000) {
+            if (delta < 0) {
                 dist = ~delta + 1;
             }
             if (dist >= 0x81) {
-                if (turning->TurnStart < turning->TurnEnd) {
+                if (turning->TurnEnd > turning->TurnStart) {
                     turning->TurnEnd = turning->TurnEnd - 0x100;
                 } else {
                     turning->TurnEnd = turning->TurnEnd + 0x100;
                 }
+            }
+            break;
+        case 1:
+            stepping = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (stepping->Dir < stepping->TurnEnd) {
+                stepping->TurnEnd = stepping->TurnEnd - 0x100;
+            }
+            break;
+        case 0:
+            stepping = &g_FieldModels[g_EntityToModel[g_CurrentEntity]];
+            if (stepping->TurnEnd < stepping->Dir) {
+                stepping->TurnEnd = stepping->TurnEnd + 0x100;
             }
             break;
         }
