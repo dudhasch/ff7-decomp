@@ -116,6 +116,26 @@ MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
  * it materialises 0x801B0000 once, in the delay slot of the branch that picks
  * the arm, where ours emits it in both arms.
  *
+ * The `lui a2,0x801b` pair is reorg, not expand: there is only ever one
+ * `(set a2 0x801B0000)` in the RTL, sitting at the call, and reorg's
+ * fill_slots_from_thread steals it into the first arm's `j` delay slot and
+ * advances the label -- which is what duplicates it. The target has the insn
+ * *above* the `bnez` that picks the arm, so its delay slot is a `nop` and
+ * there is nothing to steal. A `u_long* dest = (u_long*)0x801B0000;` local
+ * assigned before the `if` does not put it there (byte-identical output), and
+ * neither does the permuter's dead-counter variant; the constant is folded
+ * back to the call site either way.
+ *
+ * The two `addu`s are cse's operand order, the same lever as the
+ * OpcodeFuncStpls bullet: gcc 2.6.3 only canonicalises a *constant* to the
+ * second operand of a commutative rtx, so `(plus s0 v0)` and `(plus v0 s0)` are
+ * distinct expressions and both survive. Writing the size read as
+ * `*(u32*)(D_80071A5C * 24 + (s32)table)` to get the offset first is
+ * byte-identical to `table[D_80071A5C * 6]`, so fold canonicalises the tree
+ * before expand sees it; something else has to make the two addresses differ.
+ * Reading the first test through the symbol (`g_FieldFileTable[...]`) rather
+ * than the `table` local is also byte-identical.
+ *
  * Measured and rejected: making the second parameter `u16*` and advancing it in
  * place rather than deriving a third pointer (no change); swapping the two
  * pointer declarations (no change); assigning ptrPos inside the guard rather

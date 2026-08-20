@@ -514,7 +514,19 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
  * instead of `&&` (no change); swapping the conditions to `best != 0x40 &&
  * bestId != g_PlayerModelId` (15 changed / 1 inserted -- it also swaps a2 and
  * a3 for the whole tail, so the `&&` order is load-bearing and correct as
- * written). Codegen pinned via MASPSX_OVERRIDE. */
+ * written).
+ *
+ * Re-measured: it is a pure sched2 permutation, not a source-order one. The
+ * two blocks hold the same four instructions and differ only in which one
+ * reorg finds first in the fall-through thread -- target
+ * `beq/ori v1,0x40/sll/sra`, ours `beq/sll/sra/li v1,0x40`. sched2 ranks by
+ * longest path to the end of the block, and `sll -> sra -> beq` is one longer
+ * than `ori -> beq`, so the shift always goes first. Nothing at the source
+ * level reaches it: `0x40 != best`, `(s16)0x40 != best`, both operands
+ * reversed (12/3), two early `return`s, and nested `if`s all measure exactly
+ * 2 changed / 2 inserted, byte-identical to the body below. It needs a reason
+ * for the 0x40 to have a longer dependence chain, or the sign extension a
+ * shorter one. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
 #else
@@ -1224,49 +1236,40 @@ s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type);
 /* Arms (even type) or disarms (odd type) one background trigger, and reports
  * whether that actually changed the bit -- the caller only redraws when it did.
  *
- * Blocked by the same jump-table alignment problem as FieldEntityBgTriggerInit:
- * the original table sits at .rodata+0xa4 and gcc's `.align 3` puts ours at
- * +0xa8. Unlike Init this C is not yet instruction-exact either -- gcc
- * cross-jumps the two arms' shared store tail here and does not in the
- * original -- so it needs another pass once the file is split. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE(
-    "asm/us/field/nonmatchings/field2", FieldEntityBgTriggerActivate);
-#else
+ * The array element is read inline at each use rather than through an `old`
+ * local: with the local, both arms allocate the same register for the index
+ * and gcc's post-reload cross-jump merges their two identical store tails into
+ * one, which is four instructions short of the original. */
 s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     s32 changed;
     s32 bit;
-    s32 old;
     s32 mask;
-    u8 merged;
 
     changed = 0;
     switch (type) {
     case 0:
     case 2:
     case 4:
-        old = g_FieldEntityBgTrigger[trigger->entityId];
         bit = 1 << trigger->unk0D;
-        if ((old & bit) == 0) {
+        if ((g_FieldEntityBgTrigger[trigger->entityId] & bit) == 0) {
             changed = 1;
         }
-        g_FieldEntityBgTrigger[trigger->entityId] = bit | old;
+        g_FieldEntityBgTrigger[trigger->entityId] =
+            bit | g_FieldEntityBgTrigger[trigger->entityId];
         break;
     case 1:
     case 3:
     case 5:
         mask = ~(1 << trigger->unk0D);
-        old = g_FieldEntityBgTrigger[trigger->entityId];
-        merged = old | mask;
-        if (merged == 0xFF) {
+        if ((u8)(g_FieldEntityBgTrigger[trigger->entityId] | mask) == 0xFF) {
             changed = 1;
         }
-        g_FieldEntityBgTrigger[trigger->entityId] = mask & old;
+        g_FieldEntityBgTrigger[trigger->entityId] =
+            mask & g_FieldEntityBgTrigger[trigger->entityId];
         break;
     }
     return changed;
 }
-#endif
 
 /* The four trigger sound-effect ids. This is the .rodata blob of the local
  * `s16 seIds[4]` initialiser inside FieldEntityTriggerCheck below, and it is
@@ -1556,10 +1559,32 @@ extern u8 D_801144D8; // blink RNG cursor
  *   - no local at all, the literal 2 written twice inside the arm: 55.
  *   - a loop-top local holding 1 with the literal 2 left in the arm: 55.
  * So the 2 is hoistable only from the loop top, and the 1's first use is the
- * `BlinkOn` guard below it; in insn order the 2 therefore always comes first
- * and no rewriting of these two statements reverses it. Whatever the original
- * did, it did not put a plain constant assignment at the top of this loop --
- * look for a third statement there that materialises the 1. */
+ * `BlinkOn` guard below it; in insn order the 2 therefore always comes first.
+ *
+ * The gate on the 2 is not `maybe_never` -- the 1 is hoisted from uses that
+ * are themselves behind two conditional jumps -- it is move_movables'
+ * savings/lifetime threshold. The loop-top assignment does not dodge a jump,
+ * it stretches the movable's live range across the whole body so
+ * `savings * lifetime` clears the bar. Written in the arm the range is two
+ * insns and the constant stays put; that is why every arm-local spelling
+ * measures 55.
+ *
+ * The one spelling that reverses the order is `s32 blinkOpen = 1;` at the loop
+ * top, used only in the else-arm stores, with the guard keeping its literal:
+ * an SImode pseudo stored to a `u8` needs a truncation, so cse cannot fold it
+ * away the way it folds a `u8` or `s16` local (both of those measure 2 rows,
+ * byte-identical to the body below). That gets `li s4,1` into exactly the
+ * target's slot and leaves a *different* residue -- 13 rows that are nothing
+ * but `faceSel` and `blinkClosed` trading s5 and s6, both ways round, in the
+ * prologue saves, all eight `sb`s and the call argument.
+ *
+ * That swap is global_alloc priority, `log2(n_refs) * n_refs * freq /
+ * live_length`: `blinkClosed` has 3 refs over one loop, `faceSel` 10 refs over
+ * the whole function, and the short range wins, so `blinkClosed` is processed
+ * first and takes the lower register. Nothing available moves it -- all four
+ * declaration positions and `s16`/`s32`/`u8` were measured (13, 13, 13, 2),
+ * and assigning `faceSel` just before the fourth loop to shorten its range
+ * costs 48. Next pass: attack the priority, not the movable order. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else

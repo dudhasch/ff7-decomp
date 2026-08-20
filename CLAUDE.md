@@ -849,6 +849,22 @@ a near-miss, in rough order of frequency:
   survives. Write the guard as `if (cond) goto skip;` in both arms with the
   clamp after them. The tell is a constant materialised where the target
   or-s into a register.
+* **Two switch arms that end in the same store are cross-jumped into one —
+  and the only lever is the ref count of the index.** gcc runs `jump_optimize`
+  with cross-jumping *after* reload, so two arms merge exactly when their
+  emitted tails are identical **including registers**; a target that stores
+  twice, with a different index register each time, is telling you its
+  allocator happened to pick differently, not that it did anything structural.
+  Nothing about the control flow reaches it — case order, `goto` polarity,
+  operand order, separate per-arm index locals and both spellings of the
+  stored value all measured 21 rows on `FieldEntityBgTriggerActivate` in
+  `src/field/field2.c`. What does reach it is deleting the `old` local and
+  reading the array element inline at each use: the extra reference raises that
+  quantity's priority in `block_alloc`, it wins a register before the index
+  does, and the two arms come out on different registers, which is what the
+  original has. The tell is a `j` into the *other* arm's store with the stored
+  value in its delay slot, and a jump-table bounds check whose branch target is
+  four instructions short of the target's.
 * **The same `goto` spelling does not always give the same branch polarity.**
   In `KawaiFadeModelColor` the red and green channels take
   `if (cur < target) goto skip;` and come out with the branch inverted around a
