@@ -1060,6 +1060,20 @@ a near-miss, in rough order of frequency:
   which costs a save, a restore and the whole allocation. Assign it after the
   last call that precedes its uses. Worth 12 rows either way in
   `FieldEventRunInit`, in opposite directions.
+* **A hand-written `tag = base + 7` is an ordinary insn; `base[7]` is a giv.**
+  The giv's initialiser is emitted into the loop preheader by
+  `strength_reduce` and reorg leaves it there, while the hand-written pointer
+  is an ordinary assignment reorg happily steals into the guard branch's delay
+  slot. So a target with a `nop` after `beqz <count>` and the `addiu` *after*
+  it wants the offset written at the use site, not carried in a second
+  variable. Eight rows across `KawaiSetModelTransparency`'s eight loops.
+* **A giv's increment follows its biv's, in written order.** With
+  `for (j = 0; j < n; j++, base += stride)` the `j++` comes first and the
+  reduced `base + 7` increment after it; `base += stride, j++` swaps both.
+  Same lever as the two-counter bullet above, one level down. A loop whose
+  `base` is dead afterwards matches either way, because gcc drops the biv
+  increment entirely — so a run of loops where all but the last are two rows
+  out is this.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

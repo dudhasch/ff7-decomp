@@ -526,147 +526,161 @@ void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
 
 /* Set the semi-transparency/shade bits of every packet of every part of one
  * model. Walks each part's double-buffered packet area (the two ordering-table
- * copies) and toggles the ABE and shade bits of each primitive's tag byte. The
- * 8 unrolled primitive-type blocks (strides 34/28/28/20/14/18/1C/24) and the
- * dual walking-pointer tag/base induction are the wall; codegen pinned via
- * MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", KawaiSetModelTransparency);
-#else
+ * copies) and toggles the ABE and shade bits of each primitive's tag byte, in
+ * eight unrolled blocks, one per primitive type (strides 34/28/28/20/14/18/
+ * 1C/24).
+ *
+ * Five levers took this from 153 rows to zero, and four of them are about who
+ * gets to be an induction variable:
+ *
+ *   * `partCount' is not a local. The outer loop's bound is re-read from
+ *     `model->partCount' at the end test, and its zero-trip guard *is* the
+ *     early return -- a separate `if (partCount == 0) return 1;' in front of
+ *     the loop gives two `beqz's where the target has one.
+ *   * the part pointer is `&parts[i * 0x20]', not `part += 0x20'. Bumped, it
+ *     is a biv, and gcc reduces its eight field accesses onto a second base
+ *     at `parts + 0xb' -- invisible in the body, which still reads perfectly.
+ *     Indexed off the counter, gcc builds the walking pointer itself and it
+ *     comes out `move t1,v1' / `addiu t1,t1,0x20' exactly as the target has.
+ *   * there is no `tag' pointer. Writing `base[7]' and letting gcc reduce it
+ *     puts the `addiu v1,a2,7' in the loop preheader as a giv initialiser,
+ *     which reorg then leaves alone; a hand-written `tag = base + 7' in the
+ *     `for' init is an ordinary insn and gets stolen into the guard branch's
+ *     delay slot, costing eight rows across the eight loops.
+ *   * the increment list is `base += stride, j++', not `j++, base += stride'.
+ *     The giv's increment follows its biv's, so the written order decides
+ *     whether `addiu v1,v1,stride' lands before or after `addiu a1,a1,1'.
+ *     Two rows per loop, seven loops -- the eighth matches either way because
+ *     `base' is dead after it and gcc drops the biv increment entirely.
+ *   * `parts' is built offset-first: `model->partsOffset + (s32)model->
+ *     modelData'. Pointer PLUS puts the pointer first. */
 s32 KawaiSetModelTransparency(FieldModelEntry* model, u8* data) {
     u8* parts;
     u8* part;
     u8* base;
-    u8* tag;
-    u32 partCount;
     u32 enable;
     u32 i;
     u32 ot;
     u32 j;
     u32 n;
 
-    parts = model->modelData + model->partsOffset;
-    partCount = model->partCount;
+    parts = (u8*)(model->partsOffset + (s32)model->modelData);
     enable = data[0];
-    if (partCount == 0) {
-        return 1;
-    }
-    part = parts;
-    for (i = 0; i < partCount; i++, part += 0x20) {
+    for (i = 0; i < model->partCount; i++) {
+        part = &parts[i * 0x20];
         for (ot = 0; ot < 2; ot++) {
             base = *(u8**)(part + 0x1C);
             if (ot != 0) {
                 base += *(u16*)(part + 0x16);
             }
             n = part[4];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x34, base += 0x34) {
+            for (j = 0; j < n; base += 0x34, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[5];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+            for (j = 0; j < n; base += 0x28, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[6];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x28, base += 0x28) {
+            for (j = 0; j < n; base += 0x28, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[7];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x20, base += 0x20) {
+            for (j = 0; j < n; base += 0x20, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[8];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x14, base += 0x14) {
+            for (j = 0; j < n; base += 0x14, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[9];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x18, base += 0x18) {
+            for (j = 0; j < n; base += 0x18, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[10];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x1C, base += 0x1C) {
+            for (j = 0; j < n; base += 0x1C, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
             n = part[11];
-            for (j = 0, tag = base + 7; j < n; j++, tag += 0x24, base += 0x24) {
+            for (j = 0; j < n; base += 0x24, j++) {
                 if (enable) {
-                    *tag |= 2;
+                    base[7] |= 2;
                 } else {
-                    *tag &= ~2;
+                    base[7] &= ~2;
                 }
                 if (enable) {
-                    *tag |= 1;
+                    base[7] |= 1;
                 } else {
-                    *tag &= ~1;
+                    base[7] &= ~1;
                 }
             }
         }
     }
     return 1;
 }
-#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPktsBelowLvl);
 
