@@ -1388,17 +1388,40 @@ grep -rln "glabel D_800A032C" asm/us/field/
 grep -rln "D_800A032C" asm/us/field/ src/field/
 ```
 
-**And the escape from a LENDS does not work.** Giving the string a named
-definition — `const char D_800A0848[] = "evt cmd=";` — so both the C and the
-other unit can reach it produces a function that matches and an overlay that
-does not. gcc emits a named object at its *declaration point* but a string
-literal into the function's own constant pool just before the function body, so
-the named string lands ahead of the neighbouring literals rather than among
-them; and a `char[]` object carries the array's alignment (1) where the pool
-uses `.align 2`, so it lands at the wrong offset even in the right order.
-Naming *every* literal in the file with an explicit `aligned(4)` would fix
-both, and is a house-style decision rather than a codegen one. Until then, a
-LENDS function lands only together with everything that borrows from it.
+**A LENDS function lands on its own: define the borrowed symbol in
+`config/sym_extern.us.txt`.** That file is handed to `ld` as a linker script
+(`-T`, every overlay, see `tools/ninja/gen.py`), so a line there defines an
+absolute symbol. Write the C literal as a literal, let it become the local
+label it wants to be, and give the *other* unit's reference an address:
+
+```
+D_800A0848 = 0x800A0848;
+D_800A08D0 = 0x800A08D0;
+```
+
+Nothing else changes — the borrowing unit's source still says `D_800A0848`, so
+its relocation resolves exactly as before and its codegen is untouched. The
+bytes are identical because the pool still emits the same strings at the same
+offsets, and `make build`'s SHA-1 is what proves it. `OpcodeFuncMjump` and
+`OpcodeFuncTutor` in `src/field/field4.c` had both been *verified matches*
+parked for this reason alone, and both landed this way with no source change to
+their bodies.
+
+Two constraints on that file. It is read by **both** splat and `ld`, and they
+disagree about comments: splat asserts every non-blank line holds exactly one
+semicolon (so `/* … */` fails), and `ld` does not understand `//` (so that
+fails too). Keep it to bare assignments and put the explanation in the source.
+And delete the line if the function is ever re-parked — the `.s` would define
+the same symbol again and the link would see it twice.
+
+The escape that does *not* work, and it was measured: giving the string a named
+definition, `const char D_800A0848[] = "evt cmd=";`, produces a function that
+matches and an overlay that does not. gcc emits a named object at its
+*declaration point* but a string literal into the function's own constant pool
+just before the function body, so the named string lands ahead of the
+neighbouring literals rather than among them; and a `char[]` object carries the
+array's alignment (1) where the pool uses `.align 2`, so it lands at the wrong
+offset even in the right order.
 
 **`rodata_owner.py` reads `MASPSX_OVERRIDE` as if it were C, and it is not.**
 The tool decides a symbol is owned by C once it sees a body in the `.c`, so a

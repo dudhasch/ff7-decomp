@@ -3943,31 +3943,18 @@ s32 OpcodeFuncLskip(void) {
 /* MJUMP (0x60): jump to another field map at an explicit position, direction
  * and walkmesh triangle.
  *
- * The #else body is a VERIFIED MATCH -- checkfn reports MATCH -- and it cannot
- * land: this `.s` owns D_800A0848, the "evt cmd=" string src/field/field5.c
- * reaches by symbol (field_private.h:207). Writing the literal here makes it a
- * local label and field5 fails to link.
+ * `pcDirection` has to be stored as a halfword: the target's `sh v0,0x24(a2)`
+ * covers pcDirection and the unk25 byte behind it in one store, the same way
+ * FieldEntityGatewayMapLoad writes it, and a plain `= GET_PARAM_U8(9)` gives
+ * `sb` and was the only diff row.
  *
- * The obvious escape does not work, and it was measured: defining
- * `const char D_800A0848[] = "evt cmd=";` in this file and passing it by name
- * gives MATCH for the function and `field.exe: FAILED` for the overlay. Two
- * reasons, both structural. gcc emits a named object at its declaration point
- * but a string literal into the function's constant pool just before the
- * function body, so the named "evt cmd=" lands *ahead* of the "mjump" literal
- * where the original has it after; and a `char[]` object carries the array's
- * own alignment (1) rather than the pool's `.align 2`, so it would not sit at
- * 0x848 even in the right order. Naming both strings would fix the order but
- * needs an explicit `aligned(4)` on each and turns every such literal in the
- * file into a `D_` object -- a house-style decision, not a codegen fix.
- *
- * What the body needed, and what is worth keeping: `pcDirection` has to be
- * stored as a halfword. The target's `sh v0,0x24(a2)` covers pcDirection and
- * the unk25 byte behind it in one store, the same way FieldEntityGatewayMapLoad
- * writes it; a plain `= GET_PARAM_U8(9)` gives `sb` and was the only diff row.
+ * This function's `.s` used to own D_800A0848, the "evt cmd=" string
+ * src/field/field5.c reaches by symbol, which is why it sat parked as a
+ * verified match for as long as it did. The literal is a local label now;
+ * field5's reference is satisfied by an absolute definition in
+ * config/sym_extern.us.txt, which the linker takes as a script. See CLAUDE.md
+ * on landing a LENDS function.
  */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMjump);
-#else
 s32 OpcodeFuncMjump(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("mjump", 8);
@@ -3995,7 +3982,6 @@ s32 OpcodeFuncMjump(void) {
     }
     return 1;
 }
-#endif
 
 s32 OpcodeFuncPmjmp(void) {
     if (g_DebugLevel & 3) {
@@ -4248,14 +4234,11 @@ s32 OpcodeFuncFmusc(void) {
  * operand. */
 extern u8* D_800E48E0;
 
-/* The #else body is a VERIFIED MATCH but cannot land alone: this function's
- * `.s` owns D_800A08D0, and src/field/field5.c reaches that string by symbol
- * (field_private.h:208). A C literal here becomes a local label, so field5
- * fails to link. Landing it means giving the string a home both units can
- * reach -- not a codegen problem. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTutor);
-#else
+/* This function's `.s` used to own D_800A08D0, the "evt result=" string
+ * src/field/field5.c reaches by symbol, which is what kept a verified match
+ * parked. The literal is a local label now; field5's reference is satisfied by
+ * an absolute definition in config/sym_extern.us.txt. See CLAUDE.md on landing
+ * a LENDS function. */
 s32 OpcodeFuncTutor(void) {
     s16 tutorialId;
 
@@ -4288,7 +4271,6 @@ s32 OpcodeFuncTutor(void) {
     }
     return 1;
 }
-#endif
 
 /////////////////////////////////////////////////
 // Start of field_opcode_movie_overlay.c
