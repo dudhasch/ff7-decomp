@@ -3930,6 +3930,31 @@ s32 OpcodeFuncLskip(void) {
     return 0;
 }
 
+/* MJUMP (0x60): jump to another field map at an explicit position, direction
+ * and walkmesh triangle.
+ *
+ * The #else body is a VERIFIED MATCH -- checkfn reports MATCH -- and it cannot
+ * land: this `.s` owns D_800A0848, the "evt cmd=" string src/field/field5.c
+ * reaches by symbol (field_private.h:207). Writing the literal here makes it a
+ * local label and field5 fails to link.
+ *
+ * The obvious escape does not work, and it was measured: defining
+ * `const char D_800A0848[] = "evt cmd=";` in this file and passing it by name
+ * gives MATCH for the function and `field.exe: FAILED` for the overlay. Two
+ * reasons, both structural. gcc emits a named object at its declaration point
+ * but a string literal into the function's constant pool just before the
+ * function body, so the named "evt cmd=" lands *ahead* of the "mjump" literal
+ * where the original has it after; and a `char[]` object carries the array's
+ * own alignment (1) rather than the pool's `.align 2`, so it would not sit at
+ * 0x848 even in the right order. Naming both strings would fix the order but
+ * needs an explicit `aligned(4)` on each and turns every such literal in the
+ * file into a `D_` object -- a house-style decision, not a codegen fix.
+ *
+ * What the body needed, and what is worth keeping: `pcDirection` has to be
+ * stored as a halfword. The target's `sh v0,0x24(a2)` covers pcDirection and
+ * the unk25 byte behind it in one store, the same way FieldEntityGatewayMapLoad
+ * writes it; a plain `= GET_PARAM_U8(9)` gives `sb` and was the only diff row.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMjump);
 #else
@@ -3946,7 +3971,7 @@ s32 OpcodeFuncMjump(void) {
         GET_PARAM_S16(g_FieldState->pcPosX, 3);
         GET_PARAM_S16(g_FieldState->pcPosY, 5);
         GET_PARAM_S16(g_FieldState->pcWalkMeshId, 7);
-        g_FieldState->pcDirection = GET_PARAM_U8(9);
+        *(u16*)&g_FieldState->pcDirection = GET_PARAM_U8(9);
         return 1;
     case EVTCMD_FIELD_MAP_CHANGE:
         if (g_FieldState->movieCommandState == MOVCMD_DONE) {
@@ -7454,12 +7479,11 @@ s32 OpcodeFuncStpal(void) {
  * pseudo shifts the script pointer out of $a1 and costs twenty rows elsewhere.
  * decomp-permuter got 265 -> 185 and no further in 13k iterations, and its one
  * find was retyping the extern to short, which is not the same address. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncStpls);
-#else
 s32 OpcodeFuncStpls(void) {
     RECT rect;
     s16 x;
+    u8* p;
+    s32 param;
 
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("stpls", 4);
@@ -7470,11 +7494,12 @@ s32 OpcodeFuncStpls(void) {
     rect.x = x;
     rect.w = GET_PARAM_U8(4) + 1;
     rect.h = 1;
-    StoreImage(&rect, (u_long*)&D_80095DE0[GET_PARAM_U8(2) * 32 + x * 2]);
+    param = GET_PARAM_U8(2);
+    p = &D_80095DE0[x * 2];
+    StoreImage(&rect, (u_long*)(param * 32 + (s32)p));
     PC_INC(5);
     return 0;
 }
-#endif
 
 s32 OpcodeFuncLdpal(void) {
     RECT rect;
@@ -7494,12 +7519,11 @@ s32 OpcodeFuncLdpal(void) {
 
 /* LDPAL with a start entry; same address-grouping residue as OpcodeFuncStpls
  * above, and the same phrasings have been tried against it. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncLdpls);
-#else
 s32 OpcodeFuncLdpls(void) {
     RECT rect;
     s16 x;
+    u8* p;
+    s32 param;
 
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("ldpls", 4);
@@ -7510,11 +7534,12 @@ s32 OpcodeFuncLdpls(void) {
     rect.x = x;
     rect.w = GET_PARAM_U8(4) + 1;
     rect.h = 1;
-    LoadImage(&rect, (u_long*)&D_80095DE0[GET_PARAM_U8(1) * 32 + x * 2]);
+    param = GET_PARAM_U8(1);
+    p = &D_80095DE0[x * 2];
+    LoadImage(&rect, (u_long*)(param * 32 + (s32)p));
     PC_INC(5);
     return 0;
 }
-#endif
 
 void FieldEventRectClear(s16* arg0) {
     arg0[0] = 0;

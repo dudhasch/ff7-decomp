@@ -901,6 +901,25 @@ a near-miss, in rough order of frequency:
   `OpcodeFuncCppal2` in `src/field/field4.c` after each had absorbed a long
   budget on the address expression alone. Which of the two pointers is declared
   first still matters separately (see the ADPAL note in that file).
+* **`p + n` puts the pointer first; `n + (s32)p` lets you choose.** For a
+  pointer plus a scaled integer, fold canonicalises the operands so the pointer
+  is `op0`, and no C spelling of the pointer form moves it —
+  `param * 32 + p`, `(u8*)p + (param << 5)`, a `u_long*` base with `param * 8`
+  and an `&arr[...]` base were all measured and produce the identical `addu`.
+  Casting the pointer to `s32` makes it an ordinary integer `PLUS_EXPR`, fold
+  keeps source order, and the multiply becomes `op0`:
+  `(u_long*)(param * 32 + (s32)p)`. That single row is the whole of what parked
+  `OpcodeFuncStpls` and `OpcodeFuncLdpls` in `src/field/field4.c`, the two
+  functions this file records as having absorbed the largest failed budget in
+  the project. Their other four rows came from splitting the address into two
+  statements — the parameter load first, then the base — which is the same
+  `scan_loop` ordering lever as the bullet above, applied to a straight-line
+  block instead of a loop.
+* **A `u8` field and the byte behind it, stored together, are one halfword
+  store.** `sh` where you have `sb`, at an offset whose field is a `u8`
+  followed by a padding or `unkNN` byte, means the original wrote both at once:
+  `*(u16*)&state->pcDirection = GET_PARAM_U8(9);`. `OpcodeFuncMjump` and
+  `FieldEntityGatewayMapLoad` both do this with `FieldState.pcDirection`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -1038,6 +1057,18 @@ own `.s` defines and check who else names it:
 grep -rln "glabel D_800A032C" asm/us/field/
 grep -rln "D_800A032C" asm/us/field/ src/field/
 ```
+
+**And the escape from a LENDS does not work.** Giving the string a named
+definition — `const char D_800A0848[] = "evt cmd=";` — so both the C and the
+other unit can reach it produces a function that matches and an overlay that
+does not. gcc emits a named object at its *declaration point* but a string
+literal into the function's own constant pool just before the function body, so
+the named string lands ahead of the neighbouring literals rather than among
+them; and a `char[]` object carries the array's alignment (1) where the pool
+uses `.align 2`, so it lands at the wrong offset even in the right order.
+Naming *every* literal in the file with an explicit `aligned(4)` would fix
+both, and is a house-style decision rather than a codegen one. Until then, a
+LENDS function lands only together with everything that borrows from it.
 
 **`rodata_owner.py` reads `MASPSX_OVERRIDE` as if it were C, and it is not.**
 The tool decides a symbol is owned by C once it sees a body in the `.c`, so a
