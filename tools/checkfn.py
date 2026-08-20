@@ -24,6 +24,10 @@ Why this exists rather than reading `diff.py` output by eye:
   runs, `ninja build/us/...` finds no such target, prints "no work to do", and
   leaves a stale object behind -- so `diff.py` compares the *previous* build and
   happily reports a match. This refuses to run in that state.
+* A function still pinned with `MASPSX_OVERRIDE` is not compiled from the C
+  beside it at all: the macro assembles the reference `.s` into the object, so
+  the comparison is the target against itself and the verdict is MATCH no
+  matter what the `#else` body says. This refuses to run in that state too.
 """
 import json
 import os
@@ -237,7 +241,29 @@ def calibrate_sections(rows, syms):
     return {sect: max(cands, key=cands.get) for sect, cands in votes.items()}
 
 
-def check(source, func, syms, show_rows=False):
+# `MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelLoadAndInit);`
+# -- clang-format wraps the call across two lines whenever the folder string and
+# the name do not fit, so this has to be matched with DOTALL rather than per
+# line. A line-based grep misses roughly one pinned function in eight.
+OVERRIDE_RE = re.compile(
+    r'MASPSX_OVERRIDE\(\s*"[^"]*"\s*,\s*(\w+)\s*\)', re.S)
+
+
+def pinned_functions(source):
+    with open(os.path.join(REPO, source), errors="replace") as fh:
+        return set(OVERRIDE_RE.findall(fh.read()))
+
+
+def check(source, func, syms, show_rows=False, pinned=()):
+    if func in pinned:
+        die("%s is still pinned with MASPSX_OVERRIDE in %s.\n"
+            "         The macro assembles the reference .s into the "
+            "object, so the C beside\n"
+            "         it is never compiled and the verdict would be the "
+            "target against itself --\n"
+            "         MATCH, whatever the #else body says. Unpark it "
+            "first."
+            % (func, source))
     want = target_insn_count(source, func)
     # diff.py truncates at --max-lines, which defaults to 1024. A function
     # longer than that would silently be judged on its first 1024 instructions
@@ -332,7 +358,9 @@ def main(argv):
         die("no such source file: %s" % source)
     rebuild(source)
     syms = load_symbols()
-    return 0 if all([check(source, f, syms, show_rows) for f in funcs]) else 1
+    pinned = pinned_functions(source)
+    return 0 if all(
+        [check(source, f, syms, show_rows, pinned) for f in funcs]) else 1
 
 
 if __name__ == "__main__":

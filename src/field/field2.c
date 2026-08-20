@@ -1321,39 +1321,83 @@ const u32 D_800A00DC[] = {0x00000000};
  * generating code, and the assembler at the end of the pipe still exits 0. */
 extern u8 D_800DF08C[];
 extern u8 D_800DF0D4[];
+extern u8* D_800E0204;
+
+/* The per-field model-file table: one 24-byte record per field, of which the
+ * loader uses the first two words as DS_read's sector and size. It is its own
+ * object, immediately behind g_FieldLzsInfo. */
+extern u32 D_800DA5C8[];
+
+/* The face-selection block the model loader leaves in the scratchpad for
+ * KawaiLoadEyesMouthTexToVram to read back: which mouth and eye frame to
+ * upload, and the model slot whose VRAM tile they go to.
+ *
+ * Three of the four bytes are written through the record and the last one is
+ * not, and the asymmetry is load-bearing rather than sloppy: gcc 2.6.3's
+ * true_dependence lets a struct load float past a non-struct store but not
+ * past a struct one, so the modelEntries load that sets up the call settles
+ * exactly between the slot store and the byte-0 store -- which is where the
+ * target has it. All four spelled as casts lets the load float to the top of
+ * the body and costs a load-delay nop; all four spelled as members pins it
+ * below all of them and costs the same row the other way. */
+typedef struct {
+    /* 0x0 */ u8 mouth1;
+    /* 0x1 */ u8 mouth2;
+    /* 0x2 */ u8 eye;
+    /* 0x3 */ u8 slot;
+} KawaiFaceSel;
+
+void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data);
+u8* FieldModelLoadGlobalModels(
+    FieldModelFileDesc* desc, FieldModelData* data, u8* pkts, s32 readFile);
+u8* LoadLocalFieldModelAndInitAll(
+    FieldModelFileDesc* desc, FieldModelData* data, u8* readFromCd, u32* buf);
+s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel);
+void KawaiClearData(void);
 
 /* Top-level field model loader: build the FieldModelData from the loaded model
- * header, stream the field's model set off the CD, load the global and local
- * models, then push each model's eye/mouth textures to VRAM and reset the KAWAI
- * state. Verified C kept as the #else; codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelLoadAndInit);
-#else
+ * header, stream the field's model set off the CD into the overlay staging
+ * buffer at 0x801B0000, load the global and then the local models, clear every
+ * model's flags byte except the player's, and finally push each model's
+ * eye/mouth texture to VRAM before resetting the KAWAI state.
+ *
+ * The three scratchpad slots are the loaders' out-of-band parameter block:
+ * words 0 and 1 hand FieldModelLoadGlobalModels its part and animation staging
+ * buffers, and bytes 0..3 hand KawaiLoadEyesMouthTexToVram the eye/mouth
+ * selection for the model it is about to upload. */
 void FieldModelLoadAndInit(void) {
-    FieldModelData* data;
-    s32 i;
+    u8* buf;
+    u32 i;
 
-    D_800DFCA0 = (u_long*)0x80128000;
-    data = g_FieldModelData;
-    FieldModelStructInit((FieldModelFileDesc*)D_8007E770, data);
-    DS_read(g_FieldLzsInfo[g_CurrentFieldIndex * 6],
-            g_FieldLzsInfo[g_CurrentFieldIndex * 6 + 1], (u32*)0x80128000,
-            NULL);
+    D_800DFCA0 = (FieldTexBlockHeader*)0x80128000;
+    buf =
+        FieldModelStructInit((FieldModelFileDesc*)D_8007E770, g_FieldModelData);
+    D_80075E10 = (u32)buf;
+    D_800E0204 = buf;
+    DS_read(D_800DA5C8[g_CurrentFieldIndex * 6],
+            D_800DA5C8[g_CurrentFieldIndex * 6 + 1], (u_long*)0x801B0000, NULL);
     while (SystemCdromReadChain() != 0) {
     }
+    ((u8**)0x1F800000)[0] = D_800DF08C;
+    ((u8**)0x1F800000)[1] = D_800DF0D4;
     D_80075E10 = (u32)FieldModelLoadGlobalModels(
         (FieldModelFileDesc*)D_8007E770, g_FieldModelData, (u8*)D_80075E10, 1);
-    ((s32*)0x1F800000)[0] = (s32)D_800DF08C;
-    ((s32*)0x1F800000)[1] = (s32)D_800DF0D4;
     D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
-        g_FieldModelData, D_8007E770, (u8*)D_80075E10);
+        (FieldModelFileDesc*)D_8007E770, g_FieldModelData, (u8*)D_800A00DC,
+        (u32*)0x801B0000);
+    for (i = 1; i < g_FieldModelData->modelCount; i++) {
+        g_FieldModelData->modelEntries[i].flags = 0;
+    }
     for (i = 0; i < g_FieldModelData->modelCount; i++) {
+        ((KawaiFaceSel*)0x1F800000)->mouth2 = 1;
+        ((KawaiFaceSel*)0x1F800000)->eye = 0;
+        ((KawaiFaceSel*)0x1F800000)->slot = i;
+        *(u8*)0x1F800000 = 1; /* deliberately not through the record */
         KawaiLoadEyesMouthTexToVram(
             &g_FieldModelData->modelEntries[i], (u8*)0x1F800000);
     }
     KawaiClearData();
 }
-#endif
 
 s32 FieldCalcWorldToScreenPos(SVECTOR* worldPos, long* screenPos);
 void FieldModelAnimCalcMtrxs(
@@ -2141,7 +2185,6 @@ typedef struct {
 } BsxModelBlock;
 
 extern u8* D_800E0200;
-extern u8* D_800E0204;
 
 void FieldModelBsxTdbModify(u8* tdb);
 void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx);

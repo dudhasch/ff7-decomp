@@ -205,7 +205,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Two ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Five ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -555,6 +555,21 @@ a near-miss, in rough order of frequency:
   body. `AddBackgroundToRender` reads three such globals — a camera window, two
   ordering-table slots and a per-sprite animation byte pair — and typing them as
   arrays and structs was worth 172 rows and the whole frame layout.
+* **A store's struct-ness decides whether a later load may float above it.**
+  The companion to the aliasing bullet above, run forwards instead of
+  backwards: `true_dependence` lets a `MEM_IN_STRUCT_P` load move past a store
+  that is *not* in a struct, and refuses when both are. So a run of scratchpad
+  writes followed by a call whose argument reads a struct member schedules
+  three different ways for the same four assignments. All of them written as
+  casts (`*(u8*)0x1F800001 = 1;`) lets the member load float to the top of the
+  block, where it lands right behind the pointer load it depends on and costs a
+  load-delay `nop`; all of them written through a record pins the load below
+  every one of them; and writing all but the last through the record settles it
+  in between. `FieldModelLoadAndInit`'s KAWAI loop needs exactly that last
+  shape — three `KawaiFaceSel` member stores and one plain cast — and the three
+  spellings measure 5, 2 and 0 rows. When a diff is one `nop` and one load that
+  is a couple of slots early, look at what the stores around it are declared
+  as, not at the load.
 * **A `for (;;)` loop left by `goto` keeps the invariant hoisting that a
   backward `goto` loses, without paying for the rotation a `break` costs.**
   Three shapes, three different results for the same body: a backward `goto`
@@ -1044,6 +1059,16 @@ a near-miss, in rough order of frequency:
   redundant `if (i < bound)` in front of an inner loop is the same trap seen
   from the other side: the target reaches the loop through its own guard, and
   spells it against whatever register it has just proved to be zero.
+* **`unsigned char` promotes to *signed* int, unlike `unsigned short`.** A
+  `u8` struct field as a loop bound therefore gives `slt` and `blez`, and no
+  spelling of the bound reaches the `sltu`/`beqz` pair a target may have —
+  because the fix is on the other side of the comparison. Declare the *counter*
+  `u32` and the compare goes unsigned: `for (i = 0; i < data->modelCount; i++)`
+  with a `u32 i` emits `beqz` on the zero-trip guard and `sltu` on the back
+  edge, exactly where an `s32 i` emits `blez` and `slt`. Two of
+  `FieldModelLoadAndInit`'s loops need this, and it is worth reading against
+  the `u16`/`s16` loop-bound bullet above: there the *bound*'s type is the
+  knob, here it is the counter's.
 * **gcc 2.6.3 promotes `unsigned short` to *unsigned* int.** One `u16` operand
   therefore makes a whole comparison unsigned — `sltu` where the target has
   `slt` — even when the other side is a plain `s32`. An explicit `(s32)` cast
@@ -1295,7 +1320,7 @@ once unparked in the same build. Before spending a budget on any member of a
 clone family — the `Opcode*` palette ops, the `FieldEvent*` accessors, the
 `Kawai*` handlers — unpark the whole family and re-measure.
 
-#### Four ways a clean-looking diff lies
+#### Five ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -1337,6 +1362,18 @@ travel with that typedef. Left behind, gcc 2.6.3 does not stop at the unknown
 type name — it makes the object a tentative definition in `.bss`, and the only
 complaint is a `multiple definition` at link time against the real symbol in
 the data segment.
+
+**A function that is still pinned.** `MASPSX_OVERRIDE` assembles the reference
+`.s` into the object, so the C beside it is never compiled and the comparison
+is the target against itself: **MATCH, whatever the `#else` body says.** This
+is not a hypothetical — it cost a red `make build` in the session that wrote
+this paragraph. The parked body had been rewritten from scratch, `checkfn.py`
+said MATCH, and the function it was unparked into turned out to be one
+instruction longer than the target, with `slt` where the target has `sltu`;
+every symbol in the overlay after it shifted by four bytes and only the SHA-1
+noticed. Measuring a parked body means unparking it first — `checkfn.py` now
+refuses to give a verdict while the name still appears in a `MASPSX_OVERRIDE`
+in that `.c`, with the same multiline-aware match the rename check uses.
 
 **A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
 truncates silently: on a longer function the tail simply never enters the

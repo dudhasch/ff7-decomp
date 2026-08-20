@@ -276,65 +276,88 @@ s32 KawaiSetColorToModelPkts(FieldModelEntry* model, u8* data) {
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPartPkts);
 
 /* Load this model's animated eye/mouth textures into VRAM. The face selector
- * (arg1) is four bytes: two mouth frames, one eye frame, and a "has animation"
- * flag; values 0x21+ in the flag mean the model has no animated face and the
- * function is a no-op. Each present variant is looked up in a per-textureFaceId
- * index table (mouth: stride 7, eye: stride 3, 0x7E = none) and the matching
- * 0x200-byte page of the model's texture block is uploaded to its VRAM tile.
+ * is four bytes: two mouth frames, one eye frame, and the model's own slot
+ * index, which both places the tiles in VRAM and gates the whole function --
+ * slots 0x21 and up have no tiles reserved for them and the call is a no-op.
+ * Each variant is looked up in a per-textureFaceId index table (mouth: stride
+ * 7, eye: stride 3) and the matching 0x200-byte page of the shared model
+ * texture block is uploaded to that slot's tile.
  *
- * Semantically right, codegen pinned via MASPSX_OVERRIDE: the verified C is the
- * #else. The target keeps the table base in a callee-saved register and
- * strength-reduces faceId*7 / faceId*3; gcc picks different registers. */
+ * 23 rows out, and the instruction count is exact -- the function ends at the
+ * same address as the target, so nothing here is a missing or extra insn.
+ * The whole residue is one allocation choice and the scheduling that follows
+ * it: the selector byte `faceSel[k]` lands in a0 (blocks 1 and 3) or v1
+ * (block 2) where the target puts it in a1 every time. Block 1 is otherwise
+ * instruction-for-instruction exact, including both divisions and all four
+ * rect stores; blocks 2 and 3 differ only in where the D_800DFCA0 load and
+ * the `sll ..,9` get scheduled around that one register.
+ *
+ * What took it from 101 rows to 23, all of which are real findings:
+ *   - `slot / 4` and `slot / 8`, not `>> 2` and `>> 3`. The target has the
+ *     signed-division rounding fixup (`bgez` over `addiu s2,3`), which a
+ *     shift does not emit.
+ *   - The LoadImage source has to be a named local assigned *before* the four
+ *     rect stores. Written inline as the second argument it is evaluated with
+ *     the call, so the whole lookup lands after the `sh`s: 66 rows.
+ *   - Two quotient variables, not one. A single `q` reused by the mouth and
+ *     the eye block is live across both LoadImage calls and takes a
+ *     callee-saved register, where the target's eye quotient is caller-saved
+ *     (v1) because its range is inside the last block. Worth 4 rows.
+ *   - D_800DFCA0 and model->textureFaceId are re-read at every use. Caching
+ *     either in a local collapses three loads into one.
+ *   - The index tables are two-dimensional. `D_800DFCA4[faceId * 7 + sel]`
+ *     folds the whole index into one `addu`; `[faceId][sel]` gives the
+ *     target's two, symbol-then-selector.
+ *
+ * Measured and inert (all 23 rows): `u8*` instead of `u_long*` for the source
+ * pointer, `* 0x200` instead of `<< 9`, three separate source locals, `(s32)`
+ * on the faceId subscript, all five declaration orders of the five locals,
+ * `*(&D_800DFCA4[faceId][0] + sel)`, and `+ 0x300 + 8` for the second x.
+ * Measured and worse: the selector byte hoisted into a local (50), either
+ * quotient computed before the source pointer (67 and 38), `&rect` hoisted
+ * into a `RECT*` (60), `faceSel` copied to a local pointer (35), and the
+ * pointer-plus spelling of the table index (58). Codegen pinned via
+ * MASPSX_OVERRIDE; the #else is the verified C. */
+extern u8 D_800DFCA4[][7]; /* mouth texture page index, per face, per frame */
+extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
+
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiLoadEyesMouthTexToVram);
 #else
-extern u8 D_800DFCA4[]; /* mouth texture index table, stride 7 per face */
-extern u8 D_800DFD94[]; /* eye texture index table, stride 3 per face */
-
 s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
     RECT rect;
-    u8* texBlock;
-    u8* texData;
-    s32 n;
+    u_long* src;
+    s32 slot;
     s32 q;
-    u8 faceId;
+    s32 eyeQ;
 
-    n = faceSel[3];
-    if (n >= 0x21) {
-        return 1;
+    slot = faceSel[3];
+    if (slot < 0x21) {
+        src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
+                        (D_800DFCA4[model->textureFaceId][faceSel[0]] << 9));
+        q = slot / 4;
+        rect.x = ((slot - q * 4) << 4) + 0x300;
+        rect.y = (q << 5) + 0x100;
+        rect.w = 8;
+        rect.h = 0x20;
+        LoadImage(&rect, src);
+        src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
+                        (D_800DFCA4[model->textureFaceId][faceSel[1]] << 9));
+        rect.x = ((slot - q * 4) << 4) + 0x308;
+        rect.y = (q << 5) + 0x100;
+        rect.w = 8;
+        rect.h = 0x20;
+        LoadImage(&rect, src);
+        src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
+                        (D_800DFD94[model->textureFaceId][faceSel[2]] << 9));
+        eyeQ = slot / 8;
+        rect.x = ((slot - eyeQ * 8) << 3) + 0x300;
+        rect.y = (eyeQ << 5) + 0x1A0;
+        rect.w = 8;
+        rect.h = 0x20;
+        LoadImage(&rect, src);
     }
-    texBlock = (u8*)D_800DFCA0;
-    faceId = model->textureFaceId;
-
-    /* First mouth frame. */
-    q = n >> 2;
-    rect.x = ((n - q * 4) << 4) + 0x300;
-    rect.y = (q << 5) + 0x100;
-    rect.w = 8;
-    rect.h = 0x20;
-    texData = *(u8**)(texBlock + 8);
-    LoadImage(
-        &rect, (u_long*)(texData + (D_800DFCA4[faceId * 7 + faceSel[0]] << 9)));
-
-    /* Second mouth frame, one tile to the right. */
-    rect.x = ((n - q * 4) << 4) + 0x308;
-    rect.y = (q << 5) + 0x100;
-    rect.w = 8;
-    rect.h = 0x20;
-    texData = *(u8**)(texBlock + 8);
-    LoadImage(
-        &rect, (u_long*)(texData + (D_800DFCA4[faceId * 7 + faceSel[1]] << 9)));
-
-    /* Eye frame. */
-    q = n >> 3;
-    rect.x = ((n - q * 8) << 3) + 0x300;
-    rect.y = (q << 5) + 0x1A0;
-    rect.w = 8;
-    rect.h = 0x20;
-    texData = *(u8**)(texBlock + 8);
-    LoadImage(
-        &rect, (u_long*)(texData + (D_800DFD94[faceId * 3 + faceSel[2]] << 9)));
     return 1;
 }
 #endif
