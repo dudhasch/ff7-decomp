@@ -1175,6 +1175,26 @@ a near-miss, in rough order of frequency:
   the higher-numbered register — `s16 bestId; s16 best;` against `s16 best;
   s16 bestId;` is 8 rows in `FieldEntityCheckTalk`. Try the swap when the diff
   is two registers trading places and nothing else.
+* **`x / 32` and `x >> 5` are not the same instruction.** A signed division by
+  a power of two has to round toward zero, so gcc emits `bgez`/`addiu N-1`
+  ahead of the `sra`; a shift is the `sra` alone. Four instructions per site,
+  and it reads as noise in the middle of a division sequence. When the target
+  has a `bgez` over an `addiu` of a power-of-two-minus-one, the source wrote a
+  division. `FieldEntityDirByVec` in `src/field/field2.c` has two.
+* **`-x * 2` and `-(x * 2)` index differently.** Negating first makes gcc
+  compute the index into its own register before it materialises the array
+  base, so the shift is free to be stolen into the preceding branch's delay
+  slot and the base is subtracted from; folding the negation outward builds
+  the base first and leaves the slot empty. Same value, three rows across four
+  arms — the last three rows of `FieldEntityDirByVec`.
+* **An in/out pointer parameter written twice is what forces it into a
+  callee-saved register.** `*p = a; x = f(*p); *p = x;` gives the `move s0,a2`
+  and an extra saved register that the single-store version does not need. If
+  the target saves one more register than your code and there is a spare store
+  to a parameter in the diff, the function overwrites its own output — read
+  what the callers compare it against before assuming the first store is the
+  only one. `FieldEntityDirByVec` returns the *distance* through a parameter
+  the seed had named `sqrDist`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

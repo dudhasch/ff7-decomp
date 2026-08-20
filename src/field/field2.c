@@ -515,45 +515,81 @@ s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
 extern u8 D_800DEF88[];
 
-/* Direction (0-255) from one point to another, plus the squared distance.
- * Computes the fixed-point slope of the dominant axis, looks up the angle in
- * the arctan table D_800DEF88, and corrects for the quadrant. The two hardware
- * divisions and the quadrant branch ladder are the wall; codegen pinned via
- * MASPSX_OVERRIDE, #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityDirByVec);
-#else
+/* Direction (0-255) from one point to another. The third parameter is
+ * in/out: it is written with the squared distance, then *overwritten with the
+ * distance itself* -- callers compare it against a plain range, not a squared
+ * one. The slope of each axis is taken in 12-bit fixed point, divided down by
+ * 32, and the arctan table D_800DEF88 is indexed by whichever axis is the
+ * minor one; the eight-arm ladder is the quadrant correction and every arm
+ * shares one final `+ 0x40` and one `& 0xFF`.
+ *
+ * 91 rows to zero, and none of the five corrections was a codegen tweak:
+ *   - `/ 32`, not `>> 5`. A signed division by a power of two carries the
+ *     `bgez`/`addiu 0x1f` rounding pair, which a shift does not, and the two
+ *     pairs are eight instructions.
+ *   - `*sqrDist = dist;` after the SquareRoot0 call. That second store is what
+ *     forces the pointer into a callee-saved register (`move s0,a2`), so it
+ *     costs a whole extra saved register and the frame with it.
+ *   - the dominance test is `slopeX * slopeX > slopeY * slopeY`, evaluated in
+ *     that order. Written `<` with the operands swapped it is the same test
+ *     and the two `mult`s come out in the other order.
+ *   - eight arms, not four: each half tests *both* signs. The four-arm form
+ *     looks equivalent because the table is symmetric, but it is a different
+ *     program and no amount of scheduling reaches it.
+ *   - `slopeX`/`slopeY` are the same variables as `dx`/`dy`. As separate
+ *     locals the slopes land in caller-saved registers and the whole ladder
+ *     renames; reusing dx/dy lets them coalesce into the registers dx and dy
+ *     already hold, which is what the target does.
+ * And the last row: the negative table index is `D_800DEF88[-dy * 2]`, not
+ * `[-(dy * 2)]`. Negating first makes gcc compute the index into its own
+ * register before materialising the table base, so the shift can be stolen
+ * into the preceding `blez`'s delay slot and the base is subtracted from;
+ * folding the negation outward computes the base first and leaves the slot
+ * empty. Same value, three rows. */
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
     s32 dx;
     s32 dy;
     s32 dist;
-    s32 slope;
-    s32 slopeX;
-    s32 slopeY;
-    u8 angle;
+    s32 angle;
 
     dx = to->vx - from->vx;
     dy = to->vy - from->vy;
     *sqrDist = dx * dx + dy * dy;
     dist = SquareRoot0(*sqrDist);
-    slopeX = (dx << 12) / dist >> 5;
-    slopeY = (dy << 12) / dist >> 5;
-    if (slopeX * slopeX < slopeY * slopeY) {
-        if (slopeY > 0) {
-            angle = D_800DEF88[slopeX * 2] + 0x40;
+    *sqrDist = dist;
+    dx = (dx << 12) / dist / 32;
+    dy = (dy << 12) / dist / 32;
+    if (dx * dx > dy * dy) {
+        if (dx > 0) {
+            if (dy > 0) {
+                angle = D_800DEF88[dy * 2];
+            } else {
+                angle = -D_800DEF88[-dy * 2];
+            }
         } else {
-            angle = -0x40 - D_800DEF88[-slopeX * 2];
+            if (dy > 0) {
+                angle = -0x80 - D_800DEF88[dy * 2];
+            } else {
+                angle = D_800DEF88[-dy * 2] - 0x80;
+            }
         }
     } else {
-        if (slopeX > 0) {
-            angle = D_800DEF88[slopeY * 2] - 0x40;
+        if (dy > 0) {
+            if (dx > 0) {
+                angle = 0x40 - D_800DEF88[dx * 2];
+            } else {
+                angle = D_800DEF88[-dx * 2] + 0x40;
+            }
         } else {
-            angle = -0x80 - D_800DEF88[-slopeY * 2];
+            if (dx > 0) {
+                angle = D_800DEF88[dx * 2] - 0x40;
+            } else {
+                angle = -0x40 - D_800DEF88[-dx * 2];
+            }
         }
     }
-    return angle & 0xFF;
+    return (angle + 0x40) & 0xFF;
 }
-#endif
 
 u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist);
 
