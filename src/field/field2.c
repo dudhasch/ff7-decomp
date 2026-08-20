@@ -2206,110 +2206,122 @@ void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
 
 extern u16 D_8011446C;
 
-/* Project the field-exit-arrow marker positions (the per-trigger 3D points)
- * through the camera and add a sprite packet for each visible one to the OT,
- * in both the trigger-arrow and the field-exit sets. m2c seed; the residual is
- * the OT-link store scheduling and the GTE RotTransPers arg setup. Codegen
- * pinned via MASPSX_OVERRIDE pending a permuter pass. */
+/* Project the field-exit-arrow marker positions through the camera and add a
+ * sprite packet for each visible one to the OT. Two passes: the twelve
+ * trigger arrows, whose position is the midpoint of the two marker points at
+ * g_FieldTriggers+0x38 (0x18 bytes per trigger, two s16 triples), and the
+ * twelve field-exit arrows, whose position and kind sit at
+ * g_FieldTriggers+0x224 with a 0x10-byte stride. The two sets share one
+ * SPRT_16 array, Arrows[0..0xB] and Arrows[0xC..0x17]; kind 2 gets a second
+ * CLUT.
+ *
+ * PARKED at 11 rows with the instruction count exact -- no insertions, no
+ * deletions -- which makes it the closest permuter target in the overlay.
+ * From an m2c seed that did not compile, and three things got it there:
+ *
+ *   - `addPrim`'s second argument is built offset-first:
+ *     `(SPRT_16*)(i * 0x10 + 0x40C0 + (s32)buf)`, not `&buf->Arrows[i + 0xC]`.
+ *     The macro uses the pointer once as an address (base plus displacement)
+ *     and once as a value, and the value has to be `buf + (i * 0x10 +
+ *     0x40C0)`; every pointer spelling folds it to `(buf + 0x40C0) + i * 0x10`
+ *     instead. That one argument was worth 70 of the original 86 rows, because
+ *     the whole second loop's register allocation follows it.
+ *   - `u0` is assigned before `v0`, in both loops. The u0 value is a six-insn
+ *     chain off a `lhu` of D_8011446C and the v0 store is two insns; written
+ *     u0-first, sched2 lifts the v0 store into the load's delay slot exactly
+ *     as the target does. Written v0-first it is issued two slots early and
+ *     leaves a nop. Two rows and the last insertion.
+ *   - the packet's `u0`/`v0` are reached through
+ *     `((struct FieldRenderData*)(i * 0x10 + (s32)buf))->Arrows[K]` while
+ *     `x0`/`y0`/`clut` use the plain `buf->Arrows[i + K]`. Both address the
+ *     same byte; the first keeps `i * 0x10` as the base register with 0x400C /
+ *     0x40CC as the displacement (which is what the target has), the second
+ *     computes `(i + 0xC) * 0x10`. The target uses both forms in the same
+ *     loop, so this is not a tidiness choice.
+ *
+ * The eleven rows left are three `addu` operand orders -- the trigger base
+ * `addu v1,v0,s3` against our `addu v1,s3,v0` twice, and the addPrim value's
+ * `addiu v0,s3,0x40c0 / addu v0,s2,v0` against our reassociated
+ * `addiu v0,s2,0x40c0 / addu v0,s3,v0` -- plus the three branch displacements
+ * they shift, and one reorg choice: the target fills the second loop's guard
+ * delay slot by duplicating `addiu v0,s4,1` from the branch target, we fill it
+ * with `addiu a0,sp,0x10` from before the branch.
+ *
+ * Measured and rejected: `(u8*)g_FieldTriggers + i * 0x10 + K`,
+ * `i * 0x10 + K + g_FieldTriggers` and `g_FieldTriggers + i * 0x10 + K` all
+ * give the identical 11 (the addu order is not reachable from the trigger
+ * address spelling); an explicit `s32 off = i * 0x10;` shared by the trigger
+ * and the sprite -- which is what the target's callee-saved `$s3` looks like
+ * -- costs 43 rows; a named `SPRT_16* spr` for the addPrim value costs 47;
+ * and parenthesising the addPrim value as `(s32)buf + (i * 0x10 + 0x40C0)` is
+ * inert, so fold's reassociation is not reachable from the source either. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldArrowsAddToRender);
 #else
-void FieldArrowsAddToRender(void* arg0, MATRIX* arg1, s32 arg2) {
-    u16 sp10;
-    u16 sp12;
-    u16 sp14;
-    s32 sp18;
-    s32 sp1C;
-    s16 var_s4;
-    s16 var_s4_2;
-    s16 var_v0;
-    s16 var_v0_3;
-    s32 temp_a0_2;
-    s32 temp_a1;
-    s32 temp_a2;
-    s32 temp_s0;
-    s32 temp_s0_2;
-    s32 temp_s3;
-    s32 var_v0_2;
-    s32 var_v1;
-    void* temp_a0;
-    void* temp_a1_2;
-    void* temp_s0_3;
-    void* temp_s1;
-    void* temp_v1;
+void FieldArrowsAddToRender(
+    struct FieldRenderData* buf, MATRIX* mtx, s32 markers) {
+    SVECTOR pos;
+    s32 sz;
+    s32 flag;
+    s16 i;
 
-    if (((*g_FieldExitArrowState == 1) && (g_FieldAnimLock == 0)) ||
-        (*g_FieldExitArrowState == 2)) {
-        var_s4 = 0;
+    if ((g_FieldExitArrowState[0] == 1 && g_FieldAnimLock == 0) ||
+        g_FieldExitArrowState[0] == 2) {
+        i = 0;
         PushMatrix();
-        SetRotMatrix(arg1);
-        SetTransMatrix(arg1);
-        var_v1 = 0 << 0x10;
+        SetRotMatrix(mtx);
+        SetTransMatrix(mtx);
         do {
-            temp_s0 = var_v1 >> 0x10;
-            var_v0 = var_s4 + 1;
-            if (((g_FieldTriggers + temp_s0)->unk218 == 1) &&
-                ((temp_a0 = (temp_s0 * 0x18) + arg2,
-                  temp_a1 = (s32)(temp_a0->unk0 + temp_a0->unk6) / 2,
-                  sp10 = (u16)temp_a1,
-                  temp_a2 = (s32)(temp_a0->unk2 + temp_a0->unk8) / 2,
-                  sp12 = (u16)temp_a2,
-                  sp14 = (u16)((s32)(temp_a0->unk4 + temp_a0->unkA) / 2),
-                  ((temp_a1 << 0x10) != 0)) ||
-                 (var_v0 = var_s4 + 1, ((temp_a2 << 0x10) != 0)))) {
-                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
-                temp_a0_2 = temp_s0 * 0x10;
-                temp_a1_2 = temp_a0_2 + arg0;
-                temp_a1_2->unk400D = 0xD0;
-                temp_a1_2->unk400C = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
-                temp_a1_2->unk4008 = (s16)(sp10 - 7);
-                temp_a1_2->unk400A = (s16)(sp12 - 8);
-                temp_a1_2->unk4000 = (s32)((temp_a1_2->unk4000 & 0xFF000000) |
-                                           (arg0->unk0 & 0xFFFFFF));
-                arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
-                                   ((arg0 + (temp_a0_2 + 0x4000)) & 0xFFFFFF));
-                var_v0 = var_s4 + 1;
-            }
-            var_s4 = var_v0;
-            var_v1 = var_s4 << 0x10;
-        } while (var_v0 < 0xC);
-        var_s4_2 = 0;
-        var_v0_2 = 0 << 0x10;
-        do {
-            temp_s0_2 = var_v0_2 >> 0x10;
-            temp_s3 = temp_s0_2 * 0x10;
-            temp_v1 = g_FieldTriggers + temp_s3;
-            var_v0_3 = var_s4_2 + 1;
-            if (temp_v1->unk230 != 0) {
-                sp10 = temp_v1->unk224;
-                sp12 = temp_v1->unk228;
-                sp14 = temp_v1->unk22C;
-                RotTransPers((SVECTOR*)&sp10, (s32*)&sp10, &sp18, &sp1C);
-                temp_s1 = temp_s3 + arg0;
-                temp_s1->unk40CD = 0xD0;
-                temp_s1->unk40CC = (s8)(((D_8011446C * 4) & 0x30) + 0x30);
-                temp_s0_3 = arg0 + ((temp_s0_2 + 0xC) * 0x10);
-                temp_s0_3->unk4008 = (s16)(sp10 - 7);
-                temp_s0_3->unk400A = (s16)(sp12 - 8);
-                if ((g_FieldTriggers + temp_s3)->unk230 == 2) {
-                    temp_s0_3->unk400E = GetClut(0x100, 0x1E8);
+            if (*(u8*)(g_FieldTriggers + i + 0x218) == 1) {
+                pos.vx = (*(s16*)(markers + i * 0x18) +
+                          *(s16*)(markers + i * 0x18 + 6)) /
+                         2;
+                pos.vy = (*(s16*)(markers + i * 0x18 + 2) +
+                          *(s16*)(markers + i * 0x18 + 8)) /
+                         2;
+                pos.vz = (*(s16*)(markers + i * 0x18 + 4) +
+                          *(s16*)(markers + i * 0x18 + 0xA)) /
+                         2;
+                if (pos.vx != 0 || pos.vy != 0) {
+                    RotTransPers(&pos, (s32*)&pos, &sz, &flag);
+                    ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
+                        ->Arrows[0]
+                        .u0 = (D_8011446C * 4 & 0x30) + 0x30;
+                    ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
+                        ->Arrows[0]
+                        .v0 = 0xD0;
+                    buf->Arrows[i].x0 = pos.vx - 7;
+                    buf->Arrows[i].y0 = pos.vy - 8;
+                    addPrim(buf->ot, &buf->Arrows[i]);
                 }
-                temp_s1->unk40C0 = (s32)((temp_s1->unk40C0 & 0xFF000000) |
-                                         (arg0->unk0 & 0xFFFFFF));
-                arg0->unk0 =
-                    (s32)((arg0->unk0 & 0xFF000000) |
-                          ((s32)(arg0 + (temp_s3 + 0x40C0)) & 0xFFFFFF));
-                var_v0_3 = var_s4_2 + 1;
             }
-            var_s4_2 = var_v0_3;
-            var_v0_2 = var_s4_2 << 0x10;
-        } while (var_v0_3 < 0xC);
+            i++;
+        } while (i < 0xC);
+        i = 0;
+        do {
+            if (*(s32*)((u8*)g_FieldTriggers + i * 0x10 + 0x230) != 0) {
+                pos.vx = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x224);
+                pos.vy = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x228);
+                pos.vz = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x22C);
+                RotTransPers(&pos, (s32*)&pos, &sz, &flag);
+                ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
+                    ->Arrows[0xC]
+                    .u0 = (D_8011446C * 4 & 0x30) + 0x30;
+                ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
+                    ->Arrows[0xC]
+                    .v0 = 0xD0;
+                buf->Arrows[i + 0xC].x0 = pos.vx - 7;
+                buf->Arrows[i + 0xC].y0 = pos.vy - 8;
+                if (*(s32*)((u8*)g_FieldTriggers + i * 0x10 + 0x230) == 2) {
+                    buf->Arrows[i + 0xC].clut = GetClut(0x100, 0x1E8);
+                }
+                addPrim(buf->ot, (SPRT_16*)(i * 0x10 + 0x40C0 + (s32)buf));
+            }
+            i++;
+        } while (i < 0xC);
         PopMatrix();
-        arg0->unk4180 =
-            (s32)((arg0->unk4180 & 0xFF000000) | (arg0->unk0 & 0xFFFFFF));
-        arg0->unk0 = (s32)((arg0->unk0 & 0xFF000000) |
-                           ((s32)(arg0 + 0x4180) & 0xFFFFFF));
-        D_8011446C += 1;
+        addPrim(buf->ot, &buf->ArrowsDm);
+        D_8011446C++;
     }
 }
 #endif

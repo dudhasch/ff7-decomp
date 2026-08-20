@@ -511,6 +511,34 @@ a near-miss, in rough order of frequency:
   twice inside an `if` in its third loop; taking `flip = &D_800DF114;` before
   the loop and writing `*flip ^= 1;` hoists the address the way the target has
   it, and is worth 19 rows.
+* **`addPrim`'s second argument has to be built offset-first.** The macro uses
+  the pointer twice -- once as an address, for `setaddr(p, ...)`, and once as a
+  *value*, for `setaddr(ot, p)` -- and the value the target computes is
+  `base + (i * stride + K)`: `addiu v0,<idx>,K` then `addu v0,<base>,v0`. Every
+  pointer spelling, `&buf->Arrows[i + 0xC]` included, folds that to
+  `(base + K) + i * stride` and emits the two instructions the other way round,
+  which changes the whole loop's allocation behind it. Write it as
+  `(SPRT_16*)(i * 0x10 + 0x40C0 + (s32)buf)`; the integer PLUS keeps the source
+  association where the pointer PLUS reassociates. It was worth 70 of
+  `FieldArrowsAddToRender`'s 86 rows, and parenthesising the pointer form
+  (`(s32)buf + (i * 0x10 + 0x40C0)`) does *not* reach it -- fold reassociates
+  regardless once the base is a pointer.
+* **Assign the field whose value takes longest to compute first, and sched2
+  fills the load's delay slot with the short one.** `p->v0 = 0xD0;` before
+  `p->u0 = (D_8011446C * 4 & 0x30) + 0x30;` issues the two-insn v0 store
+  immediately and leaves a `nop` after the `lhu`; written the other way round
+  the six-insn u0 chain starts first and the v0 store lands in its shadow,
+  which is what the target has. Two rows and, here, the last insertion. The
+  tell is a `nop` right after a global load with an unrelated short store
+  sitting two slots above it.
+* **The same packet reached two ways in one loop is not untidiness.** In
+  `FieldArrowsAddToRender` the target writes `u0`/`v0` through
+  `((struct FieldRenderData*)(i * 0x10 + (s32)buf))->Arrows[K]` -- base
+  register `i * 0x10 + buf`, displacement 0x400C/0x40CC -- and `x0`/`y0`/`clut`
+  through the plain `buf->Arrows[i + K]`, which computes `(i + K) * 0x10`.
+  Same byte, two different address computations, both present in one loop
+  body. When m2c emits two temporaries for what is obviously one object,
+  reproduce both rather than picking the tidier one.
 * **A hardware address used a dozen times wants a named pointer local; gcc
   will not spend a callee-saved register on a constant by itself.** Written as
   `*(s32*)0x1F800004` at every access, gcc rematerialises `lui <t>,0x1f80`
