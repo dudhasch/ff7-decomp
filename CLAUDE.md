@@ -1258,6 +1258,22 @@ a near-miss, in rough order of frequency:
   givs, so the two increments came out swapped as well: 15 rows to 3 on one
   statement. When a diff shows the target storing to the same address twice,
   stop looking for a scheduling explanation.
+* **When two locals hold each other's register and nothing you write moves
+  them, you are looking at `allocno_compare`, and only two of its three terms
+  are reachable from C.** gcc 2.6.3 sorts global allocnos by
+  `floor_log2(n_refs) * n_refs / live_length * size` and breaks ties by
+  *allocno number*, which follows pseudo creation order and therefore
+  declaration order. So: if swapping the declarations changes nothing, the
+  priorities are not tied and the lever has to be the reference count or the
+  live range — not the order. And `n_refs` is weighted by loop depth
+  (`REG_N_REFS += loop_depth` in flow), which is why a value referenced inside
+  an inner loop beats a loop bound referenced only in the outer one. Three
+  functions in `src/field/` are parked on exactly this and all three read as
+  pure register renaming: `HandleKawaiDataInModel` (s5/s6, `faceSel` against a
+  loop-top constant), `FieldModelStructInit` (a3/t0, the counter against a
+  pointer copy) and `KawaiLightingApplyToPolyColor` (t2/t3, a loop count
+  against an inner-loop snapshot). Before spending a budget on one of them,
+  work out which term you can change; if the answer is none, park it.
 * **Declaration order is inert *except* between two locals of the same type
   that are live at the same time.** CLAUDE.md's standing rule (measured on
   `func_801B009C`, five permutations, no change) holds for values that never
