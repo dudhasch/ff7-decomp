@@ -790,63 +790,111 @@ s32 FieldMainLoop(void) {
     }
 }
 
-/* Parse a MIM (field background map image) header and upload its palettes and
- * tile pages to VRAM. arg1 points at the loaded MIM; the header's size and
- * dimensions seed a per-layer state block at D_800E4D90, then each palette
- * (LoadImage) and texture page (LoadTPage) is uploaded with a DrawSync between
- * steps. The $at-rematerialisation wall: the original rebuilds the state-block
- * base through $at on every store where gcc CSEs it. Codegen pinned via
- * MASPSX_OVERRIDE; the #else is the verified C. */
+/* Parse a MIM (field background map image) header and upload its palette and
+ * two texture pages to VRAM. `mim` points at the loaded file; three
+ * variable-length records follow one another, each opening with a 32-bit byte
+ * length, and each seeds a slice of the state block at D_800E4D90. The palette
+ * goes up with LoadImage, the two pages with LoadTPage, with a DrawSync
+ * between every step.
+ *
+ * The body was rewritten from the target in this session; the previous one did
+ * not compile (LoadTPage takes seven arguments, not five) and so had never been
+ * measured. Three things it now gets right:
+ *
+ *   - `mim` itself advances. The target reaches the second record's fields as
+ *     0(a1) and 2(a1) with `addiu a1,a1,4` between the pairs, which is a
+ *     source-level walk; constant displacements off one base would come out as
+ *     a single `addiu a1,a1,0xC`.
+ *   - the second LoadTPage is guarded by `if (*(u32*)&D_800E4DD8[0] != 0)` --
+ *     the `lw v1,D_800E4DD8` / `beqz v1` right after the first LoadTPage.
+ *   - every value read back for the LoadTPage argument lists is spelled as an
+ *     offset from D_800E4D90 rather than through its own symbol. Naming the
+ *     symbol twice -- once for the store, once for the read -- makes gcc
+ *     materialise its %hi/%lo into a register, and with nine such symbols the
+ *     function grew nine callee-saved registers and a 0x50 frame. Reached as
+ *     `(u8*)D_800E4D90 + 0x1C` the address is named once and the assembler
+ *     rebuilds it at the use, which is what the target does. Worth 38 rows,
+ *     and the same mechanism as the byte-offset idiom in CLAUDE.md.
+ *   - `unusedLocals` reserves the 0x28 of stack the original allocates after
+ *     `rect` and never touches; see FieldDebugInitBuffers for the same thing.
+ *
+ * 15 rows out, all of them the two `next = (size >> 2) * 4 - 0xC` chains. The
+ * target computes each in place in the register that held the length
+ * (`srl v1,v1,2` / `sll v1,v1,2` / `addiu v1,v1,-0xc`) and sched2 spreads the
+ * three into the load-delay slots of the three stores in front of them. Ours
+ * allocates the chain to v0, which is also every `lhu`'s destination, so the
+ * anti-dependence pins it after the last store and maspsx fills the slots with
+ * nops. Measured and rejected: one variable instead of two (`size` reassigned),
+ * the chain computed before or after the length store, `next` declared first,
+ * `next` as s32, `((size >> 2) << 2)`, and splitting the `- 0xC` into its own
+ * statement -- all six give the identical 15-row residue, because none of them
+ * changes which hard register the allocator picks. This is permuter work.
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldLoadMimToVram);
 #else
 void FieldLoadMimToVram(s32 arg0, u8* mim) {
     RECT rect;
-    u8* layerData;
+    u8 unusedLocals[0x28];
     u32 size;
-    u32 layerOff;
+    u32 next;
+    u16 unk0A;
 
     size = *(u32*)mim;
+    next = (size >> 2) * 4 - 0xC;
     *(u32*)&D_800E4D94[0] = size;
     *(u16*)&D_800E4D98[0] = *(u16*)(mim + 4);
     *(u16*)&D_800E4D9A[0] = *(u16*)(mim + 6);
     *(u16*)&D_800E4D9C[0] = *(u16*)(mim + 8);
-    layerOff = (size >> 2) * 4 - 0xC;
-    *(u8**)&D_800E4D90[0] = mim + 0xC;
-    *(u16*)&D_800E4D9E[0] = *(u16*)(mim + 0xA);
-    layerData = mim + 0xC + layerOff;
+    unk0A = *(u16*)(mim + 0xA);
+    mim += 0xC;
+    *(u8**)&D_800E4D90[0] = mim;
+    *(u16*)&D_800E4D9E[0] = unk0A;
+    mim += next;
 
     /* First texture page block. */
-    *(u32*)&D_800E4DA8[0] = *(u32*)layerData;
-    *(u16*)&D_800E4DAC[0] = *(u16*)(layerData + 4);
-    *(u16*)&D_800E4DAE[0] = *(u16*)(layerData + 6);
-    *(u16*)&D_800E4DB0[0] = *(u16*)(layerData + 8) * 2;
-    *(u16*)&D_800E4DB2[0] = *(u16*)(layerData + 0xA);
-    *(u8**)&D_800E4DA4[0] = layerData + 0xC;
+    size = *(u32*)mim;
+    next = (size >> 2) * 4 - 0xC;
+    *(u32*)&D_800E4DA8[0] = size;
+    mim += 4;
+    *(u16*)&D_800E4DAC[0] = *(u16*)mim;
+    *(u16*)&D_800E4DAE[0] = *(u16*)(mim + 2);
+    mim += 4;
+    *(u16*)&D_800E4DB0[0] = *(u16*)mim * 2;
+    *(u16*)&D_800E4DB2[0] = *(u16*)(mim + 2);
+    mim += 4;
+    *(u8**)&D_800E4DA4[0] = mim;
+    mim += next;
+
+    /* Second texture page block. */
+    *(u32*)&D_800E4DD8[0] = *(u32*)mim;
+    mim += 4;
+    *(u16*)&D_800E4DDC[0] = *(u16*)mim;
+    *(u16*)&D_800E4DDE[0] = *(u16*)(mim + 2);
+    mim += 4;
+    *(u16*)&D_800E4DE0[0] = *(u16*)mim * 2;
+    *(u16*)&D_800E4DE2[0] = *(u16*)(mim + 2);
+    mim += 4;
+    *(u8**)&D_800E4DD4[0] = mim;
 
     rect.x = 0;
     rect.y = 0x1E0;
     rect.w = 0x100;
     rect.h = 0x10;
     DrawSync(0);
-    LoadImage(&rect, *(u_long**)&D_800E4D90[0]);
+    LoadImage(&rect, *(u_long**)((u8*)D_800E4D94 - 4));
     DrawSync(0);
-    *(u16*)&D_800E4DB4[0] =
-        LoadTPage(*(u_long**)&D_800E4DA4[0], 1, 0, *(u16*)&D_800E4DB0[0],
-                  *(u16*)&D_800E4DB2[0]);
-
-    /* Second texture page block. */
-    *(u32*)&D_800E4DD8[0] = *(u32*)(layerData + 0xC);
-    *(u16*)&D_800E4DDC[0] = *(u16*)(layerData + 0x10);
-    *(u16*)&D_800E4DDE[0] = *(u16*)(layerData + 0x12);
-    *(u16*)&D_800E4DE0[0] = *(u16*)(layerData + 0x14) * 2;
-    *(u16*)&D_800E4DE2[0] = *(u16*)(layerData + 0x16);
-    *(u8**)&D_800E4DD4[0] = layerData + 0x18;
-
-    DrawSync(0);
-    *(u16*)&D_800E4DE4[0] =
-        LoadTPage(*(u_long**)&D_800E4DD4[0], 1, 0, *(u16*)&D_800E4DE0[0],
-                  *(u16*)&D_800E4DE2[0]);
+    *(u16*)&D_800E4DB4[0] = LoadTPage(
+        *(u_long**)((u8*)D_800E4D90 + 0x14), 1, 0,
+        *(s16*)((u8*)D_800E4D90 + 0x1C), *(s16*)((u8*)D_800E4D90 + 0x1E),
+        *(u16*)((u8*)D_800E4D90 + 0x20), *(u16*)((u8*)D_800E4D90 + 0x22));
+    if (*(u32*)((u8*)D_800E4D90 + 0x48) != 0) {
+        DrawSync(0);
+        *(u16*)&D_800E4DE4[0] = LoadTPage(
+            *(u_long**)((u8*)D_800E4D90 + 0x44), 1, 0,
+            *(s16*)((u8*)D_800E4D90 + 0x4C), *(s16*)((u8*)D_800E4D90 + 0x4E),
+            *(u16*)((u8*)D_800E4D90 + 0x50), *(u16*)((u8*)D_800E4D90 + 0x52));
+    }
     DrawSync(0);
 }
 #endif
