@@ -7626,16 +7626,17 @@ s32 OpcodeFuncCppal2(void) {
  * around to entry 0. Two passes, both walking the same pair of indices -- `i`
  * the source entry, `j` the destination one.
  *
- * Three rows, no extra instructions -- all three are the same choice. The
- * target materialises &D_80095DE0 between the `andi` that widens the palette
- * id and the `sll` that scales it; gcc emits the `sll` first. That is the
- * residue OpcodeFuncCppal and OpcodeFuncStpls above are parked on, and it
- * costs one row per loop preheader here, so two. Naming the base in a local
- * (`u8* pal = D_80095DE0;` inside the loop) moves the pair to *before* the
- * `andi` rather than between -- one row off in the other direction, measured
- * here at 27 rows against 13 for the plain form, though it is what the two
- * ADPALs below need. The third row is the loop body swapping $a0 and $v1
- * between the two scaled indices, which is downstream of the same choice. */
+ * The base-address recipe from ADPAL below (widen the id, then `u8* base =
+ * D_80095DE0;`, then the two pointers off `base`) fixes both preheaders and
+ * takes this from 13 rows to 11. What is left is the *second* loop, and it is
+ * the same shape in both RTPAL and RTPAL2: the target expands the load index
+ * before the store index (`sll a0,a2,0x10` on the `for` counter first, then
+ * the body-incremented one), gcc expands the store index first, and the two
+ * scaled addresses then swap $a0 and $v1 all the way to the `lhu`/`sh`. The
+ * first loop, whose `for` counter is the *store* index, matches exactly.
+ * Measured and rejected: hoisting the load into a `u16 color` temp before the
+ * store, in the second loop alone and in both loops -- neither changes a row,
+ * and doing it in both makes RTPAL2 worse. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncRtpal);
 #else
@@ -7656,16 +7657,20 @@ s32 OpcodeFuncRtpal(void) {
     start = FieldEventReadMemoryU8(4, 5);
     i = 0;
     for (j = start; j <= count; j++) {
-        u16* to = (u16*)(D_80095DE0 + dst * 32);
-        u16* from = (u16*)(D_80095DE0 + src * 32);
+        s32 dp = dst;
+        u8* base = D_80095DE0;
+        u16* to = (u16*)(base + dp * 32);
+        u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
         i++;
     }
     j = 0;
     for (i = count - start; i <= count; i++) {
-        u16* to = (u16*)(D_80095DE0 + dst * 32);
-        u16* from = (u16*)(D_80095DE0 + src * 32);
+        s32 dp = dst;
+        u8* base = D_80095DE0;
+        u16* to = (u16*)(base + dp * 32);
+        u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
         j++;
@@ -7706,18 +7711,20 @@ s32 OpcodeFuncRtpal2(void) {
     end += srcStart;
     i = srcStart;
     for (j = dstStart; j <= end; j++) {
-        u8* pal = D_80095DE0;
-        u16* to = (u16*)(pal + dst * 32);
-        u16* from = (u16*)(pal + src * 32);
+        s32 dp = dst;
+        u8* base = D_80095DE0;
+        u16* to = (u16*)(base + dp * 32);
+        u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
         i++;
     }
     j = srcStart;
     for (i = end - dstStart; i <= end; i++) {
-        u8* pal = D_80095DE0;
-        u16* to = (u16*)(pal + dst * 32);
-        u16* from = (u16*)(pal + src * 32);
+        s32 dp = dst;
+        u8* base = D_80095DE0;
+        u16* to = (u16*)(base + dp * 32);
+        u16* from = (u16*)(base + src * 32);
 
         to[j] = from[i];
         j++;
@@ -8464,6 +8471,19 @@ s32 OpcodeFuncSolid(void) {
 /* Every instruction matches except the tail merge: gcc cross-jumps the whole
  * shared PC_INC(7) tail, where the original keeps the
  * &g_FieldScriptPC[g_CurrentEntity] computation duplicated in both arms. */
+/* 23 rows, and the whole of it is one hoist in the else arm: gcc computes
+ * `g_FieldState->viewOffsetNumSteps = 0;` *before* the FieldEventReadMemoryS16
+ * call -- it loads g_FieldState into $v0 and puts the `sb zero,0x12(v0)` in the
+ * call's delay slot -- where the target does not touch g_FieldState until after
+ * the call and then shares one load between the 0x12 and 0x16 stores. Because
+ * g_FieldState is a pointer *global*, every store through it may alias it, so
+ * gcc reloads it between statement groups; the grouping is the tell, and the
+ * target's is {0x12,0x16}, {0x13}, {0x14,0x18,0x1a} against our {0x12},
+ * {0x13,0x16}, {0x14}, {0x18,0x1a}. Measured and rejected: hoisting the call
+ * result into an `s16` or `s32` local ahead of both stores (22 rows, 3
+ * inserted) and swapping the two statements so the call is first (18 rows, 5
+ * inserted) -- both trade changed rows for inserted ones and are worse.
+ * Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
@@ -8803,12 +8823,18 @@ s32 FieldEventSplitSet(u8 entityId, s16 x, s16 y, s32 turnDir, s32 a4) {
  *     a different one. See the EscapeCaptureScreen note in CLAUDE.md.
  * Measured and rejected: modelIdx as s16 rather than u8, and dropping the
  * modelIdx local for the inlined `g_EntityToModel[entityId]` -- gcc CSEs it
- * to the same thing and neither changes a single instruction. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventSplitJoinSetMove);
-#else
+ * to the same thing and neither changes a single instruction.
+ *
+ * The last ten rows were the model-entry index: it needs its own `s32
+ * entryIdx` local in *both* arms, not just the one the diff pointed at.
+ * Written inline inside the `&g_FieldModelData->modelEntries[...]` subscript
+ * the load and the g_FieldModelData base compete for $a0/$a1/$v1 and the
+ * naming propagates through the rest of the block; split out, each gets its
+ * own pseudo. Fixing only the arm the diff named changes nothing -- the
+ * allocator sees the whole function. */
 void FieldEventSplitJoinSetMove(
     s16 entityId, s16 x, s16 y, s16 steps, u16 snapToLeader) {
+    s32 entryIdx;
     VECTOR from;
     VECTOR to;
     s32 sqrDist;
@@ -8862,9 +8888,8 @@ void FieldEventSplitJoinSetMove(
                     g_FieldModels[g_EntityToModel[entityId]].animCurrentFrame =
                         0;
                     modelIdx = g_EntityToModel[entityId];
-                    entry =
-                        &g_FieldModelData->modelEntries
-                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                    entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+                    entry = &g_FieldModelData->modelEntries[entryIdx];
                     anims = entry->modelData + entry->animationOffset;
                     g_FieldModels[modelIdx].animLastFrame =
                         *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId *
@@ -8879,9 +8904,8 @@ void FieldEventSplitJoinSetMove(
                     g_FieldModels[g_EntityToModel[entityId]].animCurrentFrame =
                         0;
                     modelIdx = g_EntityToModel[entityId];
-                    entry =
-                        &g_FieldModelData->modelEntries
-                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                    entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+                    entry = &g_FieldModelData->modelEntries[entryIdx];
                     anims = entry->modelData + entry->animationOffset;
                     g_FieldModels[modelIdx].animLastFrame =
                         *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId *
@@ -8895,7 +8919,6 @@ void FieldEventSplitJoinSetMove(
         }
     }
 }
-#endif
 
 /* Poll one party member's walk during a SPLIT or JOIN. ActionState 2 means the
  * move just finished, so release the scripted-move lock and restore the
@@ -9338,7 +9361,16 @@ void SystemMessageSetCharName(u8 charId, u8 nameId);
  *     switch index into one variable, both cost ~13 rows.
  * Measured and rejected: a u8 temp for the FieldEventReadMemoryU8 result
  * (no change), a u16 itemId (no change). Permuter scratch imported at base
- * score 475. */
+ * score 475.
+ *
+ * Now 5 rows, all in the SMSPD arm, and all one thing: the target issues the
+ * `nor` that complements FieldEventReadMemoryU8's result *after* the
+ * g_CurrentEntity load PC_INC needs, and keeps it in $v0; gcc issues it
+ * immediately after the call and has to park it in $a1 because $v0 goes to
+ * &g_FieldScriptPC. It is post-reload scheduling with equal priorities on both
+ * sides. Measured and rejected, all identical: a named `u8 spd` holding the
+ * call result, a named local holding the complement, an `(s32)` cast on the
+ * operand, and `-x - 1` in place of `~x`. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncSpcal);
 #else
