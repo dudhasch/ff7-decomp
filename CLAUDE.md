@@ -2109,6 +2109,43 @@ bin/str disks/us/MENU/SAVEMENU.MNU 12DF8
 * Per-overlay symbol files are `config/symbols.<overlay>.txt` or
   `config/symbols.<overlay>.us.txt`.
 
+**A symbol referenced by a `MASPSX_OVERRIDE` function cannot be renamed.**
+splat writes `nonmatchings/<fn>.s` only for functions the `.c` still holds as
+`INCLUDE_ASM`; a pinned function's `.s` is frozen at the symbol names of the
+moment it stopped being one. Rename the symbol and splat rewrites every
+*generated* `.s` to the new name while the frozen ones keep the old, which no
+longer exists — so `make build` dies with
+
+```
+src/field/field4.c:(.text+0xc38): undefined reference to `D_800DF520'
+```
+
+naming the pinned function, not the symbol config. Check before renaming, and
+check with a **multiline-aware** matcher: `clang-format` wraps a long
+`MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", SomeLongName);` across two
+lines, so a line-based `grep -o 'MASPSX_OVERRIDE([^)]*)'` silently under-counts
+— it found 37 of the field overlay's 42, and the five it missed were exactly
+the ones that broke the build.
+
+```shell
+python3 - <<'EOF'
+import io, re, glob, os
+frozen = []
+for f in glob.glob('src/field/field*.c'):
+    u = os.path.basename(f)[:-2]
+    src = io.open(f, encoding='utf-8').read()
+    for m in re.finditer(r'MASPSX_OVERRIDE\(\s*"[^"]*"\s*,\s*(\w+)\s*\)', src, re.S):
+        frozen.append('asm/us/field/nonmatchings/%s/%s.s' % (u, m.group(1)))
+for sym in ('D_800DF520', 'D_800E0200'):
+    print(sym, [p for p in frozen if re.search(r'%s' % sym,
+                io.open(p, encoding='utf-8', errors='ignore').read())])
+EOF
+```
+
+An empty list means the rename is safe; anything else means the symbol is
+locked until that function matches. There is no alias escape — splat rejects
+two names at one vram with `Duplicate symbol detected!`.
+
 ## Repository map
 
 | Path | Contents |

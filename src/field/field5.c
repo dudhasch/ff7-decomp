@@ -2181,7 +2181,7 @@ void FieldDebugPageResetStrings(s16 page) {
     colors = &D_800E08A8[page * 378];
     off = page * 378;
     while (i < 24) {
-        D_800E0758[off] = 0;
+        g_FieldDebugRowText[off] = 0;
         *colors++ = 0;
         i++;
         off += 14;
@@ -2349,9 +2349,9 @@ void FieldDebugRenderString(s16 arg0, s16 arg1, u8* arg2, s16 arg3, s32 arg4) {
 
 /* The debug pages are a 378-byte record: a 0x10-byte header whose fields have
  * their own splat symbols (D_800E0748 = x, 074A = y, 074C = w, 074E = h,
- * 0754 = headRow) followed by 362 bytes of row text at D_800E0758. Only the
- * header offsets the two Add*NextDebugRow functions reach off `rows` are given
- * names here; everything else keeps its D_ symbol. */
+ * 0754 = headRow) followed by 362 bytes of row text at g_FieldDebugRowText.
+ * Only the header offsets the two Add*NextDebugRow functions reach off `rows`
+ * are given names here; everything else keeps its D_ symbol. */
 typedef struct {
     s16 unk00[6];
     s16 headRow;
@@ -2371,9 +2371,9 @@ typedef struct {
  *     the assembler rebuilds it through $at each time, which is what the
  *     original does.
  *   - the store of the incremented head row goes through `hdr`, a pointer to
- *     the record header derived from the *text* symbol (`D_800E0758 - 0x10`).
- *     That is where `addiu s0,s0,-0x10` / `sh v0,0xc(s0)` comes from: `rows`
- *     keeps the bare symbol live in a callee-saved register across the call,
+ *     the record header derived from the *text* symbol (`g_FieldDebugRowText -
+ * 0x10`). That is where `addiu s0,s0,-0x10` / `sh v0,0xc(s0)` comes from:
+ * `rows` keeps the bare symbol live in a callee-saved register across the call,
  *     and the header base is that register adjusted, not a fresh %hi/%lo.
  *     Writing the store as `*(s16*)(rows - 4)` folds the two constants in the
  *     tree and gives `sh v0,-4(s0)` instead -- 9 rows out. */
@@ -2383,9 +2383,9 @@ s32 AddStrNextDebugRow(s16 page, const char* str) {
     FieldDebugPageHdr* hdr;
 
     off = page * 378;
-    rows = D_800E0758 + off;
+    rows = g_FieldDebugRowText + off;
     FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
-    hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
+    hdr = (FieldDebugPageHdr*)(g_FieldDebugRowText - 0x10 + off);
     hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
     if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
         *(s16*)((u8*)D_800E0754 + off)) {
@@ -2398,7 +2398,8 @@ s32 AddStrNextDebugRow(s16 page, const char* str) {
 /* Append a coloured line to a debug page, wrapping back to the top row once the
  * page's pixel height can no longer hold another 10-pixel row. Same two
  * spellings as AddStrNextDebugRow above, plus the colour byte reached as
- * `D_800E0758 + 0x150 + off` so that its base is the live `rows` register too.
+ * `g_FieldDebugRowText + 0x150 + off` so that its base is the live `rows`
+ * register too.
  *
  * The head-row increment has to be a named `s16` local computed *before* the
  * header pointer, not written inline into `hdr->headRow`. Inline, the store's
@@ -2417,12 +2418,12 @@ s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
     s16 next;
 
     off = page * 378;
-    rows = D_800E0758 + off;
+    rows = g_FieldDebugRowText + off;
     FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
-    colors = (u8*)(D_800E0758 + 0x150 + off);
+    colors = (u8*)(g_FieldDebugRowText + 0x150 + off);
     colors[*(s16*)((u8*)D_800E0754 + off)] = color;
     next = *(s16*)((u8*)D_800E0754 + off) + 1;
-    hdr = (FieldDebugPageHdr*)(D_800E0758 - 0x10 + off);
+    hdr = (FieldDebugPageHdr*)(g_FieldDebugRowText - 0x10 + off);
     hdr->headRow = next;
     if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
         *(s16*)((u8*)D_800E0754 + off)) {
@@ -2433,7 +2434,7 @@ s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
 }
 
 s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
-    char* rows = D_800E0758 + page * 378;
+    char* rows = g_FieldDebugRowText + page * 378;
 
     FieldDebugStringCopy(&rows[row * 14], str);
     D_8009D824 = 1;

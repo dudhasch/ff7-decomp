@@ -1830,6 +1830,7 @@ g_FieldLzsInfo = 0x800da5c0;
 g_FieldFileTable = 0x800da5c4;
 g_WmPreSector = 0x800def80;
 g_WmPreSize = 0x800def84;
+g_FieldAtanTable = 0x800def88;
 g_FieldDebugDigits = 0x800e0208;
 g_FieldOpcodes = 0x800e0228;
 g_RandomTable = 0x800e0638;

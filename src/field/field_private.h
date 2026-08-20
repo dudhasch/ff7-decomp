@@ -116,7 +116,7 @@ extern u8 D_800E0751[];
 extern u8 D_800E0752[];
 extern s16 D_800E0754[];
 extern s16 D_800E0756[];
-extern char D_800E0758[];
+extern char g_FieldDebugRowText[];
 extern u8 D_800E08A8[];
 extern u8 D_800E08C0[];
 extern u8 D_800E1028[];

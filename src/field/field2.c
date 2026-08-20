@@ -513,13 +513,13 @@ s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
 
 s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
 
-extern u8 D_800DEF88[];
+extern u8 g_FieldAtanTable[];
 
 /* Direction (0-255) from one point to another. The third parameter is
  * in/out: it is written with the squared distance, then *overwritten with the
  * distance itself* -- callers compare it against a plain range, not a squared
  * one. The slope of each axis is taken in 12-bit fixed point, divided down by
- * 32, and the arctan table D_800DEF88 is indexed by whichever axis is the
+ * 32, and the arctan table g_FieldAtanTable is indexed by whichever axis is the
  * minor one; the eight-arm ladder is the quadrant correction and every arm
  * shares one final `+ 0x40` and one `& 0xFF`.
  *
@@ -540,7 +540,8 @@ extern u8 D_800DEF88[];
  *     locals the slopes land in caller-saved registers and the whole ladder
  *     renames; reusing dx/dy lets them coalesce into the registers dx and dy
  *     already hold, which is what the target does.
- * And the last row: the negative table index is `D_800DEF88[-dy * 2]`, not
+ * And the last row: the negative table index is `g_FieldAtanTable[-dy * 2]`,
+ * not
  * `[-(dy * 2)]`. Negating first makes gcc compute the index into its own
  * register before materialising the table base, so the shift can be stolen
  * into the preceding `blez`'s delay slot and the base is subtracted from;
@@ -562,29 +563,29 @@ u8 FieldEntityDirByVec(VECTOR* from, VECTOR* to, s32* sqrDist) {
     if (dx * dx > dy * dy) {
         if (dx > 0) {
             if (dy > 0) {
-                angle = D_800DEF88[dy * 2];
+                angle = g_FieldAtanTable[dy * 2];
             } else {
-                angle = -D_800DEF88[-dy * 2];
+                angle = -g_FieldAtanTable[-dy * 2];
             }
         } else {
             if (dy > 0) {
-                angle = -0x80 - D_800DEF88[dy * 2];
+                angle = -0x80 - g_FieldAtanTable[dy * 2];
             } else {
-                angle = D_800DEF88[-dy * 2] - 0x80;
+                angle = g_FieldAtanTable[-dy * 2] - 0x80;
             }
         }
     } else {
         if (dy > 0) {
             if (dx > 0) {
-                angle = 0x40 - D_800DEF88[dx * 2];
+                angle = 0x40 - g_FieldAtanTable[dx * 2];
             } else {
-                angle = D_800DEF88[-dx * 2] + 0x40;
+                angle = g_FieldAtanTable[-dx * 2] + 0x40;
             }
         } else {
             if (dx > 0) {
-                angle = D_800DEF88[dx * 2] - 0x40;
+                angle = g_FieldAtanTable[dx * 2] - 0x40;
             } else {
-                angle = -0x40 - D_800DEF88[-dx * 2];
+                angle = -0x40 - g_FieldAtanTable[-dx * 2];
             }
         }
     }
