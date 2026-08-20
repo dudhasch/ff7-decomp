@@ -543,31 +543,26 @@ void FieldMain(void) {
 
 #endif
 
-const u32 D_800A0024[] = {0x00000000, 0x000801E0};
-const u32 D_800A002C[] = {0x00E80000, 0x000801E0};
-const u32 D_800A0034[] = {0x01D00000, 0x000801E0};
-const u32 D_800A003C[] = {0x00000000, 0x00080140};
-const u32 D_800A0044[] = {0x00E80000, 0x00080140};
-const u32 D_800A004C[] = {0x01D00000, 0x00080140};
-
 /* The field module's per-frame loop: flip the double buffer, clear both OTs,
  * run the event script and the entity/background updates, then hand the frame
  * to the GPU. Returns only when the event script asks for a different module.
  *
- * ONE instruction out, and it is not codegen: maspsx omits the load-delay nop
- * the original assembler put at the loop-top join label. The sequence is
+ * This function was one instruction out for a long time, and the instruction
+ * was not codegen -- maspsx dropped the load-delay nop the original assembler
+ * put at the loop-top join label:
  *
  *     lhu  v0,%lo(D_80075DEC)(v0)    <- dead re-read, from `D_80075DEC++`
  *   .Ljoin:
- *     nop                            <- present in the target, absent here
- *     lui  v0,%hi(D_80075DEC)
+ *     nop
+ *     lui  v0,%hi(D_80075DEC)        <- the next `lhu v0,D_80075DEC` macro
  *
- * On the R3000 that nop is required: the lhu writes v0 a cycle late and would
- * clobber the lui. maspsx only asks whether the next instruction *reads* the
- * loaded register (`does not load from $2`) and looks straight past the label,
- * so it drops the nop; the write-after-write hazard is invisible to it. Proof
- * that nothing else is wrong: pipe cc1 through maspsx, insert that single nop
- * after the label, assemble, and diff.py reports zero rows.
+ * A load with a symbolic operand and no base register is expanded by the
+ * assembler through its own destination register, not $at, so its `lui` lands
+ * in the delay slot of a preceding load into that same register. maspsx only
+ * asked whether the next instruction *reads* the loaded register, and nothing
+ * in the text of `lhu $2,D_80075DEC` does. Fixed in tools/maspsx
+ * (_next_load_clobbers_reg, with tests in tests/test_symbol_load_clobber.py);
+ * that change adds exactly one instruction to the whole build, this one.
  *
  * Everything else in here was derived and is worth keeping:
  *   - `s32` return, not `void`. v0 is then live at the epilogue, so gcc's
@@ -578,8 +573,12 @@ const u32 D_800A004C[] = {0x01D00000, 0x00080140};
  *   - `D_80075DEC++`, not `D_80075DEC = D_80075DEC + 1`. The variable is
  *     volatile, and only the increment form re-reads it afterwards - three
  *     instructions the plain assignment does not emit.
- *   - the six RECTs are locals with aggregate initialisers, which is what puts
- *     the blobs above in .rodata and copies them in with lwl/lwr.
+ *   - the six RECTs are locals with aggregate initialisers, which is what
+ *     emits their blobs into .rodata at 0x800A0024..0x800A0054 and copies them
+ *     in with lwl/lwr. Do not also declare them at file scope: while this
+ *     function was parked the .s referenced six `const u32 D_800A0024[]`
+ *     definitions, and leaving those in beside the compiled C emits every
+ *     blob twice and grows the overlay by 48 bytes.
  *   - D_8009A060 must NOT be volatile: volatile pins its load ahead of the
  *     `li v0,1`, and the target has the constant first (in the branch delay
  *     slot of the movie-stream test).
@@ -588,9 +587,6 @@ const u32 D_800A004C[] = {0x01D00000, 0x00080140};
  *     what lets s4 become the `addiu s4,s2,1` base the target uses for
  *     pcPosX/pcPosY/pcWalkMeshId.
  *   - `/ 4096`, not `>> 12`: the target has the bgez/addiu 0xfff rounding. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMainLoop);
-#else
 
 extern FieldWalkmesh** D_8009A044;
 extern s16* D_800E4274;
@@ -793,8 +789,6 @@ s32 FieldMainLoop(void) {
         DrawOTag(&buf->OtUi);
     }
 }
-
-#endif
 
 /* Parse a MIM (field background map image) header and upload its palettes and
  * tile pages to VRAM. arg1 points at the loaded MIM; the header's size and

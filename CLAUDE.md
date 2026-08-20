@@ -615,21 +615,31 @@ a near-miss, in rough order of frequency:
   written as the body's last statement the two come out in the other order and
   land in different branch delay slots. Eight rows across four loops, and no
   other spelling reaches it.
-* **One missing `nop` after a load that a label follows is maspsx, not you.**
-  maspsx decides a load needs no delay-slot `nop` by asking whether the next
-  instruction *reads* the loaded register — and it looks straight past a label
-  to find that instruction. Both halves are wrong for
-  `lhu $2,sym` / `.Ljoin:` / `lhu $2,sym`: the second load expands to
-  `lui $2,%hi` first, and on the R3000 the pending load writes `$2` a cycle
-  late and clobbers that `lui`. The original assembler emitted the `nop`;
-  maspsx prints `#nop # DEBUG: '...' does not load from $2` and drops it.
-  `FieldMainLoop` is byte-identical apart from this one instruction. Before
-  spending a budget on such a residue, prove where it comes from — pipe cc1
-  through maspsx to a file, insert the `nop` by hand, assemble with the flags
-  from `ninja -t commands`, and re-run `diff.py`. Zero rows means the C is
-  finished and the gap is in `tools/maspsx` (a fork under this project's own
-  account, so it is fixable — but a submodule change is not covered by
-  `make submit`).
+* **A residue of exactly one `nop` may be the assembler, not the C — and
+  `tools/maspsx` is a fork under this project's own account, so it is
+  fixable.** This one has been fixed, and the shape of it is the lesson.
+  maspsx decided a load needed no delay-slot `nop` by asking whether the next
+  instruction *reads* the loaded register. Nothing in the text of
+  `lhu $2,D_80075DEC` does — but a load with a symbolic operand and no base
+  register is expanded by the assembler through its own destination register
+  rather than `$at`, so its `lui $2,%hi(...)` lands in the delay slot of a
+  preceding load into `$2` and the original assembler protected it. The
+  give-away in maspsx's own output is
+  `#nop # DEBUG: '...' does not load from $2` sitting between two loads into
+  the same register. `_next_load_clobbers_reg` now catches it, with tests in
+  `tools/maspsx/tests/test_symbol_load_clobber.py`; across the whole build
+  the rule fires exactly once, in `FieldMainLoop`, which is now a match.
+
+  The method generalises. Before spending a budget on a one-instruction
+  residue, prove where it comes from: pipe cc1 through maspsx to a file,
+  insert the instruction by hand, assemble with the flags from
+  `ninja -t commands`, and re-run `diff.py`. Zero rows means the C is finished.
+  Then fix maspsx and run its own suite (`cd tools/maspsx && python3 -m
+  unittest discover -s tests -t .`) plus a full `make build` — a hazard rule is
+  global, and the only evidence that it is narrow enough is nineteen `OK`s. A
+  submodule change is not covered by `make submit`; stage it by hand, and note
+  that the worktrees carry the submodule with its `.git` renamed to
+  `.git-disabled`, so the commit has to be made in the main checkout.
 * **A `void` function fills the delay slot of a branch to its own epilogue; a
   non-`void` one cannot.** gcc's delay-slot pass steals the insn *after* a
   conditional branch when that insn is dead on the taken path — and `li v0,K`
