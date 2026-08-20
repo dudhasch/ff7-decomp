@@ -1215,30 +1215,40 @@ extern FieldBgOtSlot D_8009ACA2;
  *   - the wrap test is an `||` of two `<=`, not `!(a && b)`; gcc 2.6.3 does not
  *     apply De Morgan and the two spellings schedule differently.
  *
- * 1 instruction out and 211 rows of register naming. What is left is delay
- * slots: the target wastes a slot after each of the four wrap tests' camera
- * loads (it evaluates the sprite coordinate first, which no spelling of the
- * comparison reproduced -- five were measured), and fills the entity-check
- * branch in layer 3 with the join block's `sll` where this build emits a nop
- * and the `sll` after the join. Being those four instructions short shifts
- * every later branch immediate, and the temporaries all sit one register off:
- * the target puts `sprite` in t3 and the run walk in t7, this build t0 and t5.
+ * 204 rows: 1 instruction out and 203 rows of register naming. The four wrap
+ * tests read `buf->Bg2[sprite].x0` / `.y0` directly at every use rather than
+ * through an `s16 x` / `s16 y` temporary -- decomp-permuter found it (score
+ * 1050 -> 765) and it measures 244 rows -> 204 against the overlay, the single
+ * largest step this function has taken. It is the same lever as the "read a
+ * loop-invariant global directly" bullet in CLAUDE.md, applied to a struct
+ * field: the temporary is a source statement that lands among the surrounding
+ * code, where the repeated reference is a common subexpression cse places
+ * itself. Inlining only the layer-3 pair (the permuter's literal find) is worth
+ * 18 of the 40 rows; all four is the rest.
+ *
+ * What is left is delay slots: the target wastes a slot after each of the four
+ * wrap tests' camera loads (it evaluates the sprite coordinate first, which no
+ * spelling of the comparison reproduced -- five were measured), and fills the
+ * entity-check branch in layer 3 with the join block's `sll a0,a1,0x2` where
+ * this build emits a nop and the `sll` after the join. That one `sll` is the
+ * *only* non-register row in 889 instructions, and it is a consequence rather
+ * than a cause: the target has $a0 free there because it addresses the trigger
+ * byte through $v1, this build through $a0.
  * The &run[2]-versus-&run[1] induction variable this note used to blame has
  * been measured and is not the problem: both builds compute the same two
  * bases, `addiu <r>,v0,0x10` and `addiu <r>,v0,0x14` at 0x2328, and differ
  * only in which register each lands in. Referencing run[2] before run[1] in
  * all four walks was measured -- 236 rows against 233 -- and does not move the
  * allocation either. Read as a whole the residue is a *permutation* of the
- * caller-saved set and nothing else: the target holds the run fields and the
- * sprite cursor in {t7, t1, t5, t2, t6, t8, t0, t9} where this build uses
- * {t5, t2, t6, t3, t7, t1, t8, t9} -- the same registers, the same count, and
- * every one of the 233 rows a rename. No missing or extra hoist, no frame
- * difference and no scheduling difference is left to find by reading; this one
- * belongs to decomp-permuter now. Measured and rejected: goto loops (434 rows,
- * no hoisting at all), `break` out of the loops (396), s32 wrap temporaries
- * (frame 0x30, 320 rows), a separate s32 temporary loaded before the wrap test
- * (278), locals for D_8011448C/D_801144C8/g_FieldTriggers (305), and both
- * `!(a && b)` and `a > lo && a < hi` for the wrap test (251).
+ * caller-saved set and nothing else: the same registers, the same count, and
+ * every row a rename. No missing or extra hoist and no frame difference is
+ * left to find by reading; this one belongs to decomp-permuter now, and it
+ * should be re-imported against this body rather than the old one. Measured
+ * and rejected: goto loops (434 rows, no hoisting at all), `break` out of the
+ * loops (396), s32 wrap temporaries (frame 0x30, 320 rows), a separate s32
+ * temporary loaded before the wrap test (278), locals for
+ * D_8011448C/D_801144C8/g_FieldTriggers (305), and both `!(a && b)` and
+ * `a > lo && a < hi` for the wrap test (251).
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddBackgroundToRender);
@@ -1248,8 +1258,6 @@ void AddBackgroundToRender(struct FieldRenderData* buf) {
     s16* run;
     s16 count;
     s16 sprite;
-    s16 x;
-    s16 y;
     s32 otSlot;
     u8 entity;
 
@@ -1328,24 +1336,26 @@ layer3:
                 do {
                     if (buf->Bg2[sprite].x0 <= D_80071A48[1].x - 0x160 ||
                         D_80071A48[1].x <= buf->Bg2[sprite].x0) {
-                        x = buf->Bg2[sprite].x0;
-                        if (x < D_80071A48[1].x - 0xA0) {
+                        if (buf->Bg2[sprite].x0 < D_80071A48[1].x - 0xA0) {
                             buf->Bg2[sprite].x0 =
-                                x + ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
+                                buf->Bg2[sprite].x0 +
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
                         } else {
                             buf->Bg2[sprite].x0 =
-                                x - ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
+                                buf->Bg2[sprite].x0 -
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapX3;
                         }
                     }
                     if (buf->Bg2[sprite].y0 <= D_80071A48[1].y - 0x100 ||
                         D_80071A48[1].y <= buf->Bg2[sprite].y0) {
-                        y = buf->Bg2[sprite].y0;
-                        if (y < D_80071A48[1].y - 0x70) {
+                        if (buf->Bg2[sprite].y0 < D_80071A48[1].y - 0x70) {
                             buf->Bg2[sprite].y0 =
-                                y + ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
+                                buf->Bg2[sprite].y0 +
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
                         } else {
                             buf->Bg2[sprite].y0 =
-                                y - ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
+                                buf->Bg2[sprite].y0 -
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapY3;
                         }
                     }
                     entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
@@ -1377,24 +1387,26 @@ layer4:
                 do {
                     if (buf->Bg2[sprite].x0 <= D_80071A48[2].x - 0x160 ||
                         D_80071A48[2].x <= buf->Bg2[sprite].x0) {
-                        x = buf->Bg2[sprite].x0;
-                        if (x < D_80071A48[2].x - 0xA0) {
+                        if (buf->Bg2[sprite].x0 < D_80071A48[2].x - 0xA0) {
                             buf->Bg2[sprite].x0 =
-                                x + ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
+                                buf->Bg2[sprite].x0 +
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
                         } else {
                             buf->Bg2[sprite].x0 =
-                                x - ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
+                                buf->Bg2[sprite].x0 -
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
                         }
                     }
                     if (buf->Bg2[sprite].y0 <= D_80071A48[2].y - 0x100 ||
                         D_80071A48[2].y <= buf->Bg2[sprite].y0) {
-                        y = buf->Bg2[sprite].y0;
-                        if (y < D_80071A48[2].y - 0x70) {
+                        if (buf->Bg2[sprite].y0 < D_80071A48[2].y - 0x70) {
                             buf->Bg2[sprite].y0 =
-                                y + ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
+                                buf->Bg2[sprite].y0 +
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
                         } else {
                             buf->Bg2[sprite].y0 =
-                                y - ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
+                                buf->Bg2[sprite].y0 -
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapY4;
                         }
                     }
                     if (D_80071A48[2].x - 0x160 < buf->Bg2[sprite].x0 &&

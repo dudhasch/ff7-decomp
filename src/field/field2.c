@@ -2433,18 +2433,43 @@ void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
 /* One record of a TDB ("texture delta") chunk inside a BSX model file. */
 typedef struct {
     /* 0x00 */ u32 opcode; // 0=memcpy, 1=page patch, 2=CLUT patch, 3=LoadImage
-    /* 0x04 */ u32 srcOff; // source RECT (0,3) / pixels (1,2), rel. to tdb
+    /* 0x04 */ u32 srcOff; // source pixels, relative to the tdb chunk
     /* 0x08 */ u32 size;   // memcpy byte count (op 0)
-    /* 0x0C */ u32 dstOff; // dest rel. tdb (0) / page idx (1) / CLUT idx (2) /
-                           // RECT (3)
-} TdbRecord;               // size 0x14
+    /* 0x0C */ u32 dst;    // absolute dest (0) / page idx (1) / CLUT idx (2) /
+                           // with dst2, the RECT LoadImage takes (op 3)
+    /* 0x10 */ u32 dst2;
+} TdbRecord; // size 0x14
 
 /* Apply a TDB ("texture delta") chunk from a BSX model file. Each record
  * relocates a raw blob (op 0), splices one 0x200-byte page (op 1) or one
  * 0x20-byte CLUT (op 2) into the shared model texture block at *D_800DFCA0, or
- * uploads an embedded image straight to VRAM (op 3). The fixed-size copies are
- * gcc's inlined memcpy expansion (dual lwl/lw form) — a scheduler/expansion
- * coupling. Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
+ * uploads an embedded image straight to VRAM (op 3).
+ *
+ * 22 rows, down from 44 changed / 7 inserted. Four of the corrections were
+ * program, not codegen, and each is readable straight off the target:
+ *   - the guard is `count == 0`, not `count <= 0` (one `beqz`, no `blez`);
+ *   - the record is indexed, `rec[i].f`, not walked with `rec += 0x14` — the
+ *     walking form makes `rec` a biv and costs the reduced base (see the
+ *     FieldModelLoadBcx bullet in CLAUDE.md);
+ *   - the struct is five words, not four. A four-word TdbRecord makes `rec[i]`
+ *     stride 0x10 while the target's scaled index is 0x14, and every field
+ *     offset in the diff still looks right because the *first* record's are;
+ *   - op 0's destination is absolute (`(u8*)rec[i].dst`), not `tdb + off`, and
+ *     op 3's RECT lives inside the record: the target sets a0 = &rec->dst in
+ *     the `beq v1,v0,<case3>` delay slot, which no `tdb + off` spelling
+ *     reaches.
+ * The residue is one register tie-break in the case-1/case-2 arms. Target:
+ *   lw a0,%lo(D_800DFCA0) / lhu v0,4(a0) / lw v0,8(a0) / nop / addu v0,a0,v0
+ *   / lw a0,4(s0)
+ * ours holds `block` in $a1 and issues the `lw a0,4(s0)` (srcOff) *before* the
+ * addu, filling the load-delay slot the target leaves as a nop. Rejected, all
+ * measured: `block` declared after `rec` (22, identical); `block` hoisted to a
+ * single assignment before the loop (47/4); `block` assigned inside the
+ * guarded arm (28/3); the memcpy destination named in a `u8* dst` local so the
+ * dest expression is complete before the source is loaded (56/1). The nop is
+ * the tell — the target has nothing to put there, so srcOff is not yet live,
+ * which no reordering of these four statements produces.
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelBsxTdbModify);
 #else
@@ -2458,115 +2483,142 @@ void FieldModelBsxTdbModify(u8* tdb) {
         return;
     }
     count = *(s32*)tdb;
-    if (count <= 0) {
+    if (count == 0) {
         return;
     }
     rec = (TdbRecord*)(tdb + 8);
-    for (i = 0; i < count; i++, rec = (TdbRecord*)((u8*)rec + 0x14)) {
-        switch (rec->opcode) {
+    for (i = 0; i < count; i++) {
+        switch (rec[i].opcode) {
         case 0:
-            memcpy(tdb + rec->dstOff, tdb + rec->srcOff, rec->size);
+            memcpy((u8*)rec[i].dst, tdb + rec[i].srcOff, rec[i].size);
             break;
         case 1:
             block = (FieldTexBlockHeader*)D_800DFCA0;
-            if (rec->dstOff < block->numPages) {
-                memcpy((u8*)block + block->pageOffset + (rec->dstOff << 9),
-                       tdb + rec->srcOff, 0x200);
+            if (rec[i].dst < block->numPages) {
+                memcpy((u8*)block + block->pageOffset + (rec[i].dst << 9),
+                       tdb + rec[i].srcOff, 0x200);
             }
             break;
         case 2:
             block = (FieldTexBlockHeader*)D_800DFCA0;
-            if (rec->dstOff < block->numCluts) {
-                memcpy((u8*)block + block->clutOffset + (rec->dstOff << 5),
-                       tdb + rec->srcOff, 0x20);
+            if (rec[i].dst < block->numCluts) {
+                memcpy((u8*)block + block->clutOffset + (rec[i].dst << 5),
+                       tdb + rec[i].srcOff, 0x20);
             }
             break;
         case 3:
-            LoadImage((RECT*)(tdb + rec->dstOff), (u_long*)(tdb + rec->srcOff));
+            LoadImage((RECT*)&rec[i].dst, (u_long*)(tdb + rec[i].srcOff));
             break;
         }
     }
 }
 #endif
 
+/* Build the per-model FieldModelEntry table from the loaded model-file
+ * descriptor. First pass numbers the NPC-flagged records; second pass fills
+ * one entry each and hands out a running offset into the model data block.
+ *
+ * 22 rows, down from 64 changed / 8 inserted, and every one of the 50 rows
+ * recovered came from reading the target rather than from allocation work:
+ *   - the old note claimed "-0x38 frame, 6 callee-saved regs". That frame
+ *     belonged to the *next* function -- diff.py renders past the end of the
+ *     one you asked for (CLAUDE.md, "Neighbouring functions"). The real frame
+ *     is -0x10 with no saved registers, and a leaf with no locals gets none,
+ *     so the 0x10 is a local nothing references: reserved below, worth 8 rows.
+ *   - `models[i].f`, not a walked `m++`. The walk makes the record pointer a
+ *     biv, gcc reduces the field addresses onto it and rebases the register to
+ *     whichever offset is referenced most -- +4 in the first loop, +3 in the
+ *     second -- so every offset in the diff is wrong by a constant and a second
+ *     base register appears for the offset-0 access. Worth 33 rows. Both loops
+ *     as pointer walks measured 54/5, second loop only 46/4.
+ *   - `*(u8*)&models[i].globalModelId` for the (id-1)<9 test and the copy: the
+ *     target loads it with `lbu` and the field is `s8` in game.h, where
+ *     field3.c's FieldModelLoadBcx needs the `lb`. Retyping the field to u8
+ *     buys this row and costs three in FieldModelLoadBcx (measured, and `s8 id`
+ *     there is worse still at 50/10) -- so the two translation units genuinely
+ *     read the byte with different signedness and the cast is the honest
+ *     spelling.
+ * The residue is one allocation tie-break and its cascade. The target puts
+ * `next` in $a1 -- the register `data` arrives in -- and copies `data` to $t0
+ * at entry (`move t0,a1`, then `addu a1,a1,v0` computing next from the still
+ * live incoming value); ours keeps `data` in $a1 and gives `next` $t0, which
+ * renames roughly a dozen rows and costs the entry copy. Since the function is
+ * a leaf, both pseudos are equally coalescable onto the argument register and
+ * the winner is global-alloc priority (log2(refs)*refs/live_length), where the
+ * two are close. Rejected, all measured: `next = (u8*)data;` split from the
+ * `+=` (27/4); the same split hoisted to the top of the function (26/2); `next`
+ * declared first among the locals (23/2, identical); computing `next` before
+ * the four header stores (23/2, identical); a separate counter for the second
+ * loop (40/1 -- it also loses the `move a2,a0` giv init, which is the other
+ * inserted row: gcc cannot prove the counter is 0 at the second preheader
+ * because a CODE_LABEL sits between the reset and the loop).
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
 #else
-/* 65 rows, ALL pure regalloc/stack-frame: every field offset is correct
- * (verified in diff). Target uses a minimal -0x10 frame with NO callee-saved
- * regs (args kept in $t0/$t1); the named-struct body spills 6 saved regs for a
- * -0x38 frame. Two-pass model-file-descriptor -> FieldModelData init. Needs
- * permuter to find the lean local set. models[0] (not [1]) avoids 4-byte
- * alignment padding of the +4 entry array. Added FieldModelData.unk8 for the
- * sw zero,0x8($t0) init. */
-void* FieldModelStructInit(FieldModelFileDesc* arg0, FieldModelData* arg1) {
-    s16 temp_a0_2;
-    u32 var_a3;
-    FieldModelLoaderData* temp_a0;
-    FieldModelEntry* temp_v1;
-    u8* var_a1;
-    FieldModelLoaderData* var_a2;
-    FieldModelLoaderData* var_v1;
+void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
+    FieldModelLoaderData* models;
+    FieldModelEntry* entry;
+    u8* next;
+    u32 i;
+    s16 partsOff;
+    u8 unusedLocals[0x10];
 
-    var_a3 = 0;
-    arg1->modelCount = 0;
-    temp_a0 = &arg0->models[0];
-    if (arg0->count != 0) {
-        var_v1 = temp_a0;
+    i = 0;
+    data->modelCount = 0;
+    models = desc->models;
+    if (desc->count != 0) {
         do {
-            if (var_v1->npcFlag != 0) {
-                var_v1->modelEntryIndex = arg1->modelCount;
-                arg1->modelCount = arg1->modelCount + 1;
+            if (models[i].npcFlag != 0) {
+                models[i].modelEntryIndex = data->modelCount;
+                data->modelCount = data->modelCount + 1;
             } else {
-                var_v1->modelEntryIndex = 0xFF;
+                models[i].modelEntryIndex = 0xFF;
             }
-            var_a3 += 1;
-            var_v1 += 1;
-        } while (var_a3 < arg0->count);
-        var_a3 = 0;
+            i += 1;
+        } while (i < desc->count);
+        i = 0;
     }
-    arg1->unk2 = 0;
-    arg1->unk1 = 0;
-    arg1->modelEntries = (FieldModelEntry*)((u8*)arg1 + 0xC);
-    arg1->unk8 = 0;
-    var_a1 = (u8*)arg1 + ((arg1->modelCount * 0x24) + 0xC);
-    if (arg0->count != 0) {
-        var_a2 = temp_a0;
+    data->unk2 = 0;
+    data->unk1 = 0;
+    data->modelEntries = (FieldModelEntry*)((u8*)data + 0xC);
+    data->unk8 = 0;
+    next = (u8*)data + ((data->modelCount * 0x24) + 0xC);
+    if (desc->count != 0) {
         do {
-            if (var_a2->npcFlag != 0) {
-                if (((u32)(var_a2->globalModelId - 1) < 9) &&
-                    (var_a2->partCount < 3)) {
-                    var_a2->partCount = 3;
+            if (models[i].npcFlag != 0) {
+                if (((u32)(*(u8*)&models[i].globalModelId - 1) < 9) &&
+                    (models[i].animationCount < 3)) {
+                    models[i].animationCount = 3;
                 }
-                temp_v1 = &arg1->modelEntries[var_a2->modelEntryIndex];
-                temp_v1->flags = 1;
-                temp_v1->kawaiType = -1;
-                temp_v1->boneCount = var_a2->boneCount;
-                temp_v1->partCount = var_a2->partCount;
-                temp_v1->rotationZ = 0;
-                temp_v1->rotationY = 0;
-                temp_v1->rotationX = 0;
-                temp_v1->translationZ = 0;
-                temp_v1->translationY = 0;
-                temp_v1->translationX = 0;
-                temp_v1->animationCount = var_a2->partCount;
-                temp_v1->globalModelId = var_a2->globalModelId;
-                temp_v1->scale = 0x1000;
-                temp_v1->textureFaceId = var_a2->faceId;
-                temp_a0_2 = var_a2->boneCount * 4;
-                temp_v1->partsOffset = temp_a0_2;
-                temp_v1->modelData = var_a1;
-                temp_v1->partMatrices = 0;
-                temp_v1->animationOffset = temp_a0_2 + (var_a2->partCount << 5);
-                var_a1 += (var_a2->boneCount * 4) + (var_a2->partCount << 5) +
-                          (var_a2->animationCount * 0x10);
+                entry = &data->modelEntries[models[i].modelEntryIndex];
+                entry->flags = 1;
+                entry->kawaiType = -1;
+                entry->boneCount = models[i].boneCount;
+                entry->partCount = models[i].partCount;
+                entry->animationCount = models[i].animationCount;
+                entry->rotationZ = 0;
+                entry->rotationY = 0;
+                entry->rotationX = 0;
+                entry->translationZ = 0;
+                entry->translationY = 0;
+                entry->translationX = 0;
+                entry->globalModelId = *(u8*)&models[i].globalModelId;
+                entry->textureFaceId = models[i].faceId;
+                entry->scale = 0x1000;
+                partsOff = models[i].boneCount * 4;
+                entry->partsOffset = partsOff;
+                entry->modelData = next;
+                entry->partMatrices = NULL;
+                entry->animationOffset = partsOff + (models[i].partCount << 5);
+                next += (models[i].boneCount * 4) + (models[i].partCount << 5) +
+                        (models[i].animationCount * 0x10);
             }
-            var_a3 += 1;
-            var_a2 += 1;
-        } while (var_a3 < arg0->count);
+            i += 1;
+        } while (i < desc->count);
     }
     D_800E0204 = 0;
-    return var_a1;
+    return next;
 }
 #endif
 
