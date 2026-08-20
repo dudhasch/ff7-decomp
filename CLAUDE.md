@@ -615,6 +615,41 @@ a near-miss, in rough order of frequency:
   written as the body's last statement the two come out in the other order and
   land in different branch delay slots. Eight rows across four loops, and no
   other spelling reaches it.
+* **One missing `nop` after a load that a label follows is maspsx, not you.**
+  maspsx decides a load needs no delay-slot `nop` by asking whether the next
+  instruction *reads* the loaded register — and it looks straight past a label
+  to find that instruction. Both halves are wrong for
+  `lhu $2,sym` / `.Ljoin:` / `lhu $2,sym`: the second load expands to
+  `lui $2,%hi` first, and on the R3000 the pending load writes `$2` a cycle
+  late and clobbers that `lui`. The original assembler emitted the `nop`;
+  maspsx prints `#nop # DEBUG: '...' does not load from $2` and drops it.
+  `FieldMainLoop` is byte-identical apart from this one instruction. Before
+  spending a budget on such a residue, prove where it comes from — pipe cc1
+  through maspsx to a file, insert the `nop` by hand, assemble with the flags
+  from `ninja -t commands`, and re-run `diff.py`. Zero rows means the C is
+  finished and the gap is in `tools/maspsx` (a fork under this project's own
+  account, so it is fixable — but a submodule change is not covered by
+  `make submit`).
+* **A `void` function fills the delay slot of a branch to its own epilogue; a
+  non-`void` one cannot.** gcc's delay-slot pass steals the insn *after* a
+  conditional branch when that insn is dead on the taken path — and `li v0,K`
+  is dead on the way to a `void` epilogue but live on the way to one that
+  returns a value. So a function whose diff is a single unfilled delay slot,
+  on exactly the branch that jumps to `jr ra`, was declared with a return type
+  it never uses. `FieldMainLoop` needs `s32`; K&R implicit `int` is the likely
+  original spelling. Only branches straight to the epilogue are affected —
+  branches into a shared tail still get their slots filled either way.
+* **`x++` on a `volatile` re-reads it; `x = x + 1` does not.** The increment is
+  an expression whose value gcc materialises even when the statement discards
+  it, and for a volatile that means a fourth instruction pair (`lui`/`lhu`)
+  after the store. Three rows separate the two spellings of the same line —
+  `D_80075DEC++` at the top of `FieldMainLoop`'s frame loop.
+* **`volatile` on a global also pins it against constant materialisation.**
+  For `if (a == 0 || g == 1)` gcc puts `li v0,1` in the first branch's delay
+  slot and the `lw` of `g` after it; declare `g` volatile and the load is
+  nailed to its source position, the `li` slides down into the load-delay slot
+  instead, and both slots read wrong. Two rows, and the only fix is to drop the
+  `volatile` — `D_8009A060`.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's

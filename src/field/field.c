@@ -166,7 +166,260 @@ const u32 D_800A0034[] = {0x01D00000, 0x000801E0};
 const u32 D_800A003C[] = {0x00000000, 0x00080140};
 const u32 D_800A0044[] = {0x00E80000, 0x00080140};
 const u32 D_800A004C[] = {0x01D00000, 0x00080140};
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMainLoop);
+
+/* The field module's per-frame loop: flip the double buffer, clear both OTs,
+ * run the event script and the entity/background updates, then hand the frame
+ * to the GPU. Returns only when the event script asks for a different module.
+ *
+ * ONE instruction out, and it is not codegen: maspsx omits the load-delay nop
+ * the original assembler put at the loop-top join label. The sequence is
+ *
+ *     lhu  v0,%lo(D_80075DEC)(v0)    <- dead re-read, from `D_80075DEC++`
+ *   .Ljoin:
+ *     nop                            <- present in the target, absent here
+ *     lui  v0,%hi(D_80075DEC)
+ *
+ * On the R3000 that nop is required: the lhu writes v0 a cycle late and would
+ * clobber the lui. maspsx only asks whether the next instruction *reads* the
+ * loaded register (`does not load from $2`) and looks straight past the label,
+ * so it drops the nop; the write-after-write hazard is invisible to it. Proof
+ * that nothing else is wrong: pipe cc1 through maspsx, insert that single nop
+ * after the label, assemble, and diff.py reports zero rows.
+ *
+ * Everything else in here was derived and is worth keeping:
+ *   - `s32` return, not `void`. v0 is then live at the epilogue, so gcc's
+ *     delay-slot pass cannot steal the following `li v0,0xc` into the delay
+ *     slot of the `eventCmd == 1` branch (the only branch here that jumps
+ *     straight to the epilogue). Declared void, that slot gets filled and the
+ *     function is one instruction short.
+ *   - `D_80075DEC++`, not `D_80075DEC = D_80075DEC + 1`. The variable is
+ *     volatile, and only the increment form re-reads it afterwards - three
+ *     instructions the plain assignment does not emit.
+ *   - the six RECTs are locals with aggregate initialisers, which is what puts
+ *     the blobs above in .rodata and copies them in with lwl/lwr.
+ *   - D_8009A060 must NOT be volatile: volatile pins its load ahead of the
+ *     `li v0,1`, and the target has the constant first (in the branch delay
+ *     slot of the movie-stream test).
+ *   - the C uses D_8009ABF4.eventCmd throughout, never the D_8009ABF5 alias;
+ *     the alias costs a %hi/%lo pair per use where gcc wants 1(s2), and it is
+ *     what lets s4 become the `addiu s4,s2,1` base the target uses for
+ *     pcPosX/pcPosY/pcWalkMeshId.
+ *   - `/ 4096`, not `>> 12`: the target has the bgez/addiu 0xfff rounding. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMainLoop);
+#else
+
+/* The walk mesh: a u16 triangle count, then that many 24-byte triangles. */
+typedef struct {
+    /* 0x00 */ u16 triCount;
+    /* 0x02 */ u16 unk2;
+    /* 0x04 */ s16 tris[1];
+} FieldWalkmesh;
+
+extern FieldWalkmesh** D_8009A044;
+extern s16* D_800E4274;
+extern s16* D_80114458;
+extern s32 D_8009A060;
+extern volatile s32 D_800965E4;
+extern u8 D_80071C0C;
+extern s16 D_80071E38;
+extern s16 D_80071E3C;
+extern MATRIX* D_80071E40;
+extern u8 D_8009AC2C;
+extern u16 D_8009AC40;
+extern u32 D_8007E7A0[2];
+extern FieldLine D_8007E7AC;
+extern s32 D_80114478;
+extern s32 D_8011447C;
+extern s16 g_FieldNextModule;
+extern s32 g_FieldScreenCenterX;
+extern s32 g_FieldScreenCenterY;
+extern DISPENV g_FieldDispEnv[2];
+extern DRAWENV g_FieldDrawEnv[2];
+extern DRAWENV g_FieldDrawEnvBg[2];
+extern DISPENV* g_FieldCurDispEnv;
+extern DRAWENV* g_FieldCurDrawEnv;
+
+s32 FieldMainLoop(void) {
+    RECT clip24Top = {0, 0, 480, 8};
+    RECT clip24Mid = {0, 232, 480, 8};
+    RECT clip24Bot = {0, 464, 480, 8};
+    RECT clip16Top = {0, 0, 320, 8};
+    RECT clip16Mid = {0, 232, 320, 8};
+    RECT clip16Bot = {0, 464, 320, 8};
+    struct FieldRenderData* buf;
+    s16* tris;
+    s16 first;
+
+    g_FieldScreenCenterX = 160;
+    g_FieldScreenCenterY = 120;
+    if (D_800965EC != 5 && D_800965EC != 0xD) {
+        FieldModelLoadAndInit();
+    }
+    tris = (*D_8009A044)->tris;
+    D_800E4274 = tris;
+    D_80114458 = (s16*)((*D_8009A044)->triCount * 24 + (s32)tris);
+    if (D_800965EC != 5 && D_800965EC != 2 && D_800965EC != 0xD) {
+        FieldEntityInitPos();
+    }
+    FieldBackgroundInitPackets(
+        g_FieldRenderData[0].Bg1, g_FieldRenderData[0].Bg2,
+        (u8*)g_FieldRenderData[0].BgAnim, g_FieldRenderData[0].BgDm);
+    first = 1;
+    FieldBackgroundInitPackets(
+        g_FieldRenderData[1].Bg1, g_FieldRenderData[1].Bg2,
+        (u8*)g_FieldRenderData[1].BgAnim, g_FieldRenderData[1].BgDm);
+    FieldRainInit(&g_FieldRenderData[0]);
+    FieldRainInit(&g_FieldRenderData[1]);
+    g_FieldMovieStreamActive = 0;
+    g_FieldMovieStreamDone = 0;
+    g_FieldMoviePlayed = 0;
+    D_80071C0C = 0;
+    g_isFieldLoading = 0;
+
+    for (;;) {
+        if (first == 0) {
+            D_80075DEC++;
+        }
+        D_80075DEC = D_80075DEC & 1;
+        D_8009ABF4.renderBuffer = D_80075DEC;
+        buf = &g_FieldRenderData[(s16)D_80075DEC];
+        ClearOTagR(buf->ot, 0x1000);
+        ClearOTagR(&buf->OtUi, 1);
+        FieldCameraAssign();
+        g_FieldPadRaw = FieldButtonsUpdate(&D_80071E38, &D_80071E3C);
+        D_8009ABF4.currentMovieFrame = D_80075D00->unk8;
+        FieldEventUpdate((s32)&buf->OtUi);
+        g_PlayerModelId = D_8009ABF4.pcModelId;
+        FieldBGScrollInit();
+        FieldBGScrollUpdate();
+        FieldBGShakeUpdate(&D_8009ABF4.shakeX);
+        FieldBGShakeUpdate(&D_8009ABF4.shakeY);
+        FieldBGUpdateDrawenv(buf);
+        PreloadNextFieldMap(&g_FieldEntity[g_PlayerModelId],
+                            (FieldLine*)(g_FieldTriggers + 0x38));
+        if ((D_8009ABF4.activeKeys & 0x90F) == 0x90F) {
+            D_8009ABF4.eventCmd = 0xA;
+            func_80035658();
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 1) {
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 0xC) {
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 0xD) {
+            StopFieldMapPreload();
+            g_FieldNextModule = 0xC;
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 0x19) {
+            g_FieldNextModule = 0x10;
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 0xF || D_8009ABF4.eventCmd == 0x10 ||
+            D_8009ABF4.eventCmd == 0x11 || D_8009ABF4.eventCmd == 0x15 ||
+            D_8009ABF4.eventCmd == 0x16 || D_8009ABF4.eventCmd == 0x17 ||
+            D_8009ABF4.eventCmd == 0x18) {
+            g_FieldNextModule = 0xD;
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 6 || D_8009ABF4.eventCmd == 7 ||
+            D_8009ABF4.eventCmd == 9 || D_8009ABF4.eventCmd == 0xE ||
+            D_8009ABF4.eventCmd == 8 || D_8009ABF4.eventCmd == 0x12 ||
+            D_8009ABF4.eventCmd == 0x13) {
+            g_FieldNextModule = 5;
+            StopFieldMapPreload();
+            return;
+        }
+        if ((g_FieldPadRaw & 0x10) && D_8009ABF4.menuDisabled == 0 &&
+            g_FieldMoviePlayed == 0 && g_FieldMovieStreamActive == 0) {
+            g_FieldNextModule = 5;
+            D_8009ABF4.eventCmd = 9;
+            D_8009ABF4.eventCmdParam = 0;
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 5 || D_8009ABF4.eventCmd == 0x1A) {
+            StopFieldMapPreload();
+            return;
+        }
+        if (D_8009ABF4.eventCmd == 2) {
+            D_8009ABF4.pcPosX = g_FieldEntity[g_PlayerModelId].PosX / 4096;
+            D_8009ABF4.pcPosY = g_FieldEntity[g_PlayerModelId].PosY / 4096;
+            g_FieldNextModule = 2;
+            D_8009ABF4.pcWalkMeshId = g_FieldEntity[g_PlayerModelId].PosI;
+            StopFieldMapPreload();
+            return;
+        }
+        FieldEntityMovementUpdate(g_FieldPadRaw);
+        FieldEntityLineInteract(&g_FieldEntity[g_PlayerModelId], &D_8007E7AC);
+        FieldEntityCheckTalk();
+        if (g_FieldMovieStreamActive == 0 || D_8009A060 == 1) {
+            AddBackgroundToRender(buf);
+        }
+        HandleKawaiDataInModel(buf);
+        FieldRainUpdate();
+        FieldRainAddToRender(buf->ot, buf->Rain, D_80071E40, &buf->RainDm);
+        FieldArrowsAddToRender(buf, D_80071E40, g_FieldTriggers + 0x38);
+        func_800138EC();
+        D_80114478 = VSync(1);
+        while (DrawSync(1) != 0) {
+        }
+        D_8011447C = VSync(1);
+        if (g_FieldMovieStreamActive != 0 && D_800965E4 != 1) {
+            VSync(3);
+        } else {
+            VSync(2);
+        }
+        if (first != 0) {
+            first--;
+            if (first == 0) {
+                SetDispMask(1);
+            }
+        }
+        ResetGraph(1);
+        if (g_FieldMovieStreamActive == 0) {
+            if (g_FieldMovieStreamDone == 0) {
+                g_FieldDispEnv[(s16)D_80075DEC].isrgb24 = 0;
+            } else {
+                g_FieldMovieStreamDone = 0;
+            }
+        }
+        PutDispEnv(&g_FieldDispEnv[(s16)D_80075DEC]);
+        PutDrawEnv(&g_FieldDrawEnv[(s16)D_80075DEC]);
+        if (g_FieldMovieStreamActive == 0) {
+            ClearImage(&g_FieldDrawEnv[(s16)D_80075DEC].clip, 0, 0, 0);
+        } else if (g_FieldDispEnv[(s16)D_80075DEC].isrgb24 == 0) {
+            ClearImage(&clip16Top, 0, 0, 0);
+            ClearImage(&clip16Mid, 0, 0, 0);
+            ClearImage(&clip16Bot, 0, 0, 0);
+        } else {
+            ClearImage(&clip24Top, 0, 0, 0);
+            ClearImage(&clip24Mid, 0, 0, 0);
+            ClearImage(&clip24Bot, 0, 0, 0);
+        }
+        g_FieldCurDispEnv = &g_FieldDispEnv[(s16)D_80075DEC];
+        g_FieldCurDrawEnv = &g_FieldDrawEnvBg[(s16)D_80075DEC];
+        FieldUpdateMovieStream();
+        if (D_8009AC2C == 0) {
+            DrawOTag(&buf->OtSceneDrenv);
+            DrawOTag(&buf->ot[0xFFF]);
+            DrawOTag(&buf->OtFadeDrenv);
+            if (D_8009AC40 != 0) {
+                DrawOTag(&D_8007E7A0[(s16)D_80075DEC]);
+            }
+        }
+        DrawOTag(&buf->OtUi);
+    }
+}
+
+#endif
 
 /* Parse a MIM (field background map image) header and upload its palettes and
  * tile pages to VRAM. arg1 points at the loaded MIM; the header's size and
