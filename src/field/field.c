@@ -196,7 +196,352 @@ void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
 
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field", FieldMain);
+extern DISPENV g_FieldDispEnv[2];
+extern DRAWENV g_FieldDrawEnv[2];
+extern DRAWENV g_FieldDrawEnvBg[2];
+extern DRAWENV D_80113FE4[2];
+extern DRAWENV D_8011409C[2];
+extern DRAWENV D_80114154[2];
+extern DRAWENV D_8011420C[2];
+extern s8 D_800716D0;
+extern s16 D_8007173C;
+extern u8 D_80071A58;
+extern s16 D_8007E768;
+extern s32* D_8007EB64;
+extern u8 D_8007EBC8;
+extern u8 D_8009C6D8;
+extern s8 D_8009A057;
+extern s16 D_8009A100;
+extern volatile u16 D_8009AC18;
+extern s16 D_8009AC1A[1];
+extern volatile s16 D_8009AC1E;
+extern u16 D_8009AC40[1];
+extern u32 D_8009AC3C[1];
+extern void func_800128B8(void);
+extern void func_800129D0(void);
+extern void DebugRunEveryLoop(void);
+extern void FieldEventInit(FieldState* state, FieldEntity* entities, s32 arg2);
+extern void FieldEntityBgTriggerInit(void* triggers);
+extern void FieldEnablePartyModels(void);
+extern void FieldEntityLineClear(FieldLine* line);
+extern void FieldArrowsInit(SPRT_16* sprites, DR_MODE* dm);
+extern void FieldLoadMimToVram(s32 arg0, u8* mim);
+/* The walk mesh: a u16 triangle count, then that many 24-byte triangles. */
+typedef struct {
+    /* 0x00 */ u16 triCount;
+    /* 0x02 */ u16 unk2;
+    /* 0x04 */ s16 tris[1];
+} FieldWalkmesh;
+
+extern s32 FieldMainLoop(void);
+
+/* The field's trigger block opens with a header; only the camera height
+ * bias at +0xA is read here. Spelling it as a struct member -- rather than
+ * *(u16*)(g_FieldTriggers + 0xA) -- is what lets gcc hoist the load above
+ * the scalar stores in front of it: a struct load does not alias a store
+ * to a plain extern. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0xA];
+    /* 0x0A */ u16 camHeightBias;
+} FieldTriggerHeader;
+
+extern FieldLine D_8007E7AC;
+extern volatile s16 g_FieldNextModule;
+extern FieldWalkmesh** D_8009A044;
+extern FieldBgData** D_8009D848;
+extern s16 D_80071E38;
+extern s16 D_80071E3C;
+
+/* Parked at 77 changed / 6 inserted of 793 instructions (78 further rows are
+ * symbol aliases -- the C reaches g_FieldRenderData's members where the .s
+ * names D_800E8F7C and friends). Everything down to func_800128B8 is
+ * byte-identical, and so are the jump table, all seven of its arms and the
+ * whole tail dispatch. What was learned, and what is left:
+ *
+ *   - the local `RECT clip` aggregate initialiser is what puts the 8-byte
+ *     blob at .rodata+0 and the jump table at +8, which is the layout the
+ *     overlay needs. Writing the four fields instead moves the table to 0.
+ *     (While the function is parked the .s carries only the table, so the
+ *     blob is the file-scope D_800A0000 at the top of this unit.)
+ *   - eventCmd is read through a `volatile u8*`. Volatile is not decoration:
+ *     it is what makes the target re-load the byte at every test and emit a
+ *     separate `andi 0xff` for the zero-extension. Non-volatile, cse folds
+ *     all six tests into one lbu and the function is ten instructions short.
+ *   - that same pointer is the base register the whole tail addresses off
+ *     (0(s1) eventCmd, 1(s1) eventCmdParam, 0x4b fadeType, 0x4d fadeAdjust,
+ *     0x63 prevFieldId, 0xf1 the switch selector -- every FieldState offset
+ *     minus one). Spelling those as D_8009ABF4.<member> instead costs a
+ *     second anchor register (gcc picks &prevFieldId) and 37 rows.
+ *   - D_8009AC1E and D_8009AC18 must be volatile: the target loads both with
+ *     lhu, and a plain u16 with an (s16) cast folds to lh, a plain u16 stored
+ *     into a u8 field narrows to lbu.
+ *   - g_FieldBGCameraHeightBias is read as a struct member, not as
+ *     *(u16*)(g_FieldTriggers + 0xA): only the struct form lets gcc hoist the
+ *     load above the three scalar stores in front of it (7 rows).
+ *   - the switch selector goes into a u8 local, not a u32 one -- the u32 form
+ *     loses the andi.
+ *
+ * The residue is five clusters, all scheduling or address-form:
+ *   1. D_8009AC40[0] = 0, D_8009AC1A[0] = 2 and the D_8009AC3C read: the
+ *      target materialises the whole address into a general register
+ *      (lui/addiu/op 0(reg)); every spelling tried here gives the two-
+ *      instruction $at macro. Measured and rejected: scalar extern, one-
+ *      element array, volatile on each of the three, and a volatile store
+ *      through a cast. The one place the register form does appear --
+ *      D_8009A000 -- has its address used twice, so cse hoists it; these
+ *      three are used once. 6 rows.
+ *   2. the fade block stores fadeType before fadeSpeed in the target and
+ *      after it here, with the rest of the block identical. 4 rows.
+ *   3. `li a0,-1` is hoisted above the rain if/else in the target and lands
+ *      after the loop's two inits here. A named local for the fill value was
+ *      measured and changes nothing. 3 rows.
+ *   4. the tail reads D_80071A5C early and eventCmdParam late; here it is the
+ *      other way round. Reading g_CurrentFieldIndex into a local first, and
+ *      s32 vs s16 for the D_80071A5C temporary, were both measured and are
+ *      worse. 6 rows.
+ *   5. one delay slot at the cross-jump into the shared fade-reset tail.
+ * The remaining rows are branch-target addresses, which follow from the
+ * length difference and cost nothing once the clusters above are closed. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
+#else
+
+void FieldMain(void) {
+    RECT clip = {0, 0, 480, 472};
+    volatile u8* ev;
+    s8* fill;
+    s32 i;
+    u16 fieldId;
+    s16 preloadId;
+    u8 exitKind;
+
+    ClearOTagR(&g_FieldRenderData[0].OtFadeDrenv, 1);
+    ClearOTagR(&g_FieldRenderData[1].OtFadeDrenv, 1);
+    SetDrawEnv(&g_FieldRenderData[0].FadeDrenv, &g_FieldDrawEnv[0]);
+    SetDrawEnv(&g_FieldRenderData[1].FadeDrenv, &g_FieldDrawEnv[1]);
+    addPrim(&g_FieldRenderData[0].OtFadeDrenv, &g_FieldRenderData[0].FadeDrenv);
+    addPrim(&g_FieldRenderData[1].OtFadeDrenv, &g_FieldRenderData[1].FadeDrenv);
+    SetDefDrawEnv(&g_FieldDrawEnvBg[0], 0, 8, 0x140, 0xE0);
+    SetDefDrawEnv(&g_FieldDrawEnvBg[1], 0, 0xF0, 0x140, 0xE0);
+    SetDefDrawEnv(&D_80114154[0], 0, 8, 0x140, 0xE0);
+    SetDefDrawEnv(&D_80114154[1], 0, 0xF0, 0x140, 0xE0);
+    SetDefDrawEnv(&D_8011420C[0], 0, 8, 0x140, 0xE0);
+    SetDefDrawEnv(&D_8011420C[1], 0, 0xF0, 0x140, 0xE0);
+    g_FieldDrawEnvBg[0].dtd = 1;
+    g_FieldDrawEnvBg[1].dtd = 1;
+    D_80114154[0].dtd = 1;
+    D_80114154[1].dtd = 1;
+    D_8011420C[0].dtd = 1;
+    D_8011420C[1].dtd = 1;
+    g_FieldDrawEnvBg[0].isbg = 0;
+    g_FieldDrawEnvBg[1].isbg = 0;
+    D_80114154[0].isbg = 0;
+    D_80114154[1].isbg = 0;
+    D_8011420C[0].isbg = 0;
+    D_8011420C[1].isbg = 0;
+    ClearOTagR(&g_FieldRenderData[0].OtSceneDrenv, 1);
+    ClearOTagR(&g_FieldRenderData[1].OtSceneDrenv, 1);
+    SetDrawEnv(&g_FieldRenderData[0].SceneDrenv, &g_FieldDrawEnvBg[0]);
+    SetDrawEnv(&g_FieldRenderData[1].SceneDrenv, &g_FieldDrawEnvBg[1]);
+    addPrim(
+        &g_FieldRenderData[0].OtSceneDrenv, &g_FieldRenderData[0].SceneDrenv);
+    addPrim(
+        &g_FieldRenderData[1].OtSceneDrenv, &g_FieldRenderData[1].SceneDrenv);
+    SetDefDrawEnv(&D_80113FE4[0], 0, 8, 0x140, 0xE0);
+    SetDefDrawEnv(&D_80113FE4[1], 0, 0xF0, 0x140, 0xE0);
+    D_80113FE4[0].isbg = 0;
+    D_80113FE4[1].isbg = 0;
+    D_80113FE4[0].dtd = 1;
+    D_80113FE4[1].dtd = 1;
+    SetDefDrawEnv(&D_8011409C[0], 0, 8, 0x140, 0xE0);
+    SetDefDrawEnv(&D_8011409C[1], 0, 0xF0, 0x140, 0xE0);
+    D_8011409C[0].isbg = 0;
+    D_8011409C[1].isbg = 0;
+    D_8011409C[0].dtd = 1;
+    D_8011409C[1].dtd = 1;
+    func_800128B8();
+    ev = &D_8009ABF4.eventCmd;
+    D_8009AC40[0] = 0;
+    if (D_800965EC != 1 && D_800965EC != 2 && D_800965EC != 3 &&
+        D_800965EC != 5 && D_800965EC != 0xD) {
+        ClearImage(&clip, 0, 0, 0);
+    }
+
+    for (;;) {
+        DebugRunEveryLoop();
+        D_80071A5C = 0;
+        g_FieldPreloadMapId = 0;
+        if ((D_800965EC == 1 || D_800965EC == 3) && D_8009ABF4.fadeType == 0) {
+            func_800129D0();
+            D_8009ABF4.fadeType = 3;
+            D_80071A58 = 3;
+            D_8009ABF4.fadeAdjust = 0;
+            D_8007E768 = 0;
+            D_80095DD4 = 1;
+        }
+        if (D_800965EC != 5 && D_800965EC != 0xD) {
+            D_8007EB64 = (s32*)0x80114FE4;
+            D_8009A044 = (FieldWalkmesh**)0x80114FE8;
+            D_8009D848 = (FieldBgData**)0x80114FEC;
+            D_80083578 = (MATRIX**)0x80114FF0;
+            g_FieldTriggersP = (s32*)0x80114FF4;
+            g_FieldEncountersP = (s32*)0x80114FF8;
+            g_FieldModelsP = (s32*)0x80114FFC;
+            FieldLoadMimDatFiles();
+        }
+        if (D_800965EC == 2) {
+            D_8007EBE0 = 1;
+            if (D_8007EBC8 == 1) {
+                D_8007EBC8 = 0;
+                D_8009C6D8 = 0;
+                D_8007173C = 0;
+                *ev = 0;
+            }
+        }
+        while (D_80095DD4 != 0) {
+        }
+        while (DrawSync(1) != 0) {
+        }
+        if (D_800965EC != 0xD) {
+            D_8009ABF4.fadeType = 1;
+            D_8009ABF4.fadeSpeed = 0x10;
+            D_8009ABF4.fadeAdjust = 0x100;
+            D_8009ABF4.fadeRed = 0;
+            D_8009ABF4.fadeGreen = 0;
+            D_8009ABF4.fadeBlue = 0;
+        }
+        if (D_800965EC == 0 || D_800965EC == 1 || D_800965EC == 3 ||
+            D_800965EC == 6 || D_800965EC == 8 || D_800965EC == 7 ||
+            D_800965EC == 9 || D_800965EC == 0xB || D_800965EC == 0xA) {
+            D_8009ABF4.layer2_bgScrollXSpeed = 0;
+            D_8009ABF4.layer2_bgScrollYSpeed = 0;
+            D_8009ABF4.layer3_bgScrollXSpeed = 0;
+            D_8009ABF4.layer3_bgScrollYSpeed = 0;
+            D_8009ABF4.layer3_depth = 1;
+            D_8009ABF4.layer2_depth = 0xFFF;
+            D_8009A100 = 0;
+            D_80071E38 = 0;
+            D_80071E3C = 0;
+            g_FieldBGCameraHeightBias =
+                ((FieldTriggerHeader*)g_FieldTriggers)->camHeightBias;
+            FieldEventInit(&D_8009ABF4, g_FieldEntity, *D_8007EB64);
+            g_FieldEntity[D_8009AC1E].Dir = D_8009AC18;
+            if ((g_RainControl & 0x80) == 0) {
+                g_RainForce = 0;
+            } else {
+                g_RainForce = 0xFF;
+            }
+            i = 0xF;
+            fill = &D_8009A057;
+            do {
+                *fill-- = -1;
+            } while (--i >= 0);
+            FieldEntityBgTriggerInit((void*)(g_FieldTriggers + 0x158));
+        } else {
+            D_8009AC1A[0] = 2;
+        }
+        FieldEnablePartyModels();
+        FieldEntityLineClear(&D_8007E7AC);
+        D_800716D0 = 0;
+        FieldArrowsInit(
+            g_FieldRenderData[0].Arrows, &g_FieldRenderData[0].ArrowsDm);
+        FieldArrowsInit(
+            g_FieldRenderData[1].Arrows, &g_FieldRenderData[1].ArrowsDm);
+        if (D_800965EC != 5 && D_800965EC != 0xD) {
+            FieldLoadMimToVram(0, (u8*)0x80128000);
+        }
+        if (D_800965EC == 2) {
+            D_8009A000[0] = 0xF5;
+            SystemAkaoExecute();
+            D_8009A000[0] = 0x18;
+            D_8009A008[0] = 4;
+            D_8009A004[0] = D_8009AC3C[0];
+            SystemAkaoExecute();
+        }
+        FieldMainLoop();
+        while (DrawSync(1) != 0) {
+        }
+        VSync(1);
+        g_FieldDispEnv[0].isrgb24 = 0;
+        g_FieldDispEnv[1].isrgb24 = 0;
+        PutDispEnv(&g_FieldDispEnv[(s16)D_80075DEC]);
+        PutDrawEnv(&g_FieldDrawEnv[(s16)D_80075DEC]);
+        D_800965EC = 1;
+        if (*ev == 0xA || *ev == 0x1A || *ev == 5) {
+            break;
+        }
+        if (*ev == 1) {
+            preloadId = D_80071A5C;
+            *(u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
+            fieldId = *(u16*)(ev + 1);
+            g_CurrentFieldIndex = fieldId;
+            if ((s16)fieldId != preloadId) {
+                StopFieldMapPreload();
+            }
+            if ((u32)((u16)g_CurrentFieldIndex - 1) < 0x40) {
+                g_FieldNextModule = 3;
+                func_800129D0();
+                *(u16*)(ev + 0x4B) = 3;
+                D_80071A58 = 3;
+                *(u16*)(ev + 0x4D) = 0;
+                D_8007E768 = 0;
+                D_80095DD4 = 1;
+                break;
+            }
+        }
+        if (*ev == 0xC) {
+            *(u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
+            fieldId = *(u16*)(ev + 1);
+            exitKind = ev[0xF1];
+            g_CurrentFieldIndex = fieldId;
+            switch (exitKind) {
+            case 0:
+                g_FieldNextModule = 6;
+                break;
+            case 1:
+                g_FieldNextModule = 7;
+                break;
+            case 2:
+                g_FieldNextModule = 8;
+                break;
+            case 3:
+                g_FieldNextModule = 9;
+                break;
+            case 4:
+                g_FieldNextModule = 0xA;
+                break;
+            case 5:
+                g_FieldNextModule = 0xB;
+                break;
+            case 6:
+                g_FieldNextModule = 0xE;
+                break;
+            }
+            break;
+        }
+        if (*ev == 2 || *ev == 0xD) {
+            break;
+        }
+        if (g_FieldNextModule == 5) {
+            func_800129D0();
+            *(u16*)(ev + 0x4B) = 0xD;
+            D_80071A58 = 0xD;
+            *(u16*)(ev + 0x4D) = 0;
+            D_8007E768 = 0;
+            D_80095DD4 = 1;
+            break;
+        }
+        if (g_FieldNextModule == 0xD) {
+            break;
+        }
+        if (g_FieldNextModule == 0x10) {
+            break;
+        }
+    }
+    VSync(0);
+}
+
+#endif
 
 const u32 D_800A0024[] = {0x00000000, 0x000801E0};
 const u32 D_800A002C[] = {0x00E80000, 0x000801E0};
@@ -247,13 +592,6 @@ const u32 D_800A004C[] = {0x01D00000, 0x00080140};
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMainLoop);
 #else
 
-/* The walk mesh: a u16 triangle count, then that many 24-byte triangles. */
-typedef struct {
-    /* 0x00 */ u16 triCount;
-    /* 0x02 */ u16 unk2;
-    /* 0x04 */ s16 tris[1];
-} FieldWalkmesh;
-
 extern FieldWalkmesh** D_8009A044;
 extern s16* D_800E4274;
 extern s16* D_80114458;
@@ -264,12 +602,11 @@ extern s16 D_80071E38;
 extern s16 D_80071E3C;
 extern MATRIX* D_80071E40;
 extern u8 D_8009AC2C;
-extern u16 D_8009AC40;
 extern u32 D_8007E7A0[2];
 extern FieldLine D_8007E7AC;
 extern s32 D_80114478;
 extern s32 D_8011447C;
-extern s16 g_FieldNextModule;
+extern volatile s16 g_FieldNextModule;
 extern s32 g_FieldScreenCenterX;
 extern s32 g_FieldScreenCenterY;
 extern DISPENV g_FieldDispEnv[2];
@@ -449,7 +786,7 @@ s32 FieldMainLoop(void) {
             DrawOTag(&buf->OtSceneDrenv);
             DrawOTag(&buf->ot[0xFFF]);
             DrawOTag(&buf->OtFadeDrenv);
-            if (D_8009AC40 != 0) {
+            if (D_8009AC40[0] != 0) {
                 DrawOTag(&D_8007E7A0[(s16)D_80075DEC]);
             }
         }
@@ -842,10 +1179,18 @@ extern FieldBgOtSlot D_8009ACA2;
  * and the `sll` after the join. Being those four instructions short shifts
  * every later branch immediate, and the temporaries all sit one register off:
  * the target puts `sprite` in t3 and the run walk in t7, this build t0 and t5.
- * The other giveaway is the second induction variable -- the target reduces
- * &run[2] and reaches run[1] at -2, this build reduces &run[1]; the reference
- * counts say run[1] should win, so something in the original references run[2]
- * more than `count = run[2]` does. Measured and rejected: goto loops (434 rows,
+ * The &run[2]-versus-&run[1] induction variable this note used to blame has
+ * been measured and is not the problem: both builds compute the same two
+ * bases, `addiu <r>,v0,0x10` and `addiu <r>,v0,0x14` at 0x2328, and differ
+ * only in which register each lands in. Referencing run[2] before run[1] in
+ * all four walks was measured -- 236 rows against 233 -- and does not move the
+ * allocation either. Read as a whole the residue is a *permutation* of the
+ * caller-saved set and nothing else: the target holds the run fields and the
+ * sprite cursor in {t7, t1, t5, t2, t6, t8, t0, t9} where this build uses
+ * {t5, t2, t6, t3, t7, t1, t8, t9} -- the same registers, the same count, and
+ * every one of the 233 rows a rename. No missing or extra hoist, no frame
+ * difference and no scheduling difference is left to find by reading; this one
+ * belongs to decomp-permuter now. Measured and rejected: goto loops (434 rows,
  * no hoisting at all), `break` out of the loops (396), s32 wrap temporaries
  * (frame 0x30, 320 rows), a separate s32 temporary loaded before the wrap test
  * (278), locals for D_8011448C/D_801144C8/g_FieldTriggers (305), and both

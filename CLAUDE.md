@@ -650,6 +650,59 @@ a near-miss, in rough order of frequency:
   nailed to its source position, the `li` slides down into the load-delay slot
   instead, and both slots read wrong. Two rows, and the only fix is to drop the
   `volatile` — `D_8009A060`.
+* **A field re-read at every test, each `lbu` trailed by a redundant
+  `andi 0xff`, is a `volatile`.** Without the qualifier cse folds a run of
+  `if (x == A) … if (x == B) …` on the same byte into a single load, and
+  combine merges the zero-extension into it, so the C comes out ten
+  instructions short of a target that reloads six times. The `andi` is the
+  half that cannot be explained any other way: `lbu` already zero-extends, and
+  the separate extension only survives because the volatile MEM is barred from
+  the cse table. `FieldMain` reads `FieldState.eventCmd` this way.
+  The corollary is worth as much as the rule: reading it through a
+  `volatile u8*` local makes that pointer the base register the *whole*
+  surrounding block is then addressed off — `0(s1)` for the byte itself and
+  every other member of the struct at its offset minus one. Spelling those
+  members as `D_8009ABF4.<member>` instead lets gcc pick its own anchor (it
+  chose `&prevFieldId`), which costs a second callee-saved register and 37
+  rows.
+* **`volatile` on a 16-bit global gives `lhu` plus a separate `sll`/`sra`.**
+  The plain type folds the sign-extension into the load and gives `lh`, and a
+  plain `u16` read into a `u8` field narrows all the way to `lbu`. So when the
+  target loads a halfword unsigned and *then* widens it by hand, the
+  declaration is volatile, not the expression — an `(s16)` cast on a
+  non-volatile `u16` produces `lh` and is a third wrong answer.
+  `D_800965EC`, `g_FieldNextModule`, `D_8009AC1E` and `D_8009AC18` are all
+  this in `src/field/field.c`.
+* **A local aggregate initializer's `.rodata` blob is emitted *before* the
+  function's jump table.** gcc writes the constant pool ahead of the function
+  body and the table during `final`, so a unit whose table has to sit at
+  `.rodata+8` wants the local written as `RECT clip = {0, 0, 480, 472};` and
+  *not* as four field stores — the opposite of the "write the fields" advice
+  two bullets up, which is about a target that has no blob copy at all. The
+  tell is `lwl`/`lwr` from a `.rodata` symbol into the frame. `FieldMain` puts
+  `jtbl_800A0008` at offset 8 exactly this way.
+* **Read a global through a struct pointer when the target hoists its load
+  above nearby stores.** `*(u16*)(g_FieldTriggers + 0xA)` is a load through a
+  computed pointer and may alias the plain `extern` stores in front of it, so
+  gcc leaves it where it is; `((FieldTriggerHeader*)g_FieldTriggers)->
+  camHeightBias` sets `MEM_IN_STRUCT_P` and `true_dependence` then lets the
+  load float to the top of the block. Seven rows in `FieldMain`, and it is the
+  same lever as the `AddBackgroundToRender` aliasing bullet run the other way:
+  there a scalar had to *become* a struct to stop being hoisted, here a
+  pointer deref has to become a struct member to *start*.
+* **A `u8` switch selector wants a `u8` local, not a `u32` one.** The switch
+  needs the value twice — once for `do_tablejump`'s bounds check and once as
+  the table index — so combine cannot fold the zero-extension into the load
+  and the target has `lbu` plus `andi`. Assign it to a `u32` and the extension
+  disappears into the load. Three rows in `FieldMain`'s exit dispatch.
+* **`lui r/addiu r/op 0(r)` against your `$at` macro means the address is used
+  twice, not that the declaration is wrong.** gcc keeps a symbol's address in
+  a general register once cse has a second reference for it, and maspsx's
+  two-instruction `%hi`/`%lo(at)` expansion is what a single use produces. Six
+  rows in `FieldMain` are still on the wrong side of this, and the following
+  have all been measured and do *not* move it: scalar `extern`, one-element
+  array, struct member, `volatile` on the object, and a `volatile` store
+  through a cast.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 One near-miss that currently has no known fix: gcc hoists a global array's
