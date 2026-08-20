@@ -1006,8 +1006,31 @@ a near-miss, in rough order of frequency:
   handler, and taking a `FieldEntity*` instead of repeating the array
   expression. The original re-reads all of them at every use — `OpcodeFuncTurn`
   reads `GET_PARAM_U8(4)` and `(5)` three times each — and the locals are worth
-  tens of rows because they change what is live where. Repeat the whole
   indexed expression, however ugly it looks.
+* **But when the target *does* hold a `FieldEntity*` in a register, it holds
+  one per use site, not one per function.** The exception to the bullet above
+  is a run of accesses to the same model with a store in the middle: the
+  target keeps a base register across them because they are one source
+  expression, and it re-materialises the base for the *next* such run. Written
+  as one reused local, the pseudo's live range spans everything between the
+  runs and the allocator pays for it somewhere else. `FieldEntityTurnToEntity`
+  needs **three** — the TurnType/TurnStep checks, the `TurnStart = Dir`
+  snapshot, and the switch arms — and it matched only when all three were
+  separate variables: merging the arms into the snapshot's costs 30 rows and
+  merging the snapshot into the checks' costs 3. `OpcodeFuncMove` needs two
+  and `OpcodeFuncTurnr` four. The tell is a `move`/`addu` into a *different*
+  register than the one the previous run used, for the same address. This is
+  the same lever as the "one pointer pair per loop" bullet, applied to
+  straight-line code.
+* **m2c prints a switch's case bodies in address order, and that is the
+  source order.** gcc emits the bodies as the switch body is expanded, so
+  their layout is the order they were written; only the compare chain is
+  rebuilt by `balance_case_nodes`. So when m2c renders `case 2:` before
+  `case 1:` before `case 0:`, write them that way — it is not m2c being
+  arbitrary. `FieldEntityTurnToEntity`'s three direction arms measure 65, 53
+  and 42 rows as 0-1-2, 0-2-1 and 2-1-0, and only the last one goes on to
+  match. The give-away without m2c is the last test in the chain: `bne
+  <default>` with the arm as fall-through means that arm is written last.
 * **A helper that "just" wraps an opcode usually is the opcode.** Two `void`
   handlers calling a `void` helper, each doing its own `PC_INC`, is the shape
   m2c and a first reading produce; the original often has the helper do the
