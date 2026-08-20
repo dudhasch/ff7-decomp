@@ -7936,15 +7936,28 @@ s32 OpcodeFuncAdpal2(void) {
  * reassociate it onto the loop-invariant factor and hoist `factor * 2` out of
  * the loop, which is three rows on its own; `<< 1` does not reassociate.
  *
- * Three rows left. Two are &D_80095DE0's placement, as in the RTPALs above.
- * The third is not source-addressable: the target converts mulR and mulG to
- * u16 in the preheader (`andi t3,a0,0xffff`) but uses mulB straight out of
- * $s4, and the three are read identically from the same call. gcc is being
- * inconsistent with itself there, so no single declared type reproduces it --
- * u16 for all three gets the first two right and the third wrong. Related:
- * the target extracts red from the *untruncated* $a3 while taking the other
- * two channels from the truncated copy, which is the same inconsistency seen
- * from the other end. */
+ * The arithmetic is unsigned end to end: the target shifts the products with
+ * `srl` and clamps with `sltiu`, so `color' and the three channel results are
+ * u32. Declared u16/s32 -- which is what the m2c seed and every earlier
+ * revision of this note had -- the same source compiles to `sra'/`slti' and
+ * sits eight rows further out. `r | ((b << 10) | (g << 5))' is the target's
+ * or-tree; the natural `(b << 10) | (g << 5) | r' reverses one `or' operand.
+ *
+ * PARKED at 23 rows, and this pair has to be measured with *both* members
+ * unparked: MPPAL2 owns the "mppal" literal MPPAL prints, so with either one
+ * pinned the other emits a second copy and every `.rodata' offset after it
+ * shifts. The 2-row and 3-row figures earlier revisions of this note quoted
+ * were that artefact, not a residue.
+ *
+ * What is left is one hoist-order difference and its register-rename cascade.
+ * The target hoists in the order from-base, mulR mask, mulG mask, to-base --
+ * i.e. the order the values are first used in the loop body -- while every
+ * spelling tried computes both bases adjacently. Rejected: moving the `to'
+ * declaration below the channel arithmetic (it then sits in the `if' arm,
+ * which `move_movables' will not hoist at all: 46 rows), declaring it after
+ * the `color' read (no change), u16 `color' with the products cast to u32
+ * (25), and u16 mulR/mulG with u8 mulB, which is what the target's
+ * `andi 0xffff' on two of the three factors looks like it wants (29). */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal2);
 #else
@@ -7967,14 +7980,16 @@ s32 OpcodeFuncMppal2(void) {
     mulG = FieldEventReadMemoryU8(4, 7);
     mulR = FieldEventReadMemoryU8(5, 8);
     for (i = 0; i < count; i++) {
-        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
-        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
-        u16 color = from[i];
+        s32 sp = srcPal;
+        u8* base = D_80095DE0;
+        u16* from = (u16*)(base + sp * 32);
+        u16* to = (u16*)(base + dstPal * 32);
+        u32 color = from[i];
 
         if (color != 0) {
-            s32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
-            s32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
-            s32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+            u32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
+            u32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
+            u32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
 
             if (b >= 0x20) {
                 b = 0x1F;
@@ -7985,7 +8000,7 @@ s32 OpcodeFuncMppal2(void) {
             if (r >= 0x20) {
                 r = 0x1F;
             }
-            to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+            to[i] = r | ((b << 10) | (g << 5)) | (color & 0x8000);
             if (to[i] == 0) {
                 to[i] = 0x8000;
             }
@@ -8003,8 +8018,10 @@ s32 OpcodeFuncMppal2(void) {
  * overlay, and this one -- the sub-range form -- is second. The addresses say
  * so, and so does the fact that MPPAL2 owns the "mppal" literal this prints.
  *
- * Two rows, both &D_80095DE0's placement. Same channel extraction as
- * OpcodeFuncMppal2 above; read that note before touching this one. */
+ * PARKED at 15 rows, same single cause as OpcodeFuncMppal2 above -- the
+ * preheader hoist order -- and the same unsigned arithmetic and or-tree.
+ * Read that note before touching this one, including its warning that the
+ * pair only measures honestly with both members unparked. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMppal);
 #else
@@ -8031,14 +8048,16 @@ s32 OpcodeFuncMppal(void) {
     mulR = FieldEventReadMemoryU8(4, 9);
     end = start + count;
     for (i = start; i < end; i++) {
-        u16* from = (u16*)(D_80095DE0 + srcPal * 32);
-        u16* to = (u16*)(D_80095DE0 + dstPal * 32);
-        u16 color = from[i];
+        s32 sp = srcPal;
+        u8* base = D_80095DE0;
+        u16* from = (u16*)(base + sp * 32);
+        u16* to = (u16*)(base + dstPal * 32);
+        u32 color = from[i];
 
         if (color != 0) {
-            s32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
-            s32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
-            s32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
+            u32 r = (mulR * ((color << 1) & 0x3E)) >> 7;
+            u32 g = (mulG * ((color >> 4) & 0x3F)) >> 7;
+            u32 b = (mulB * ((color >> 9) & 0x3F)) >> 7;
 
             if (b >= 0x20) {
                 b = 0x1F;
@@ -8049,7 +8068,7 @@ s32 OpcodeFuncMppal(void) {
             if (r >= 0x20) {
                 r = 0x1F;
             }
-            to[i] = (b << 10) | (g << 5) | r | (color & 0x8000);
+            to[i] = r | ((b << 10) | (g << 5)) | (color & 0x8000);
             if (to[i] == 0) {
                 to[i] = 0x8000;
             }
@@ -8995,36 +9014,38 @@ s32 FieldEventSplitJoinEndTurn(s16 entityId) {
 
 /* FADE (0x6B): start a screen fade. Reads the fade type and per-channel target
  * colours, then the speed. The jump table picks the fadeAdjust start value per
- * fade family (subtractive fades start at the speed, additive at 0). The
- * .rodata phase wall (jump table). Verified C kept as the #else; codegen pinned
- * via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFade);
-#else
+ * fade family: the odd types (1/5/7/9) start one above the parameter, the even
+ * ones (2/6/8/10) at it, and 0/3/4 do not touch fadeAdjust at all. */
 s32 OpcodeFuncFade(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("fade", 8);
     }
     g_FieldState->fadeType = GET_PARAM_U8(7);
-    switch (g_FieldState->fadeType) {
+    switch ((s16) * (volatile u16*)&g_FieldState->fadeType) {
     case FFT_INV4_TO_FIELD_SUB:
-    case FFT_FIELD_TO_INV4_SUB:
     case FFT_STANDARD_TO_FIELD_ADD:
-    case FFT_FIELD_TO_STANDARD_ADD:
+    case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
         g_FieldState->fadeAdjust = GET_PARAM_U8(8) + 1;
         break;
-    default:
+    case FFT_FIELD_TO_INV4_SUB:
+    case FFT_FIELD_TO_STANDARD_ADD:
+    case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
+    case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
         g_FieldState->fadeAdjust = GET_PARAM_U8(8);
         break;
+    case FFT_INSTANT:
+    case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
+    case FFT_INSTANT_BLACK:
+        break;
     }
-    g_FieldState->fadeSpeed = FieldEventReadMemoryS16(1, 1);
-    g_FieldState->fadeRed = FieldEventReadMemoryU8(2, 3);
-    g_FieldState->fadeGreen = FieldEventReadMemoryU8(3, 4);
+    *(volatile s16*)&g_FieldState->fadeSpeed = GET_PARAM_U8(6);
+    g_FieldState->fadeRed = FieldEventReadMemoryU8(1, 3);
+    g_FieldState->fadeGreen = FieldEventReadMemoryU8(2, 4);
     g_FieldState->fadeBlue = FieldEventReadMemoryU8(4, 5);
     PC_INC(9);
     return 0;
 }
-#endif
 
 /* The two volatile casts are delay-slot barriers, not a claim about the
  * hardware. gcc reorg happily sinks a plain store sitting just ahead of a call
