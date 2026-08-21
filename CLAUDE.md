@@ -1262,6 +1262,21 @@ a near-miss, in rough order of frequency:
   `src/field/field4.c` matched on exactly this, from 26 rows; note this is not
   the same as the `KawaiFadeModelColor` bullet above, which is about *avoiding*
   duplication so cse keeps knowing what the variables held.
+* **A cast through a `volatile` pointer drops the qualifier, and the loads it
+  frees fill the target's `nop`s.** `volatile u8* ev;` says nothing about
+  `*(u16*)(ev + 1)` -- the cast produces a plain `u16*`, the MEM is not
+  volatile, and gcc will hoist that load above the `*(u16*)(ev + 0x63)` store
+  next to it, because two non-volatile MEMs through a computed pointer are
+  exactly what `memrefs_conflict_p` cannot disambiguate in the *other*
+  direction. What you see is a target with two `nop`s in load-delay slots that
+  your build fills with useful work, plus an `andi 0xffff` your build has and
+  the target does not: with the load hoisted its pseudo has two uses, and
+  combine only folds a zero-extension into a `lhu` that feeds one. Spelling
+  every access `*(volatile u16*)(ev + N)` restores the source order and both
+  effects go. Worth 25 rows in `FieldMain`, from a body whose park note had
+  already diagnosed the tail as "a load in the wrong place" and had gone
+  looking at the *types* of the two locals instead. When a diff is denser than
+  the target, check what the qualifiers survive.
 * **A struct member read through a `(volatile T*)` cast gets the global-volatile
   treatment without touching the header.** `((volatile FieldState*)g_FieldState)
   ->fadeAdjust` loads `lhu` and leaves the `sll`/`sra` as separate insns, where
