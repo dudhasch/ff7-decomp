@@ -1663,6 +1663,35 @@ a near-miss, in rough order of frequency:
   65/0 and 43/4 are inserted blocks, and not one of them is predictable from
   the target -- the pass to raise is `perm_ins_block`, and the only way to
   place one is to search.
+* **m2c's offsets are in *bytes*, so every `*(SYM + off)` it writes is scaled
+  a second time by whatever `SYM` is declared as.** The seed reads the byte
+  offset straight out of the `addu`, then renders the access as pointer
+  arithmetic on an `extern` that the project has already typed -- so
+  `*(g_FieldDebugPageY + page * 0x17A)` against an `s16[]` addresses
+  `page * 0x2F4`, and against an `s32[]` it is four times out. Nothing
+  complains: the C is valid, the function compiles, and the diff reads as a
+  wall of register noise because every address in it is wrong. Two functions
+  in `src/field/` were carrying this at 53 and 9 sites respectively, and in
+  both cases fixing it was the single largest step.
+  The fix is the byte-offset form this file already prescribes for the `$at`
+  wall -- `*(s16*)((u8*)SYM + off)` -- which is also what the target has
+  whenever it addresses interior labels: `FieldDebugRenderPage` spends **389
+  of its 1341 instructions** inside `$at` macro expansions and
+  `FieldBGUpdateDrawenv` 181 of 1266. Read the load width off the target per
+  symbol rather than trusting the `extern` (`lw` at one offset and `lhu` at
+  the next is normal), and check this before anything else on a fresh seed:
+  `grep -c '\$at'` against the function's instruction count tells you in one
+  command whether the original addresses this way at all.
+* **The index temporaries m2c emits under different names are usually one
+  variable, and whether it is computed once is worth tens of instructions in
+  either direction.** `temp_t7 = page * 0x17A;` repeated at five block
+  boundaries is one `off`. Merging the names is free; deciding how often to
+  *assign* it is the lever, and the two extremes are both bad --
+  `FieldDebugRenderPage` measures **+27** with the assignment repeated per
+  block, **-77** with the expression written inline at all 93 uses (cse then
+  folds it to far fewer than the target's six expansions), and lands closest
+  computing it once. Sweep the three; do not assume.
+
 * **Do not transcribe m2c's `if (c != 0) { do { … } while (i < c); }` -- that
   *is* a `for`, and writing both costs two instructions per loop.** gcc
   expands `for (i = 0; i < c; i++)` as an init, a zero-trip test and a
