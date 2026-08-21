@@ -2304,39 +2304,52 @@ extern u16 D_8011446C;
  *     computes `(i + 0xC) * 0x10`. The target uses both forms in the same
  *     loop, so this is not a tidiness choice.
  *
- * The eleven rows left are three `addu` operand orders -- the trigger base
- * `addu v1,v0,s3` against our `addu v1,s3,v0` twice, and the addPrim value's
- * `addiu v0,s3,0x40c0 / addu v0,s2,v0` against our reassociated
- * `addiu v0,s2,0x40c0 / addu v0,s3,v0` -- plus the three branch displacements
- * they shift, and one reorg choice: the target fills the second loop's guard
- * delay slot by duplicating `addiu v0,s4,1` from the branch target, we fill it
- * with `addiu a0,sp,0x10` from before the branch.
+ * Two rows left, down from eleven. Two levers, and both were inside the
+ * "measured and rejected" list this note used to carry, which had concluded
+ * that "the two remaining levers do not exist in C".
  *
- * Measured and rejected: `(u8*)g_FieldTriggers + i * 0x10 + K`,
- * `i * 0x10 + K + g_FieldTriggers` and `g_FieldTriggers + i * 0x10 + K` all
- * give the identical 11 (the addu order is not reachable from the trigger
- * address spelling); an explicit `s32 off = i * 0x10;` shared by the trigger
- * and the sprite -- which is what the target's callee-saved `$s3` looks like
- * -- costs 43 rows; a named `SPRT_16* spr` for the addPrim value costs 47;
- * and parenthesising the addPrim value as `(s32)buf + (i * 0x10 + 0x40C0)` is
- * inert, so fold's reassociation is not reachable from the source either.
+ * 1. The addPrim value is `&((SPRT_16*)((s32)buf + 0x40C0))[i]`, an ARRAY_REF
+ *    off a based pointer, not an integer sum. The old list had tried casts,
+ *    explicit parentheses and two named locals against fold's reassociation
+ *    of `i * 0x10 + 0x40C0 + (s32)buf` -- all inert or much worse -- but never
+ *    the subscript. An ARRAY_REF is not a PLUS_EXPR, so fold has nothing to
+ *    reassociate and expand emits `addiu <idx>,0x40c0` then `addu <buf>,<idx>`
+ *    the way the target does. 2 rows.
  *
- * A second budget added five more measurements, all negative, and together
- * they say the two remaining levers do not exist in C. Wrapping the offset
- * sum in a cast to block fold -- `(s32)(i * 0x10 + 0x40C0) + (s32)buf` and
- * the same with `(u32)` -- is inert to the instruction, because a conversion
- * to a type the operand already has is not a NOP_EXPR at all: the C front
- * end's `convert` returns the operand unchanged, so fold never sees a barrier.
- * Writing the multiply first in the trigger address, for the two `0x230`
- * accesses alone and for all five accesses in the loop, is also inert: fold
- * canonicalises a PLUS's operands before expand ever runs, so the emitted
- * `addu` order is not a function of source order. And giving the addPrim
- * value a plain byte-offset local -- `s32 off = i * 0x10 + 0x40C0;` at the
- * top of the loop body, then `(SPRT_16*)((s32)buf + off)`, which is the one
- * shape that would hand expand the target's two insns directly -- costs
- * 45 rows and 5 insertions, the same cliff the `SPRT_16* spr` local fell off:
- * the local is live across `RotTransPers`, `GetClut` and `addPrim`, takes a
- * callee-saved register, and the whole loop reallocates around it. */
+ * 2. The `do { } while (0);` after the addPrim is worth 7 rows and is a
+ *    placeholder, not an answer. It is decomp-permuter's `perm_ins_block`
+ *    mutation, found in an overnight run, and what it buys is a basic-block
+ *    boundary (expand_end_loop's exit CODE_LABEL) *inside* the `if` body,
+ *    before the join. Nothing natural has been found that puts one there:
+ *    plain braces around the tail, an inverted guard with the label before
+ *    `i++`, the same barrier moved outside the `if`, the clut check written
+ *    as a goto over its body, and moving the addPrim above the clut check or
+ *    above the x0/y0 stores all measure 9, 9, 9, 9, 87 and 81. The
+ *    PSY-Q `addPrim` macro is a comma expression here and in the real SDK, so
+ *    it is not a do-while wrapper in disguise. Resolve this before unparking;
+ *    it is very likely a source construct nobody has guessed yet.
+ *
+ * The two rows that remain are the trigger base: `addu v1,v0,s3` twice,
+ * against our `addu v1,s3,v0`. fold canonicalises a PLUS's operands by
+ * complexity before expand runs, so the MULT becomes op0 whatever the source
+ * order, and the emitted `addu` order is not a function of source order.
+ * Measured and inert for these two: `(u8*)g_FieldTriggers + i * 0x10 + K`,
+ * `i * 0x10 + K + g_FieldTriggers`, `(s32)g_FieldTriggers + i * 0x10 + K`,
+ * `((s32*)((u8*)g_FieldTriggers + 0x230))[i * 4]`,
+ * `((VECTOR*)((u8*)g_FieldTriggers + 0x230))[i].vx` and the same through a
+ * `(s32)` base -- all six give exactly these two rows. Note the contrast with
+ * lever 1: the subscript form works there because the whole address is one
+ * ARRAY_REF, and does not work here because the base itself is a runtime load
+ * that still has to be added to the scaled index.
+ *
+ * Also still true, from the first budget: an explicit `s32 off = i * 0x10;`
+ * shared by the trigger and the sprite -- which is what the target's
+ * callee-saved `$s3` looks like -- costs 43 rows, a named `SPRT_16* spr` for
+ * the addPrim value costs 47, and a byte-offset local `s32 off = i * 0x10 +
+ * 0x40C0;` costs 45 and 5 insertions. All three fall off the same cliff: the
+ * local is live across `RotTransPers`, `GetClut` and `addPrim`, takes a
+ * callee-saved register, and the whole loop reallocates around it. The
+ * target's `$s3` is a reduced giv, not a local. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldArrowsAddToRender);
 #else
@@ -2397,7 +2410,9 @@ void FieldArrowsAddToRender(
                 if (*(s32*)((u8*)g_FieldTriggers + i * 0x10 + 0x230) == 2) {
                     buf->Arrows[i + 0xC].clut = GetClut(0x100, 0x1E8);
                 }
-                addPrim(buf->ot, (SPRT_16*)(i * 0x10 + 0x40C0 + (s32)buf));
+                addPrim(buf->ot, &((SPRT_16*)((s32)buf + 0x40C0))[i]);
+                do {
+                } while (0);
             }
             i++;
         } while (i < 0xC);
