@@ -1590,6 +1590,9 @@ extern FieldBgOtSlot D_8009ACA2;
  *      where the pointer is assigned decides everything -- at the top of the
  *      function it is 124/3 against 65 for the assignment sitting immediately
  *      above the `layer3:` label.
+ *      It does not generalise to the other addPrims: the same treatment of the
+ *      layer-4 sprite addPrim, with its own pointer assigned above `layer4:`,
+ *      is 138/2, and of the BgDrenv3S addPrim 70.
  *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
