@@ -309,15 +309,44 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
- * The residue is 65 rows / 3 insertions with that object removed, in four
- * live clusters:
- *   1. the pre-loop block. The target builds &D_8009AC40 into a caller-saved
- *      register, stores through it, and derives `ev` from the *loop's* copy
- *      of that address at the preheader (`addiu s1,s3,-0x4b`, 0xb8 bytes
- *      later); here `ev` is derived at the pre-loop store, one instruction
- *      early. For gcc to hoist it, `ev` has to be assigned inside the loop --
- *      and every placement measured is much worse: loop top 114/12, after the
- *      fade `if` 87/7, before its first use 89/7. 2 rows and 1 insertion.
+ * The residue is 40 rows / 6 insertions with that object removed. Seven of
+ * those 40 are the `.rodata` offsets that object itself causes -- it is 8
+ * bytes of `.rodata` that the unparked function would emit as its own RECT
+ * blob, so while it is present the jump table sits at `.rodata+0x10` against
+ * the target's `+0x8` and every table slot reads wrong. That is the CLAUDE.md
+ * trap, seen from the measuring side rather than the landing side; deleting
+ * the object and the `#else` arm together is the only honest measurement, and
+ * this note quotes the number with it still there.
+ *
+ * The lever that took it from 65 to 40 is `volatile` on the *casts*, not on
+ * the pointer: `ev` is a `volatile u8*`, but `*(u16*)(ev + 0x63)` casts the
+ * qualifier away, so gcc was free to hoist the `ev + 1` load above the
+ * `ev + 0x63` store and fill both of the target's load-delay slots with it.
+ * `*(volatile u16*)(ev + N)` at all eight sites pins them in source order and
+ * the two `nop`s appear. It also removes an `andi 0xffff`: with the load
+ * hoisted, `fieldId`'s pseudo had two uses and combine would not fold the
+ * zero-extension into the `lhu`. Measured against it and worse: `fieldId` as
+ * `s32` or `u32` (54/5 with the casts, 69/4 without), `preloadId` as `s32` or
+ * `u32` (60/6).
+ *
+ * The live clusters, against the 40/6 base:
+ *   1. the pre-loop block. The target's preheader hoists five invariants into
+ *      callee-saved registers -- `ori s2,zero,1`, `ori s5,zero,3`,
+ *      `ori s4,zero,0xd`, the `%hi`/`%lo` of D_8009AC40 into $s3, and then
+ *      `addiu s1,s3,-0x4b` for `ev` -- and the pre-loop `fadeType = 0` store
+ *      builds its own copy of the address in $v0 and derives nothing. Here
+ *      `ev` is derived at that pre-loop store instead, one instruction early.
+ *      For gcc to hoist it, `ev` has to be assigned inside the loop, and every
+ *      placement measured is much worse: loop top 100/13 against the current
+ *      base (114/12 against the older one), before the fade `if` 140/22, after
+ *      the fade `if` 87/7, before its first use 89/7. 5 rows, 2 insertions.
+ *      The same block also shows `addiu s0,sp,0x18` -- the target computes
+ *      `&clip` into a callee-saved register before the five-way guard chain
+ *      and passes it with `move a0,s0`, where this build computes it straight
+ *      into $a0 at the call. A named `RECT* clipP` assigned anywhere in the
+ *      pre-loop block is exactly inert at all five placements measured: the
+ *      address is `sp + 0x18`, cse rematerialises it, and a pointer local
+ *      cannot pin it.
  *   2. CLOSED. D_8009AC1A[0] = 2 and the D_8009AC3C read wanted `volatile` on
  *      the declarations. The target materialises each address into a general
  *      register (lui/addiu/op 0(reg)) where a plain declaration gives maspsx's
@@ -597,8 +626,8 @@ void FieldMain(void) {
         }
         if (*ev == 1) {
             preloadId = D_80071A5C;
-            *(u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
-            fieldId = *(u16*)(ev + 1);
+            *(volatile u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
+            fieldId = *(volatile u16*)(ev + 1);
             g_CurrentFieldIndex = fieldId;
             if (fieldId != preloadId) {
                 StopFieldMapPreload();
@@ -606,17 +635,17 @@ void FieldMain(void) {
             if ((u32)((u16)g_CurrentFieldIndex - 1) < 0x40) {
                 g_FieldNextModule = 3;
                 func_800129D0();
-                *(u16*)(ev + 0x4B) = 3;
+                *(volatile u16*)(ev + 0x4B) = 3;
                 D_80071A58 = 3;
-                *(u16*)(ev + 0x4D) = 0;
+                *(volatile u16*)(ev + 0x4D) = 0;
                 D_8007E768 = 0;
                 D_80095DD4 = 1;
                 break;
             }
         }
         if (*ev == 0xC) {
-            *(u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
-            fieldId = *(u16*)(ev + 1);
+            *(volatile u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
+            fieldId = *(volatile u16*)(ev + 1);
             exitKind = ev[0xF1];
             g_CurrentFieldIndex = fieldId;
             switch (exitKind) {
@@ -649,9 +678,9 @@ void FieldMain(void) {
         }
         if (g_FieldNextModule == 5) {
             func_800129D0();
-            *(u16*)(ev + 0x4B) = 0xD;
+            *(volatile u16*)(ev + 0x4B) = 0xD;
             D_80071A58 = 0xD;
-            *(u16*)(ev + 0x4D) = 0;
+            *(volatile u16*)(ev + 0x4D) = 0;
             D_8007E768 = 0;
             D_80095DD4 = 1;
             break;
