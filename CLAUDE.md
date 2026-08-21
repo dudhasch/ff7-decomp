@@ -160,6 +160,30 @@ Functions already carrying a parked near-miss body are marked `P` and sort to
 the top: a written hypothesis is a head start, and finishing them is the
 cheapest work available.
 
+**`P` says a note exists, not how close it is -- run `parked_queue.py` for
+that.** The row count written into a park note is true of the moment it was
+written and of nothing after: anything that changes the function's own body,
+its callees' prototypes, or a struct it reads moves it, and a stale number is
+indistinguishable from a fresh one in the text.
+
+```shell
+.venv/bin/python3 tools/parked_queue.py 'src/field/field*.c' --jobs 4
+#   HandleKawaiDataInModel   2
+#   OpcodeFuncFadew          2
+#   FieldEntityTriggerCheck  9
+#   ...
+```
+
+It hands `variant_eval.py` a no-op edit per `MASPSX_OVERRIDE` body, so each
+score is that body's own, measured with every guard `variant_eval` already
+has -- the target unparked alone, diagnostics fatal, aliases discounted. This
+matters more than it sounds: a queue ordered by remembered numbers sent a full
+budget at a function its note called "-2 instructions" and the tool measured at
+110 rows, while the two functions actually two rows from matching sat eight
+places further down. Regenerate it at the start of a batch, next to
+`worklist.py`, and read it with the length caveat -- rows only compare between
+bodies of the same length.
+
 Then cross-check the pick with the trained model, which weighs different
 signals:
 
@@ -3464,6 +3488,7 @@ line N`, so keep the prose colon-free and put `// size:0xN` on its own.
 | `tools/builder/` | The Go build driver behind `./mako.sh` |
 | `tools/worklist.py` | Per-file work list: what is left, blocked, handwritten, cheapest first |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
+| `tools/parked_queue.py` | Every parked near-miss in a file, measured and ordered closest-first |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `tools/asm_widths.py` | Per-symbol access width from a target `.s` — what an m2c seed's byte offsets have to be cast to |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
