@@ -10014,8 +10014,10 @@ s32 OpcodeFuncNfade(void) {
  * And the permuter has now had a go, with the result recorded rather than
  * repeated: base score **10** -- exactly the two register rows at
  * `allocno_compare`'s 5 points each, so the scratch is measuring the right
- * thing -- and **no improvement in 32,000 candidates** with
- * `perm_ins_block=20` and `perm_temp_for_expr=200`. That is a strong negative
+ * thing -- and **no improvement in 191,751 candidates** with
+ * `perm_ins_block=20` and `perm_temp_for_expr=200`, run to a wall-clock limit
+ * rather than to exhaustion. Not one candidate ever scored below 10, so the
+ * run left no `output-` directory at all. That is a strong negative
  * and it fits the diagnosis: 10 is a local optimum with a cliff on both sides,
  * because the one edit that fixes the register also makes the two tails
  * identical hard-register patterns and cross-jumping then deletes three
