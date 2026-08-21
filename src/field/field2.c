@@ -2271,91 +2271,51 @@ void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
 
 extern u16 D_8011446C;
 
-/* Project the field-exit-arrow marker positions through the camera and add a
- * sprite packet for each visible one to the OT. Two passes: the twelve
- * trigger arrows, whose position is the midpoint of the two marker points at
- * g_FieldTriggers+0x38 (0x18 bytes per trigger, two s16 triples), and the
- * twelve field-exit arrows, whose position and kind sit at
- * g_FieldTriggers+0x224 with a 0x10-byte stride. The two sets share one
- * SPRT_16 array, Arrows[0..0xB] and Arrows[0xC..0x17]; kind 2 gets a second
- * CLUT.
+/* Queue the field exit arrows: up to 12 gateway markers, then up to 12
+ * "point" arrows the script can place, each projected through the current
+ * camera matrix and linked into the render OT.
  *
- * PARKED at 11 rows with the instruction count exact -- no insertions, no
- * deletions -- which makes it the closest permuter target in the overlay.
- * From an m2c seed that did not compile, and three things got it there:
+ * Matching, and three things in here look wrong and are not. Do not tidy them.
  *
- *   - `addPrim`'s second argument is built offset-first:
- *     `(SPRT_16*)(i * 0x10 + 0x40C0 + (s32)buf)`, not `&buf->Arrows[i + 0xC]`.
- *     The macro uses the pointer once as an address (base plus displacement)
- *     and once as a value, and the value has to be `buf + (i * 0x10 +
- *     0x40C0)`; every pointer spelling folds it to `(buf + 0x40C0) + i * 0x10`
- *     instead. That one argument was worth 70 of the original 86 rows, because
- *     the whole second loop's register allocation follows it.
- *   - `u0` is assigned before `v0`, in both loops. The u0 value is a six-insn
- *     chain off a `lhu` of D_8011446C and the v0 store is two insns; written
- *     u0-first, sched2 lifts the v0 store into the load's delay slot exactly
- *     as the target does. Written v0-first it is issued two slots early and
- *     leaves a nop. Two rows and the last insertion.
- *   - the packet's `u0`/`v0` are reached through
- *     `((struct FieldRenderData*)(i * 0x10 + (s32)buf))->Arrows[K]` while
- *     `x0`/`y0`/`clut` use the plain `buf->Arrows[i + K]`. Both address the
- *     same byte; the first keeps `i * 0x10` as the base register with 0x400C /
- *     0x40CC as the displacement (which is what the target has), the second
- *     computes `(i + 0xC) * 0x10`. The target uses both forms in the same
- *     loop, so this is not a tidiness choice.
+ * 1. `off = i * 0x10;` is used at five of the seven places that need the
+ *    scaled index and NOT at the other two -- `pos.vy` and the `.v0` store
+ *    still spell `i * 0x10` inline. That asymmetry is the match: the same
+ *    packet reached two ways in one loop is a shape the originals use (see
+ *    CLAUDE.md), and using `off` everywhere costs 43 rows, using it nowhere
+ *    costs 2, and using it at these five costs nothing. Its declaration slot
+ *    matters too -- between `pos` and `sz`.
  *
- * Two rows left, down from eleven. Two levers, and both were inside the
- * "measured and rejected" list this note used to carry, which had concluded
- * that "the two remaining levers do not exist in C".
+ * 2. `do { } while (0);` after the addPrim is worth 7 rows and its identity
+ *    is not recoverable. What it buys is the basic-block boundary that
+ *    expand_end_loop's exit CODE_LABEL puts *inside* the `if` body, before
+ *    the join; `while (0) { }` is byte-identical, so whatever the original
+ *    wrote there emitted loop notes. Everything natural that was tried is
+ *    7 rows short: plain braces around the tail, an inverted guard with the
+ *    label before `i++`, the barrier moved outside the `if`, the clut check
+ *    written as a goto over its body, and moving the addPrim above the clut
+ *    check or above the x0/y0 stores. The PSY-Q `addPrim` macro is a comma
+ *    expression here and in the real SDK, so it is not a do-while wrapper in
+ *    disguise. If someone works out what belongs here, this is the place.
  *
- * 1. The addPrim value is `&((SPRT_16*)((s32)buf + 0x40C0))[i]`, an ARRAY_REF
- *    off a based pointer, not an integer sum. The old list had tried casts,
- *    explicit parentheses and two named locals against fold's reassociation
- *    of `i * 0x10 + 0x40C0 + (s32)buf` -- all inert or much worse -- but never
- *    the subscript. An ARRAY_REF is not a PLUS_EXPR, so fold has nothing to
- *    reassociate and expand emits `addiu <idx>,0x40c0` then `addu <buf>,<idx>`
- *    the way the target does. 2 rows.
+ * 3. The second walk's addPrim argument is `&((SPRT_16*)((s32)buf +
+ * 0x40C0))[i]`
+ *    -- an ARRAY_REF off a based pointer, not the integer sum
+ *    `i * 0x10 + 0x40C0 + (s32)buf` the first walk's `&buf->Arrows[i]` would
+ *    suggest. fold reassociates the integer form to `(buf + 0x40C0) + i * 0x10`
+ *    and emits the two adds the other way round; an ARRAY_REF is not a
+ *    PLUS_EXPR, so there is nothing to reassociate. Casts, parentheses and
+ *    named locals were all measured against this and are inert or much worse.
  *
- * 2. The `do { } while (0);` after the addPrim is worth 7 rows and is a
- *    placeholder, not an answer. It is decomp-permuter's `perm_ins_block`
- *    mutation, found in an overnight run, and what it buys is a basic-block
- *    boundary (expand_end_loop's exit CODE_LABEL) *inside* the `if` body,
- *    before the join. Nothing natural has been found that puts one there:
- *    plain braces around the tail, an inverted guard with the label before
- *    `i++`, the same barrier moved outside the `if`, the clut check written
- *    as a goto over its body, and moving the addPrim above the clut check or
- *    above the x0/y0 stores all measure 9, 9, 9, 9, 87 and 81. The
- *    PSY-Q `addPrim` macro is a comma expression here and in the real SDK, so
- *    it is not a do-while wrapper in disguise. Resolve this before unparking;
- *    it is very likely a source construct nobody has guessed yet.
- *
- * The two rows that remain are the trigger base: `addu v1,v0,s3` twice,
- * against our `addu v1,s3,v0`. fold canonicalises a PLUS's operands by
- * complexity before expand runs, so the MULT becomes op0 whatever the source
- * order, and the emitted `addu` order is not a function of source order.
- * Measured and inert for these two: `(u8*)g_FieldTriggers + i * 0x10 + K`,
- * `i * 0x10 + K + g_FieldTriggers`, `(s32)g_FieldTriggers + i * 0x10 + K`,
- * `((s32*)((u8*)g_FieldTriggers + 0x230))[i * 4]`,
- * `((VECTOR*)((u8*)g_FieldTriggers + 0x230))[i].vx` and the same through a
- * `(s32)` base -- all six give exactly these two rows. Note the contrast with
- * lever 1: the subscript form works there because the whole address is one
- * ARRAY_REF, and does not work here because the base itself is a runtime load
- * that still has to be added to the scaled index.
- *
- * Also still true, from the first budget: an explicit `s32 off = i * 0x10;`
- * shared by the trigger and the sprite -- which is what the target's
- * callee-saved `$s3` looks like -- costs 43 rows, a named `SPRT_16* spr` for
- * the addPrim value costs 47, and a byte-offset local `s32 off = i * 0x10 +
- * 0x40C0;` costs 45 and 5 insertions. All three fall off the same cliff: the
- * local is live across `RotTransPers`, `GetClut` and `addPrim`, takes a
- * callee-saved register, and the whole loop reallocates around it. The
- * target's `$s3` is a reduced giv, not a local. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldArrowsAddToRender);
-#else
+ * The `.u0` and `.v0` stores go through a cast to FieldRenderData at
+ * `i * 0x10 + (s32)buf` while `x0`/`y0`/`clut` use the plain
+ * `buf->Arrows[i + K]`. Both address the same byte; the first keeps the
+ * scaled index as the base register with 0x400C / 0x40CC as the
+ * displacement, the second computes `(i + 0xC) * 0x10`. The original uses
+ * both forms in the same loop. */
 void FieldArrowsAddToRender(
     struct FieldRenderData* buf, MATRIX* mtx, s32 markers) {
     SVECTOR pos;
+    s32 off;
     s32 sz;
     s32 flag;
     s16 i;
@@ -2394,20 +2354,20 @@ void FieldArrowsAddToRender(
         } while (i < 0xC);
         i = 0;
         do {
-            if (*(s32*)((u8*)g_FieldTriggers + i * 0x10 + 0x230) != 0) {
-                pos.vx = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x224);
+            off = i * 0x10;
+            if (*(s32*)((u8*)g_FieldTriggers + off + 0x230) != 0) {
+                pos.vx = *(u16*)((u8*)g_FieldTriggers + off + 0x224);
                 pos.vy = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x228);
-                pos.vz = *(u16*)((u8*)g_FieldTriggers + i * 0x10 + 0x22C);
+                pos.vz = *(u16*)((u8*)g_FieldTriggers + off + 0x22C);
                 RotTransPers(&pos, (s32*)&pos, &sz, &flag);
-                ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
-                    ->Arrows[0xC]
-                    .u0 = (D_8011446C * 4 & 0x30) + 0x30;
+                ((struct FieldRenderData*)(off + (s32)buf))->Arrows[0xC].u0 =
+                    (D_8011446C * 4 & 0x30) + 0x30;
                 ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
                     ->Arrows[0xC]
                     .v0 = 0xD0;
                 buf->Arrows[i + 0xC].x0 = pos.vx - 7;
                 buf->Arrows[i + 0xC].y0 = pos.vy - 8;
-                if (*(s32*)((u8*)g_FieldTriggers + i * 0x10 + 0x230) == 2) {
+                if (*(s32*)((u8*)g_FieldTriggers + off + 0x230) == 2) {
                     buf->Arrows[i + 0xC].clut = GetClut(0x100, 0x1E8);
                 }
                 addPrim(buf->ot, &((SPRT_16*)((s32)buf + 0x40C0))[i]);
@@ -2421,7 +2381,6 @@ void FieldArrowsAddToRender(
         D_8011446C++;
     }
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_model.c
