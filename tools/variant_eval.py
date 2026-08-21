@@ -292,6 +292,18 @@ def score(obj, want, rows_wanted, context, cfg, func, out):
     out.append("TOTAL %d  (%d changed, %d inserted, %d deleted; target has %d insns)"
                % (chg + ins + dele, chg, ins, dele, want))
 
+    # Length is the hard invariant and `inserted` is not it: asm-differ counts
+    # a row where one side is blank, and a single moved instruction produces
+    # one of those plus a CHG somewhere else. FieldDebugRenderPage reports 127
+    # insertions and is twelve instructions long. So measure the compiled size
+    # directly and say so whenever it differs -- a body of the wrong length
+    # cannot match however few rows differ, and a row count is only comparable
+    # between two bodies of the same length.
+    got = compiled_insn_count(obj, func)
+    if got is not None and got != want:
+        out.append("       length %d against %d  (%+d instructions)"
+                   % (got, want, got - want))
+
     if not rows_wanted:
         return chg + ins + dele
     show = set()
@@ -310,6 +322,25 @@ def score(obj, want, rows_wanted, context, cfg, func, out):
                       checkfn.text_of(scoped[n].get("base")) or "",
                       checkfn.text_of(scoped[n].get("current")) or "", line))
     return chg + ins + dele
+
+
+def compiled_insn_count(obj, func):
+    """Instructions in `func` in a compiled object, from its ELF symbol size.
+
+    `nm -S` prints the size the assembler recorded for the symbol, which for a
+    function is exactly its body, so this needs no disassembly and no guessing
+    about where the next symbol starts."""
+    proc = subprocess.run(["mipsel-linux-gnu-nm", "-S", obj],
+                          capture_output=True, text=True)
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        # <value> <size> <type> <name>
+        if len(parts) == 4 and parts[3] == func and parts[2] in ("T", "t"):
+            try:
+                return int(parts[1], 16) // 4
+            except ValueError:
+                return None
+    return None
 
 
 def run_one(spec_path, rows_wanted, keep, context):

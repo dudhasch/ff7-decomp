@@ -1804,6 +1804,14 @@ a near-miss, in rough order of frequency:
   target's branch polarity and block order *literally* is also 731 -- so read
   the length, not the CFG.
 
+* **`variant_eval.py` prints the compiled length too, and that is the number
+  to read.** It reports `length <ours> against <target> (+N instructions)`
+  whenever the two differ, taken from the function's ELF symbol size rather
+  than from the diff, so it cannot be confused by alignment. Reach for it
+  first: `FieldDebugRenderPage` reports **127 insertions** and is **twelve**
+  instructions long, and three separate times this project has read an
+  insertion count as a length and drawn the wrong conclusion from it.
+
 * **`checkfn`'s "inserted" is not a length measurement — read the `+N
   instructions` figure instead.** An instruction that merely *moved* is
   reported as one insertion and one deletion, so the counts scale with how
