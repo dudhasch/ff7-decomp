@@ -1412,18 +1412,47 @@ extern FieldBgOtSlot D_8009ACA2;
  * The &run[2]-versus-&run[1] induction variable this note used to blame has
  * been measured and is not the problem: both builds compute the same two
  * bases, `addiu <r>,v0,0x10` and `addiu <r>,v0,0x14` at 0x2328, and differ
- * only in which register each lands in. Referencing run[2] before run[1] in
- * all four walks was measured -- 236 rows against 233 -- and does not move the
- * allocation either. Read as a whole the residue is a *permutation* of the
- * caller-saved set and nothing else: the same registers, the same count, and
- * every row a rename. No missing or extra hoist and no frame difference is
- * left to find by reading; this one belongs to decomp-permuter now, and it
- * should be re-imported against this body rather than the old one. Measured
- * and rejected: goto loops (434 rows, no hoisting at all), `break` out of the
- * loops (396), s32 wrap temporaries (frame 0x30, 320 rows), a separate s32
- * temporary loaded before the wrap test (278), locals for
- * D_8011448C/D_801144C8/g_FieldTriggers (305), and both `!(a && b)` and
- * `a > lo && a < hi` for the wrap test (251).
+ * only in which register each lands in.
+ * The residue is a *permutation* of the caller-saved set and nothing else:
+ * the same registers, the same count, and every row a rename. It is worth
+ * writing down exactly which permutation, because that is the only actionable
+ * thing left. In layer 1's preheader both builds emit the same seven
+ * invariants in the same order -- 0x00FFFFFF, &run[0], &run[2], 0xFF000000,
+ * 0x000124DC, &D_80071A48, and the inner sprite index -- and gcc assigns
+ * $t0..$t7 in allocno-priority order, so the register a value gets *is* its
+ * rank. Ranking them 1..8 by register number:
+ *
+ *   target: 0xFFFFFF, &run[2], 0xFF000000, sprite, count, 0x124DC,
+ *           &D_80071A48, &run[0]
+ *   here:   sprite, 0xFFFFFF, &run[2], 0xFF000000, count, &run[0], 0x124DC,
+ *           &D_80071A48
+ *
+ * so exactly two allocnos are misplaced: `sprite` is ranked first and belongs
+ * fourth, and `&run[0]` is ranked sixth and belongs last. allocno_compare
+ * sorts by `floor_log2(n_refs) * n_refs / live_length`, so lowering `sprite`
+ * means shedding loop-weighted references from it or lengthening its live
+ * range, and neither is reachable from anything tried. The `t8`-against-`s0`
+ * row at 0x2478 is the same fact one register further down.
+ *
+ * Measured and rejected across two sessions, all against this body:
+ * goto loops (434 rows, no hoisting at all), `break` out of the loops (396),
+ * s32 wrap temporaries (frame 0x30, 320 rows), a separate s32 temporary
+ * loaded before the wrap test (278), locals for
+ * D_8011448C/D_801144C8/g_FieldTriggers (305), both `!(a && b)` and
+ * `a > lo && a < hi` for the wrap test (251), referencing run[2] before
+ * run[1] in all four walks (236 against 233), a per-layer `count` (203), a
+ * per-layer `sprite` (207), both split (207), `entity` as u32 or s32
+ * (inert), `otSlot` as s16 (214/2), swapping the `otSlot`/`entity`
+ * declaration order (inert), and folding `data` away into
+ * `run = (*D_8009D848)->runs;` (inert). The per-layer splits are the
+ * interesting negatives: the same change on FieldBackgroundInitPackets'
+ * `data` was worth 12 rows, so "split pointers that describe different
+ * things" is not a rule that transfers -- there the three pointers really did
+ * address three different objects, here `count` and `sprite` describe the
+ * same walk four times over and merging them is correct.
+ *
+ * This one belongs to decomp-permuter, and the scratch must be re-imported
+ * against this body rather than an older one.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddBackgroundToRender);
