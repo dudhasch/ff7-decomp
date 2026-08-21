@@ -304,7 +304,7 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
- * The residue is 76 rows / 5 insertions with that object removed, in four
+ * The residue is 77 rows / 4 insertions with that object removed, in five
  * clusters:
  *   1. the pre-loop block. The target builds &D_8009AC40 into a caller-saved
  *      register, stores through it, and derives `ev` from the *loop's* copy
@@ -329,9 +329,19 @@ extern s16 D_80071E3C;
  *      dimension has now been measured against the corrected base and every
  *      one is worse: s32 temp 76/7, no temp 76/7, temp after the store 76/7,
  *      dropping the fieldId local 76/6, both 76/6. 10 rows.
- *   5. `li a0,-1` is hoisted above the rain if/else in the target and lands
- *      after the loop's two inits here. A named local for the fill value was
- *      measured and changes nothing. 3 rows.
+ *   5. the fill loop's two constants. `fillVal = -1;` written *above* the rain
+ *      if/else is what puts `li a0,-1` in the guard's delay slot, the way the
+ *      target has it -- the same lever as the `white` local in
+ *      FieldBackgroundInitPackets, and the reason the older note here recorded
+ *      "a named local changes nothing" is that it was assigned just before the
+ *      loop rather than above the branch. Position, not existence. The type is
+ *      inert (s8, s16 and s32 all measure 77/4). What is left is the other
+ *      constant: the target's `j` out of the first rain arm has a `nop` in its
+ *      delay slot and `li v1,0xf` at the join, where reorg steals the `li`
+ *      into the slot here. Measured and rejected: `fill` assigned before `i`
+ *      (80/5), `i = 0xF` hoisted above the branch too (92/4), `fill` hoisted
+ *      instead (97/5), the arms written as a goto rather than an else (77/4,
+ *      byte-identical). 3 rows.
  * The remaining rows are branch-target addresses, which follow from the
  * length difference and cost nothing once the clusters above are closed. */
 #ifndef NON_MATCHINGS
@@ -342,6 +352,7 @@ void FieldMain(void) {
     RECT clip = {0, 0, 480, 472};
     volatile u8* ev;
     s8* fill;
+    s32 fillVal;
     s32 i;
     u16 fieldId;
     s16 preloadId;
@@ -458,6 +469,7 @@ void FieldMain(void) {
                 ((FieldTriggerHeader*)g_FieldTriggers)->camHeightBias;
             FieldEventInit(&D_8009ABF4, g_FieldEntity, *D_8007EB64);
             g_FieldEntity[D_8009AC1E].Dir = D_8009AC18;
+            fillVal = -1;
             if ((g_RainControl & 0x80) == 0) {
                 g_RainForce = 0;
             } else {
@@ -466,7 +478,7 @@ void FieldMain(void) {
             i = 0xF;
             fill = &D_8009A057;
             do {
-                *fill-- = -1;
+                *fill-- = fillVal;
             } while (--i >= 0);
             FieldEntityBgTriggerInit((void*)(g_FieldTriggers + 0x158));
         } else {
