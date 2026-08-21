@@ -350,6 +350,15 @@ extern s16 D_80071E3C;
  *      measures 63/4 against 64/3 -- the same total, so it is left out.
  *      Earlier, against the pre-volatile base: s32 temp 76/7, no temp 76/7,
  *      temp after the store 76/7, dropping the fieldId local 76/6. 9 rows.
+ *      A `do { } while (0);` barrier after the 0x63 store -- decomp-permuter's
+ *      best find on the aligned scratch, 2080 against a base of 2505 -- is
+ *      deliberately *not* taken: it measures 59/5 against 65/3, six changed
+ *      rows turned into matches at the cost of two more instructions than the
+ *      target has, and a body that is longer is further from matching however
+ *      the row count reads. One barrier is the whole of it; two, three, four
+ *      and a barrier before the store all measure the same 59/5 or worse, as
+ *      does a temporary for the addPrim address the same candidate carried
+ *      (inert on its own).
  *   5. the fill loop's two constants. `fillVal = -1;` written *above* the rain
  *      if/else is what puts `li a0,-1` in the guard's delay slot, the way the
  *      target has it -- the same lever as the `white` local in
