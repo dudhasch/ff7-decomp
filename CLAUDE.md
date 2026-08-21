@@ -2258,6 +2258,34 @@ once unparked in the same build. Before spending a budget on any member of a
 clone family — the `Opcode*` palette ops, the `FieldEvent*` accessors, the
 `Kawai*` handlers — unpark the whole family and re-measure.
 
+**A relocation multiset that names a symbol more often than your source stores
+to it counts store *sites*, and it is a structural reading of the target that
+costs one command.** The check `permuter_scratch.sh` runs to prove a scratch is
+scoreable prints both objects' relocation counts, and each `%hi`/`%lo` pair is
+one site -- so six against four is three sites against two, which is a fact
+about cross-jumping and block layout rather than about registers.
+`FieldEntityWalkmechCross` in `src/field/field2.c` names `D_80113F28` four
+times against the target's six. Note what that did **not** settle there:
+writing the two stores out in all three arms rather than sharing a `store:`
+tail behind an `edge` variable was worth 10 rows and left the count at four,
+so gcc still merges the identical `D_80113F28 = *triId;` suffix and the source
+shape that defeats it is still unknown. Read the multiset early -- it is
+cheap, and it says how many sites the original had -- but treat a count you
+cannot move as an open question, not as a lever you have already pulled.
+
+**Three unrelated values spelled into one local is the counter-merging idiom
+run backwards, and it is worth more than any register lever.** CLAUDE.md's
+standing advice is to *merge* the counters of loops that describe the same
+walk. The converse costs just as much: `FieldEntityWalkmechCross`'s seed used
+one `px` for `pos->vx`, for `pos->vy` and then for the mesh-space x the cross
+products consume. Three unrelated live ranges in one pseudo take a `$t`
+register rather than `$v0`, and the scheduler hoists a load a block early to
+cover the resulting delay slot -- which reads as scheduling noise a long way
+from the declaration. A separate local for the conversion was **29 rows** and
+cost no instruction. When a diff shows a value in a callee- or long-lived
+register where the target uses `$v0`, count how many different things the
+source spells with that name.
+
 #### Seven ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into

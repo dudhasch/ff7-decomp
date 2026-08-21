@@ -1596,7 +1596,19 @@ void FieldInitDefaultValues(void) {
  * change). What the target has is the inner loop's own hoisted movable, which
  * only exists if `loop_optimize' finds the symbol inside the inner body --
  * and every spelling that puts it there folds `%hi'/`%lo' into the address
- * instead, which loses the register altogether. Permuter food. */
+ * instead, which loses the register altogether.
+ *
+ * Also rejected, and it is the one spelling the list above was missing: the
+ * *outer* accesses reached through the neighbouring symbol, `(u16*)((entity *
+ * 2) + (u8*)g_WindowToEntity - 0x70)`, so that cse has no shared `symbol_ref`
+ * to relate the inner reference to and `loop_optimize` is forced to give the
+ * inner loop its own movable. Both outer accesses 59/3, the post-loop one
+ * alone 59/3, the pre-loop one alone 26/1 -- against 16/0. The neighbouring-
+ * object idiom is real (see `FieldLoadMimToVram`) and it is the wrong tool
+ * here: it does not stop the copy, it just costs the outer loop its own base.
+ *
+ * The length is already exact -- 0 inserted, 0 deleted at 152 instructions --
+ * so this is a clean permuter target and score 0 is reachable. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else

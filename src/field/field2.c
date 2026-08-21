@@ -2177,14 +2177,16 @@ extern s16 D_801144CC;
  * reading the rows rather than by permuting:
  *
  *   - Write `D_801144CC` and `D_80113F28` out in all three arms rather than
- *     sharing a `store:` tail behind an `edge` variable. The two spellings
- *     differ only in that cross-jumping merges the identical
- *     `D_80113F28 = *triId;` suffix -- and the target does not merge it: its
- *     relocation multiset names `D_80113F28` **six** times against our four,
- *     which is three stores against two. That count is printed by
- *     `permuter_scratch.sh` and says nothing about registers. Worth 10 rows,
- *     and worth reaching for whenever a target references a symbol more often
- *     than the source stores to it.
+ *     sharing a `store:` tail behind an `edge` variable. Worth 10 rows. The
+ *     hypothesis behind it is only half confirmed and the other half is the
+ *     open question here: the target's relocation multiset names `D_80113F28`
+ *     **six** times against our four, which is three store sites against two,
+ *     so gcc is merging the identical `D_80113F28 = *triId;` suffix that all
+ *     three arms end with. Writing the arms out does *not* stop it -- the
+ *     count is still four afterwards -- so the 10 rows come from the block
+ *     layout rather than from the merge, and whatever source shape gives the
+ *     original three surviving sites has not been found. Do not re-derive
+ *     this from the rows; re-run `permuter_scratch.sh` and read the count.
  *   - Assign `scratch` *before* `result = 0`, not after the `D_80113F28`
  *     store. Whichever pseudo is created first wins the first `bgez`'s delay
  *     slot, and the target puts `lui s0,0x1f80` there. 3 rows.
