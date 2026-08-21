@@ -3699,7 +3699,7 @@ struct FieldRain {
 
 extern struct FieldRain g_FieldRain[64];
 extern u8 g_RainForce;
-extern s16 D_800E42EE[0x40][12];
+extern s16 g_FieldRainDrops[0x40][12];
 
 void FieldRainInit(struct FieldRenderData* renderData) {
     LINE_F2* line;
@@ -3737,7 +3737,7 @@ void FieldRainAddToRender(
 
     for (i = 0, j = 0; i < LEN(g_FieldRain); i++) {
         // 12 * sizeof(s16) = 24 bytes (0x18), the exact size of FieldRain
-        if (D_800E42EE[i][0] == 1) {
+        if (g_FieldRainDrops[i][0] == 1) {
             RotTransPers(&g_FieldRain[i].p1, &rain->x0, &p, &flag);
             RotTransPers(&g_FieldRain[i].p2, &rain->x1, &p, &flag);
             AddPrim(ot, rain);

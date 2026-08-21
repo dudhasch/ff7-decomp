@@ -3393,6 +3393,37 @@ An empty list means the rename is safe; anything else means the symbol is
 locked until that function matches. There is no alias escape — splat rejects
 two names at one vram with `Duplicate symbol detected!`.
 
+**A rename has to sweep `src/**/*.h`, not just the `.c` files.** Most of the
+`extern` declarations for these globals live in the per-overlay private headers
+(`src/field/field_private.h`, `src/main/main_private.h`), not in
+`include/game.h`. Miss one and gcc 2.6.3 reports `'g_Foo' undeclared (first use
+in this function)`, substitutes 0, and **keeps generating code** -- so the build
+runs to completion and the only symptom is the overlay's SHA-1. Renaming
+thirteen field globals this way silently took 736 bytes out of `field.exe`
+(0x2BC from `field4.c`, 0x24 from `field5.c`) with every function still
+diffing perfectly. The give-away is in `build/us/<ovl>.map`: a `.text` size that
+shrank. Check the compile output for non-warning diagnostics before believing
+a rename is inert.
+
+**Where a renamed symbol's name has to be declared depends on which overlay
+*defines* it.** Field's `vram_start` is `0x800A0000`, so every field global
+below that address is defined in **main**'s `.bss`/`.data` and merely
+referenced from field. Three files are involved and they do different jobs:
+
+| file | job |
+| --- | --- |
+| `config/symbols.<ovl>.us.txt` | names references in the `.s` splat writes for that overlay |
+| `config/sym_extern.us.txt` | `-T` linker script -- defines the absolute symbol, for *every* overlay's link |
+| `config/sym_export.us.txt` | generated from `main.elf`; do not edit |
+
+A main-owned global referenced from field needs an entry in **both** of the
+first two (`g_FieldMusicLock` is the worked example). With only the field entry,
+`main.elf` fails to link the moment main's own C references the new name --
+`undefined reference to 'g_FieldMovieLock'` -- because main's `.bss` `.s` still
+defines the old `D_` label. And `symbols.*.us.txt` is parsed strictly: a comment
+containing a `:` is rejected with `error reading config/symbols.field.us.txt,
+line N`, so keep the prose colon-free and put `// size:0xN` on its own.
+
 ## Repository map
 
 | Path | Contents |

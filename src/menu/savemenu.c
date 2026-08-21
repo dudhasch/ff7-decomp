@@ -688,7 +688,7 @@ ok:
     close(i);
     memcpy(&Savemap, D_801E7138, sizeof(SaveWork));
     for (i = 0; i < 12; i++) {
-        D_80049208[i] = ((u8*)Savemap.header.menu_color)[i];
+        g_FieldWindowColors[i] = ((u8*)Savemap.header.menu_color)[i];
     }
     return 0;
 }
@@ -761,7 +761,7 @@ void func_801D224C(void) {
         i++;
     } while (i < 3);
     for (i = 0; i < 12; i++) {
-        ((u8*)Savemap.header.menu_color)[i] = D_80049208[i];
+        ((u8*)Savemap.header.menu_color)[i] = g_FieldWindowColors[i];
     }
     Savemap.header.gil = D_8009D260;
     Savemap.header.time = D_8009D264;

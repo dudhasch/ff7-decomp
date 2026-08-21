@@ -1169,7 +1169,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001DEF0);
 void func_8001DEF0(u8* menu_colors) {
     s32 i;
     for (i = 0; i < 12; i++) {
-        D_80049208[i] = *menu_colors++;
+        g_FieldWindowColors[i] = *menu_colors++;
     }
 }
 #endif

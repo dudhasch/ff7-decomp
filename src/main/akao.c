@@ -192,7 +192,7 @@ extern s32 g_AkaoTempoMulMusic;
 extern s32 D_80062FF8;
 extern s32 D_80063004;
 extern s32 D_80063010; // sound message queue count
-extern u8 D_800716CC;
+extern u8 g_FieldMovieLock;
 extern u8 D_8007EBE4[];
 extern s32 D_8007EBE8;
 extern s32 D_8007EBEC;
@@ -1688,8 +1688,8 @@ void func_80033A90(void) {
 
     Savemap.phs_visibility_mask = 1; // Only Cloud is visible.
     g_FieldMusicLock = 0;
-    D_800716CC = 0;
-    D_80071E30 = 0;
+    g_FieldMovieLock = 0;
+    g_FieldBattleLock = 0;
     Savemap.partyID[0] = 0;
     Savemap.memory_bank_2[9] = 0;
     Savemap.memory_bank_4[0x68] = 0xFF; // Start of location name.

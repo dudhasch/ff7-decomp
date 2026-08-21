@@ -233,7 +233,7 @@ void func_800A3F4C(s32 arg0) {
         D_800E566C = 1;
     }
     if (D_800E566C > 0 && D_800E566C < 3) {
-        if (D_80071E30 == 0) {
+        if (g_FieldBattleLock == 0) {
             D_800E566C = 3;
             func_800A2108(0, 0);
             func_800B77A8(arg0);

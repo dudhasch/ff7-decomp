@@ -59,9 +59,9 @@ s32 OpcodeFuncSmtra(void) {
     materia |= FieldEventReadMemoryU8(3, 5) << 16;
     materia |= FieldEventReadMemoryU8(4, 6) << 24;
     if (func_8002542C(materia) == -1) {
-        D_8009D5A7 = 0;
+        g_FieldMateriaAddResult = 0;
     } else {
-        D_8009D5A7 = 1;
+        g_FieldMateriaAddResult = 1;
     }
     PC_INC(7);
     return 0;
@@ -2078,7 +2078,7 @@ void InitFieldDebugPages(void) {
     D_8007EBDC = 8;
     g_FieldScriptDebugFlags = 0;
     g_DebugLevel = 0;
-    D_80070788 = 0;
+    g_FieldDebugStepRequest = 0;
     g_FieldDebugCurPage = 5;
     FieldDebugPageSetHeadRow(5, 4);
 }

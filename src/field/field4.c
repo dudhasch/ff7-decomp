@@ -1274,7 +1274,7 @@ void FieldEventUpdate(s32 arg0) {
         }
     }
     if (g_FieldScriptRunState != 4) {
-        if (g_FieldScriptRunState != 5 || D_80070788 != 0) {
+        if (g_FieldScriptRunState != 5 || g_FieldDebugStepRequest != 0) {
             FieldEventOpcodeCycle();
         }
     }
@@ -1839,8 +1839,8 @@ void FieldEventOpcodeCycle(void) {
                 if (g_FieldScriptRunState == 5 && g_DebugLevel & 1 &&
                     (!(g_FieldScriptDebugFlags & 4) ||
                      g_FieldScriptDebugEntities[g_CurrentEntity])) {
-                    if (++D_8009A064 >= 8) {
-                        D_8009A064 = 0;
+                    if (++g_FieldDebugStepCounter >= 8) {
+                        g_FieldDebugStepCounter = 0;
                         g_CurrentEntity++;
                     }
                     goto done;
@@ -1858,7 +1858,7 @@ void FieldEventOpcodeCycle(void) {
 
 done:
     if (g_FieldScriptRunState == 5) {
-        D_80070788 = 0;
+        g_FieldDebugStepRequest = 0;
     }
     FieldUpdateAnimationState();
 }
@@ -4777,9 +4777,9 @@ s32 OpcodeFuncAkao(void) {
     *D_8009A000 = GET_PARAM_U8(4);
     *D_8009A004 = FieldEventReadMemoryU8(1, 5);
     *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 6);
-    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 8);
-    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 10);
-    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 12);
+    g_FieldAkaoArg3 = (s16)FieldEventReadMemoryS16(3, 8);
+    g_FieldAkaoArg4 = (s16)FieldEventReadMemoryS16(4, 10);
+    g_FieldAkaoArg5 = (s16)FieldEventReadMemoryS16(6, 12);
     SystemAkaoExecute();
     PC_INC(14);
     return 0;
@@ -4793,9 +4793,9 @@ s32 OpcodeFuncAkao2(void) {
     *D_8009A000 = GET_PARAM_U8(4);
     *D_8009A004 = (s16)FieldEventReadMemoryS16(1, 5);
     *D_8009A008 = (s16)FieldEventReadMemoryS16(2, 7);
-    D_8009A00C = (s16)FieldEventReadMemoryS16(3, 9);
-    D_8009A010 = (s16)FieldEventReadMemoryS16(4, 11);
-    D_8009A014 = (s16)FieldEventReadMemoryS16(6, 13);
+    g_FieldAkaoArg3 = (s16)FieldEventReadMemoryS16(3, 9);
+    g_FieldAkaoArg4 = (s16)FieldEventReadMemoryS16(4, 11);
+    g_FieldAkaoArg5 = (s16)FieldEventReadMemoryS16(6, 13);
     SystemAkaoExecute();
     PC_INC(15);
     return 0;
@@ -4850,7 +4850,7 @@ s32 OpcodeFuncCmusc(void) {
     FieldEventClearAkaoStruct();
     *D_8009A000 = GET_PARAM_U8(3);
     *D_8009A008 = (s16)FieldEventReadMemoryS16(3, 4);
-    D_8009A00C = (s16)FieldEventReadMemoryS16(4, 6);
+    g_FieldAkaoArg3 = (s16)FieldEventReadMemoryS16(4, 6);
     result = SetAndApplyAkao();
     PC_INC(6);
     return result;
@@ -5035,7 +5035,7 @@ s32 OpcodeFuncDskcg(void) {
     switch (g_FieldState->eventCmd) {
     case EVTCMD_NONE:
         g_FieldState->eventCmd = EVTCMD_CD_CHANGE;
-        D_8009D588 = GET_PARAM_U8(1);
+        g_FieldDiscChangeRequest = GET_PARAM_U8(1);
         return 1;
     case EVTCMD_CD_CHANGE:
         if (g_FieldState->movieCommandState == MOVCMD_DONE) {
@@ -8020,7 +8020,7 @@ s32 OpcodeFuncPmvie(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("pmvie", 1);
     }
-    if (D_800716CC != 0) {
+    if (g_FieldMovieLock != 0) {
         PC_INC(2);
         return 0;
     }
@@ -8054,8 +8054,8 @@ s32 OpcodeFuncMovie(void) {
         DebugPrintOpcode("movie", 0);
     }
     g_FieldMovieOpcodeActive = 1;
-    if (D_800716CC != 0) {
-        D_801144D4 = 0;
+    if (g_FieldMovieLock != 0) {
+        g_FieldMovieLockFrame = 0;
         PC_INC(1);
         return 0;
     }
@@ -8086,9 +8086,9 @@ s32 OpcodeFuncMvief(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("mvief", 2);
     }
-    if (D_800716CC != 0) {
-        FieldEventWriteMemoryS16(2, 2, D_801144D4);
-        D_801144D4++;
+    if (g_FieldMovieLock != 0) {
+        FieldEventWriteMemoryS16(2, 2, g_FieldMovieLockFrame);
+        g_FieldMovieLockFrame++;
         PC_INC(3);
         return 0;
     } else {
@@ -10084,9 +10084,9 @@ s32 OpcodeFuncGwcol(void) {
     }
     pane = FieldEventReadMemoryU8(1, 3);
     corner = pane * 3;
-    FieldEventWriteMemoryU8(2, 4, D_80049208[corner]);
-    FieldEventWriteMemoryU8(3, 5, D_80049208[corner + 1]);
-    FieldEventWriteMemoryU8(4, 6, D_80049208[corner + 2]);
+    FieldEventWriteMemoryU8(2, 4, g_FieldWindowColors[corner]);
+    FieldEventWriteMemoryU8(3, 5, g_FieldWindowColors[corner + 1]);
+    FieldEventWriteMemoryU8(4, 6, g_FieldWindowColors[corner + 2]);
     PC_INC(7);
     return 0;
 }
@@ -10100,9 +10100,9 @@ s32 OpcodeFuncSwcol(void) {
     }
     pane = FieldEventReadMemoryU8(1, 3);
     corner = pane * 3;
-    D_80049208[corner] = FieldEventReadMemoryU8(2, 4);
-    D_80049208[corner + 1] = FieldEventReadMemoryU8(3, 5);
-    D_80049208[corner + 2] = FieldEventReadMemoryU8(4, 6);
+    g_FieldWindowColors[corner] = FieldEventReadMemoryU8(2, 4);
+    g_FieldWindowColors[corner + 1] = FieldEventReadMemoryU8(3, 5);
+    g_FieldWindowColors[corner + 2] = FieldEventReadMemoryU8(4, 6);
     PC_INC(7);
     return 0;
 }
@@ -10209,7 +10209,7 @@ s32 OpcodeFuncCkitm(void) {
 // Begin of field_opcode_special.c
 /////////////////////////////////////////////////
 
-extern u8 D_8009D7D0[1];
+extern u8 g_FieldMessageSpeed[1];
 void func_80033A90(void);
 void SystemMessageSetCharName(u8 charId, u8 nameId);
 
@@ -10219,13 +10219,13 @@ void SystemMessageSetCharName(u8 charId, u8 nameId);
  * the jump table's `(u32)(sub - 0xF5) < 0xB` guard checks.
  *
  * Four findings, all costly to re-derive:
- *   - `D_8009D7D0` is an array, not a scalar. As a plain `extern u8` the store
- *     in the SMSPD arm is not MEM_IN_STRUCT_P, so true_dependence lets the
- *     `g_FieldScriptPC[g_CurrentEntity]` load PC_INC needs float above it: gcc
+ *   - `g_FieldMessageSpeed` is an array, not a scalar. As a plain `extern u8`
+ * the store in the SMSPD arm is not MEM_IN_STRUCT_P, so true_dependence lets
+ * the `g_FieldScriptPC[g_CurrentEntity]` load PC_INC needs float above it: gcc
  *     issues the `nor` immediately after the call, has to park it in $a1
  *     because $v0 has gone to &g_FieldScriptPC, and sinks the store past the
- *     PC address. Declared `u8[1]` and written `D_8009D7D0[0]`, the store is
- *     in a struct too, the load is pinned below it, the `nor` lands in the
+ *     PC address. Declared `u8[1]` and written `g_FieldMessageSpeed[0]`, the
+ * store is in a struct too, the load is pinned below it, the `nor` lands in the
  *     load-delay slot of the `lbu` and keeps $v0 -- which is the target. That
  *     was the last row, after a park note had called it "post-reload
  *     scheduling with equal priorities on both sides"; it is aliasing, and it
@@ -10281,14 +10281,14 @@ s32 OpcodeFuncSpcal(void) {
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("mvlck", 2);
         }
-        D_800716CC = GET_PARAM_U8(2);
+        g_FieldMovieLock = GET_PARAM_U8(2);
         PC_INC(3);
         return 0;
     case 0xFB:
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("btlck", 2);
         }
-        D_80071E30 = GET_PARAM_U8(2);
+        g_FieldBattleLock = GET_PARAM_U8(2);
         PC_INC(3);
         return 0;
     case 0xFA:
@@ -10314,14 +10314,14 @@ s32 OpcodeFuncSpcal(void) {
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("smspd", 3);
         }
-        D_8009D7D0[0] = ~FieldEventReadMemoryU8(4, 3);
+        g_FieldMessageSpeed[0] = ~FieldEventReadMemoryU8(4, 3);
         PC_INC(4);
         return 0;
     case 0xF7:
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("gmspd", 3);
         }
-        FieldEventWriteMemoryU8(4, 3, ~D_8009D7D0[0]);
+        FieldEventWriteMemoryU8(4, 3, ~g_FieldMessageSpeed[0]);
         PC_INC(4);
         return 0;
     case 0xF6:

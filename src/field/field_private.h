@@ -165,7 +165,7 @@ extern u8 g_RandomTableStep;
 extern u8 g_RandomTableIndex;
 extern u8 g_RandomTable[256];
 extern u8 g_DialogDigitCharacters[16];
-extern s16 D_800E42EE[0x40][12];
+extern s16 g_FieldRainDrops[0x40][12];
 extern u8 g_WindowReplaceBank[4][8];
 extern u16 g_WindowReplaceBankAddr[4][8];
 extern s16 g_WindowWaitTime[4];
@@ -185,8 +185,8 @@ extern s16 g_WindowTotalRowsHeight[4];
  * sign-extension instead of folding into a signed load. */
 extern volatile u16 g_FieldMovieStreamActive;
 extern u8 g_FieldExitArrowState[];
-extern u8 D_8009D5A7;
-extern u8 D_800716CC;
+extern u8 g_FieldMateriaAddResult;
+extern u8 g_FieldMovieLock;
 extern u8
     g_FieldMovieOpcodeActive; // set while a movie opcode is driving playback
 extern u32
@@ -197,9 +197,9 @@ extern s16 g_FieldMovieStreamDone;
 void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
 void func_800354CC(void);                    // STR playback start
 void func_80035658(void);                    // STR playback stop
-extern s32 D_8009A010;
-extern s32 D_8009A014;
-extern s16 D_801144D4;
+extern s32 g_FieldAkaoArg4;
+extern s32 g_FieldAkaoArg5;
+extern s16 g_FieldMovieLockFrame;
 extern u8 D_80095DE0[];
 /* "evt cmd=" and "evt result=", written into field4.c's .rodata by
  * OpcodeFuncMjump and OpcodeFuncTutor and shared with OpcodeFuncMenu over in
@@ -329,7 +329,7 @@ void PlayWindowPointerClickSound(void);
 /* Declared in a unit body before the split. */
 extern s16 D_80071A5C;
 extern s16 D_8009AC1C;
-extern s16 D_800E42EE[0x40][12];
+extern s16 g_FieldRainDrops[0x40][12];
 extern s16 g_CurrentFieldIndex;
 extern s16 g_PlayerModelId;
 extern s32 D_8007E770;

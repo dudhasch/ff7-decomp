@@ -777,8 +777,8 @@ typedef struct WindowData {
     u16 preventClose;
 } WindowData; // size:0x30
 
-extern u8 D_80049208[12];   // window colors maybe??
-extern u8 D_800492F0[][12]; // see Labels enum
+extern u8 g_FieldWindowColors[12]; // window colors maybe??
+extern u8 D_800492F0[][12];        // see Labels enum
 extern FieldModelData* g_FieldModelData;
 extern u16 D_80062D78; // pressed button?
 extern u16 D_80062D7C; // pressed button?
@@ -800,7 +800,7 @@ extern Unk800A8D04* g_CurrentAction;
 extern DRAWENV D_800706A4[2];
 extern u8 g_FieldMusicLock; // MUSIC/FMUSC skip the sound engine while nonzero
                             // (set by the MULCK opcode)
-extern u8 D_80070788;
+extern u8 g_FieldDebugStepRequest;
 extern u8 g_EntityToLine[48];
 extern u16 g_BattleMode;
 extern u16 g_FieldWaitCounter[48];      // Used by WAIT opcode to pause script
@@ -810,7 +810,7 @@ extern u8 g_FieldScriptSyncWaitEntity[48][8];
 extern s8 g_FieldDebugCurPage;
 extern u8 g_FieldScriptDebugFlags;
 extern u8 g_WindowCount;
-extern u8 D_80071E30;
+extern u8 g_FieldBattleLock;
 extern MATRIX* D_80071E40;
 extern u8 g_PartyUpdatedByFieldScript;
 extern u8 g_CurrentEntity; // entity owning the currently executing script
@@ -854,10 +854,10 @@ extern u8 g_FieldScriptRunState;
 extern s16 D_8009A000[1];
 extern u32 D_8009A004[1];
 extern s32 D_8009A008[1];
-extern s32 D_8009A00C;
+extern s32 g_FieldAkaoArg3;
 extern s32 D_8009A024[8];
 extern u8 g_FieldCurrentOpcode;
-extern s32 D_8009A064;
+extern s32 g_FieldDebugStepCounter;
 extern u8 g_FieldScriptPriority[48]; // active scripts execution priority
 extern FieldState D_8009ABF4;
 extern u8 D_8009AC2F;
@@ -873,7 +873,7 @@ extern u8 D_8009D2E7;
 extern u8 D_8009D302;
 extern u8 D_8009D391[1]; // part of a struct?
 extern u8 D_8009D40D;
-extern u8 D_8009D588; // disc number requested by the DSKCG opcode
+extern u8 g_FieldDiscChangeRequest; // disc number requested by the DSKCG opcode
 extern u8 D_8009D684;
 extern u8 D_8009D685;
 extern u8 D_8009D686;
