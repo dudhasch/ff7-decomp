@@ -1935,7 +1935,14 @@ back.
 
 `checkfn.py` builds through ninja into `build/us/...`, a single shared path, so
 it cannot be run concurrently: two agents editing the same `.c` overwrite each
-other's object and read each other's verdict. When you want to sweep dozens of
+other's object and read each other's verdict. The same collision bites a single
+agent: a decomp-permuter **import** unparks the target into the live `.c`,
+runs ninja, and only then restores it, so an import running in the background
+and a variant sweep in the foreground will clobber each other's copy of the
+source. The failure is silent in both directions — the import writes a scratch
+built from someone else's variant, or dies with `Function <name> not found in
+base.c`, and the sweep scores a body it did not write. Do the imports first,
+wait for them, then sweep. When you want to sweep dozens of
 phrasings of one function — or run several searches in parallel —
 use `tools/variant_eval.py` instead:
 
