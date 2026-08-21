@@ -1372,7 +1372,10 @@ extern s16 D_801144D0;
  *   - `s32`/`s16`/`u32` counters (no change or worse); declaring the counters
  *     ahead of the pointers (no change); `s32 count` (216/25); `white`
  *     declared ahead of `count` (no change); a `white` at the layer-2 entry
- *     (no change).
+ *     (no change). Re-measured on the lever 8-10 base, since the body has
+ *     moved: `s16` counters inert, `s32` and `u32` counters 36/12, `u16 count`
+ *     82/12 and `s32 count` 98/11, against 34/13. The counter types are
+ *     genuinely free and `count` is genuinely `s16`.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
