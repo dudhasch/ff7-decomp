@@ -989,17 +989,36 @@ extern s16 D_801144D0;
  * shifts the whole register allocation; a backward goto is not a loop gcc
  * recognises, so the test stays at the top and is reached by a plain `j`.
  *
- * 25 rows out, and they are one register-allocation decision repeated: the
- * target keeps `modes` in s8 and spills both sprite counters (0x20 and 0x28);
- * this build keeps spriteCount in s8 and spills `modes`, so every `modes++`
- * costs an lw/addiu/sw instead of one addiu. The target's frame is 0x10 larger
- * than ours with 36 bytes of its locals never touched, which says it carried
- * one more long-lived value than this C creates -- find that value and the
- * allocation should fall out. Two structural findings are already folded in
- * above: the goto loops, and the explicit if/else around SetSemiTrans.
- * Measured and rejected: `while` loops with the same body (43 rows, frame
- * 0x10 too large), assigning `run` after tile1/tpages (no change), and
- * `for (;;) { if (...) break; }` (38 rows).
+ * 176 changed / 25 inserted. Read the two numbers separately, because an
+ * earlier version of this note quoted only the insertions and made the
+ * function look 25 rows from done: the 25 are one register-allocation decision
+ * repeated, and the 176 are its consequences. The target keeps `modes` in $s8
+ * and spills both sprite counters (0x20 and 0x28); this build keeps
+ * spriteCount in $s8 and spills `modes`, so each of the four `modes++` costs
+ * an lw/addiu/sw where the target pays one addiu -- that is the 25 -- and
+ * every register downstream renames.
+ *
+ * gcc 2.6.3's global_alloc ranks by `log2(n_refs) * n_refs / live_length` with
+ * **no** frequency weighting (that came later), so the inner do-while loops do
+ * not help the counters and the four backward-goto walks do not hurt `modes`.
+ * What decides it is the live range: `spriteCount` dies at
+ * `D_801144C8 = spriteCount;` at the top of layer 3, well before `modes`'
+ * last use in layer 4, and the shorter range wins. Nothing tried lengthens it.
+ *
+ * The frame is now right: `u8 unusedLocals[0x10];` reserves the 0x10 the
+ * target carries and this C does not create, and is worth 22 rows on its own
+ * (198 -> 176). The size is exact -- 0x8 and 0x18 both revert to 198.
+ *
+ * The goto walks are load-bearing and the numbers that used to sit here were
+ * insertions, not rows: as `while` loops the body measures 191/43, as
+ * `for (;;) { if (...) break; }` 177/36, against 176/25 here, because
+ * duplicate_loop_exit_test copies the 0x7FFF test to the bottom of each of the
+ * four walks. A backward goto is not a loop gcc recognises, so the test stays
+ * at the top and is reached by a plain `j`. Also measured and rejected:
+ * `SetDrawMode(modes++, ...)` at all four sites (174/29 -- two fewer changed
+ * rows for four more insertions, so worse); `s32`/`s16` counters and an `s32`
+ * spriteCount (no change); declaring the counters ahead of the pointers (no
+ * change); assigning `run` after tile1/tpages (no change).
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
@@ -1014,6 +1033,7 @@ void FieldBackgroundInitPackets(
     s16 count;
     u16 spriteCount;
     u16 sprite34Count;
+    u8 unusedLocals[0x10];
 
     spriteCount = 0;
     sprite34Count = 0;
