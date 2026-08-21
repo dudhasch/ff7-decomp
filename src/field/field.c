@@ -1009,7 +1009,7 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 67 changed / 15 inserted, down from 174/23. Six levers got it there and
+ * 55 changed / 15 inserted, down from 174/23. Seven levers got it there and
  * three of them contradict what this note used to say, so read the rejected
  * list at the bottom as history, not as evidence.
  *
@@ -1064,6 +1064,16 @@ extern s16 D_801144D0;
  *    against 67, and with `*tpages++` still in the argument it is 71 either
  *    way.
  *
+ * 7. `data` is three variables, one per layer, not one reused three times.
+ *    The layer-4 walk never reads it at all. This is the opposite of the
+ *    counter-merging rule and the same side as the one-pointer-pair-per-loop
+ *    rule: merge counters that describe the same walk, split pointers that
+ *    describe different ones. 12 rows, and it is the change that made the
+ *    whole prologue line up -- everything down to the first spill store now
+ *    matches instruction for instruction. Splitting `count` the same way is
+ *    worse in both arrangements (80 against 67 with `data` merged, 69 against
+ *    55 with it split), which is the counter-merging rule holding.
+ *
  * `white` is not a tidiness variable. The target materialises 0x80 into a
  * callee-saved register once at the layer-3 entry and again at the layer-4
  * entry (`ori $s1,$zero,0x80` at both, the second one alone in its own block),
@@ -1075,13 +1085,15 @@ extern s16 D_801144D0;
  * costs 51 rows.
  *
  * The frame is right and the spill offsets are not, and the two cannot both be
- * satisfied by padding. `u8 unusedLocals[0x10];` gives the target's 0x78 frame
- * but puts the three spill slots at 0x28/0x30/0x38 against the target's
+ * satisfied by padding, and lever 7 did not change that -- the three pointers
+ * took registers, not slots. `u8 unusedLocals[0x10];` gives the target's 0x78
+ * frame but puts the three spill slots at 0x28/0x30/0x38 against the target's
  * 0x18/0x20/0x28; deleting it puts the slots exactly right and the frame at
  * 0x68. Declared locals are allocated during expand and reload's spill slots
  * after them, so a declared local always sits *below* the spills and can only
  * push them up -- measured: none 132 (slots right, frame 0x10 short), 0x8 140,
- * 0x10 118, 0x18 140, 0x20 140 (frame 0x88, slots at 0x40/0x48). The target's
+ * 0x10 118, 0x18 140, 0x20 140 (frame 0x88, slots at 0x40/0x48); and again
+ * against the seven-lever base: none 64, 0x8 77, 0x10 55, 0x18 77. The target's
  * extra 0x20 sits *above* its three spill slots, which a declared local cannot
  * produce; it has to be two more spilled pseudos whose references reload later
  * satisfied from registers. Until one of those is identified, 0x10 is the best
@@ -1118,7 +1130,9 @@ MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
 #else
 void FieldBackgroundInitPackets(
     SPRT_16* sprt16, SPRT* sprt, u8* pairs, DR_MODE* modes) {
-    FieldBgData* data;
+    FieldBgData* data1;
+    FieldBgData* data2;
+    FieldBgData* data3;
     FieldBgTile1* tile1;
     FieldBgTile2* tile2;
     u16* tpages;
@@ -1133,10 +1147,10 @@ void FieldBackgroundInitPackets(
     sprite34Count = 0;
     D_8011448C = 0;
     D_801144D0 = 0;
-    data = *D_8009D848;
-    run = data->runs;
-    tile1 = (FieldBgTile1*)((u8*)data + data->layer1Offset);
-    tpages = (u16*)((u8*)data + data->tpageOffset);
+    data1 = *D_8009D848;
+    run = data1->runs;
+    tile1 = (FieldBgTile1*)((u8*)data1 + data1->layer1Offset);
+    tpages = (u16*)((u8*)data1 + data1->tpageOffset);
 
     for (;;) {
         if (run[0] == 0x7FFF) {
@@ -1175,8 +1189,8 @@ void FieldBackgroundInitPackets(
 
 layer2:
     D_8011448C = spriteCount - D_8011448C;
-    data = *D_8009D848;
-    tile2 = (FieldBgTile2*)((u8*)data + data->layer2Offset);
+    data2 = *D_8009D848;
+    tile2 = (FieldBgTile2*)((u8*)data2 + data2->layer2Offset);
 
     for (;;) {
         if (run[0] == 0x7FFF) {
@@ -1218,8 +1232,8 @@ layer2:
 layer3:
     white = 0x80;
     D_801144C8 = spriteCount;
-    data = *D_8009D848;
-    D_8007EBD4 = (FieldBgTile3*)((u8*)data + data->layer34Offset);
+    data3 = *D_8009D848;
+    D_8007EBD4 = (FieldBgTile3*)((u8*)data3 + data3->layer34Offset);
 
     for (;;) {
         if (run[0] == 0x7FFF) {
