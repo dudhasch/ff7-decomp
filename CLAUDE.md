@@ -1579,6 +1579,41 @@ a near-miss, in rough order of frequency:
   givs, so the two increments came out swapped as well: 15 rows to 3 on one
   statement. When a diff shows the target storing to the same address twice,
   stop looking for a scheduling explanation.
+* **A dead conditional is a register-allocation lever, and it leaves no
+  instructions behind.** When a diff is a permutation of the caller-saved set
+  and nothing else, the fix is to change one value's *rank* — gcc assigns
+  `$t0..$t9` in allocno-priority order, so the register a value gets is its
+  rank — and `allocno_compare`'s only reachable term is `n_refs`, weighted by
+  loop depth in flow. An extra reference at depth 0 therefore reorders the
+  whole set, and it does not have to survive to the object:
+
+  ```c
+  if (sprite || ((P_TAG*)&buf->ot[D_8009ACA2.layer4])->addr) {
+      run++;
+      goto layer3;
+  }
+  run++;
+  goto layer3;
+  ```
+
+  Both paths do the same thing and both operands are pure, so jump_optimize
+  and flow delete all of it — the insertion count goes *down*, from 1 to 0 —
+  and `AddBackgroundToRender` in `src/field/field.c` drops 56 rows. Every part
+  of the condition matters and none of it is guessable: `sprite ||` on its own
+  is 112 rows, the `->addr` term on its own 161, `count` in place of `sprite`
+  154, dropping the cast so the load is a plain `u_long` 151/2, and the plain
+  `do { } while (0); ` barrier that finished `FieldArrowsAddToRender` 159. The
+  `else` arm decomp-permuter wrote it with is not needed; the duplicated tail
+  is. Repeating the construct at the neighbouring walk's exit costs rows again.
+
+  The companion form is cheaper to write and does survive: assigning a
+  subexpression to an *existing* local inside a condition,
+  `((otSlot = buf->BgAnim[...].mask) & mask)`, which adds references to that
+  local rather than to a new one — a fresh local in its place gives back none
+  of the 34 rows it is worth. Both of these are `perm_ins_block` and
+  `perm_temp_for_expr` finds; neither is reachable by reasoning about the
+  target, because neither changes what the code does. When the residue is pure
+  renaming, raise those two weights and let the search run.
 * **When two locals hold each other's register and nothing you write moves
   them, you are looking at `allocno_compare`, and only two of its three terms
   are reachable from C.** gcc 2.6.3 sorts global allocnos by
