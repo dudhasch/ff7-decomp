@@ -1199,8 +1199,32 @@ extern FieldLine D_8007E7AC;
  *     Measured and inert there: the `s16` local assigned inside the `else`
  *     arm rather than before the `if`, which is what the target's
  *     `move a3,v1` in the branch delay slot looks like it should need.
- *   - Passes 2 (-9), 3 (-6), 7 (-7) and 8 (-9) are over and have not been
- *     read since the switches and the arm split landed.
+ *   - Passes 2 (-9) and 3 (-6) are over, and both are the index again: the
+ *     target computes `sra v0,v0,16 / sll / addu / sll s0,v1,2` once at the
+ *     loop top and addresses the shared switch tails as `addu at,at,s0`,
+ *     where we recompute it in each tail. Unlike passes 7 and 8 neither pass
+ *     re-extends the counter anywhere, so here the single `s32 idx` local
+ *     genuinely is the right structure -- with it, **pass 3 lands on exactly
+ *     209 instructions** and pass 2 on 115 of 110. It costs 92 rows, and that
+ *     is the whole difficulty: `idx` in pass 3 alone is 498 rows against 406,
+ *     in pass 2 alone 493, in both 502, and the declaration's position among
+ *     the locals is inert (measured last as well as first), so the cost is
+ *     the extra pseudo competing across the function rather than a spill-slot
+ *     shift. Something else has to absorb that before the index local can be
+ *     kept.
+ *
+ *     Also measured and exactly inert on these two passes: a `u8` local for
+ *     the switch selector and an `s32` one -- CLAUDE.md's prescription for
+ *     the missing `slti` range check, which is one of pass 2's rows -- and
+ *     the passes-7/8 hoist recipe, `typeDone = 3; ents = g_FieldEntity;` at
+ *     the top of pass 2's loop body with the turnDone store through the
+ *     constant and the turnStep store through the pointer. The target's pass
+ *     2 does hoist both (`ori s3,zero,0x3` then `lui/addiu s1`) and its
+ *     turnStep store is `addu v0,s0,s1 / sb v1,0x3A(v0)`, so the shape is
+ *     right and gcc simply does not hoist here: it costs 19 rows and moves
+ *     the pass's instruction count not at all. Pass 3's preheader hoists
+ *     nothing and both its shared blocks use the $at macro, so it does not
+ *     want the recipe in the first place.
  *   - Passes 7 and 8 recompute `i * 0x84` twice more than the target does,
  *     near the end of the loop body, and their whole residue is that: pass 7
  *     is `sll` +4, `sra` +2, `addu` +1 and pass 8 one more of each.
