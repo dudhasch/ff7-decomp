@@ -2837,6 +2837,31 @@ diff <(mipsel-linux-gnu-objdump -drz /tmp/b.o \
      <(mipsel-linux-gnu-objdump -drz nonmatchings/<fn>/target.o | ...)
 ```
 
+**Two things make that diff lie, and `permuter_scratch.sh` now handles both.**
+Neither is visible in the log, and each cost a scratch that read as broken:
+
+* **A preserved macro is not expanded in `base.c`.** `import.py` leaves every
+  `[preserve_macros]` entry as a `#pragma _permuter latedefine` block plus an
+  opaque `void PC_INC();`, and only the permuter's own per-candidate
+  preprocessing turns those back into `#define`s. cpp ignores an unknown pragma
+  silently, so compiling `base.c` to check it emits a *call* to `PC_INC`: the
+  object comes out short by a `%hi`/`%lo` pair per site and carries a `PC_INC`
+  relocation the target cannot have. `OpcodeFuncFadew` read as 372 bytes
+  against 396 with six mismatched symbols and was fine.
+  `tools/permuter_latedefines.py` materialises them first. This affects every
+  opcode handler in `src/field/`, which is most of that overlay's parked queue.
+* **String literals and jump tables are local labels.** gcc emits them as local
+  `.rodata` symbols, so a candidate relocates against `.rodata`; splat names the
+  same bytes, so the target relocates against `D_800A0DE8` and
+  `jtbl_800A0DF4`. Same address, same bytes, permanent penalty, so
+  `--stop-on-zero` can never fire. `align --strings` cannot reach it: a literal
+  has no declaration to rewrite, and naming it in C moves where gcc puts it
+  (see the `sym_extern` note above). The target side has to move instead --
+  the prelude's `glabel` macro takes a visibility argument, so
+  `tools/permuter_rodata_local.py` demotes the `.rodata` ones to
+  `glabel <sym>, local` and reassembles `target.o`.
+
+
 An empty diff means the score describes the code — `AddBackgroundToRender` and
 `FieldBackgroundInitPackets` are both clean this way, `FieldMain` is not: the
 target names six interior members of `g_FieldRenderData` by their own
