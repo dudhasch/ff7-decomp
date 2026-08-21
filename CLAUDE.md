@@ -1663,6 +1663,20 @@ a near-miss, in rough order of frequency:
   65/0 and 43/4 are inserted blocks, and not one of them is predictable from
   the target -- the pass to raise is `perm_ins_block`, and the only way to
   place one is to search.
+* **`checkfn`'s "inserted" is not a length measurement — read the `+N
+  instructions` figure instead.** An instruction that merely *moved* is
+  reported as one insertion and one deletion, so the counts scale with how
+  badly the diff aligned rather than with how wrong the body is.
+  `FieldMain` reports six insertions at exactly the target's 786 instructions;
+  `AddBackgroundToRender` reports none at exactly 658; `FieldBackgroundInitPackets`
+  reports eleven and is genuinely six instructions long. `checkfn.py` now
+  prints the compiled length whenever it differs, and that is the number to
+  work on first: length is a hard invariant, so a body of the wrong size
+  cannot match however few rows differ, and a "better" row count bought by
+  adding an instruction is a step backwards. Two metrics, and they disagree
+  often enough to matter — one `perm_ins_block` barrier took that function from
+  34 rows to 26 *and* from four instructions long to six.
+
 * **A `do { } while (0);` is a free test for which pass you are fighting.** It
   emits nothing, so it cannot change an allocno's reference count or live
   range; all it does is end a basic block, which is a scheduling boundary. So
