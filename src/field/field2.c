@@ -3604,7 +3604,22 @@ extern u8 D_801144D8; // blink RNG cursor
  * So the three shapes stand at 2 / 3 / 13 and neither term of
  * allocno_compare is reachable: `n_refs` cannot be raised without emitting
  * something, and `live_length` cannot be raised at all, since every spelling
- * that would stretch it is dead code. */
+ * that would stretch it is dead code.
+ * Confirmed again from the .lreg dump, which puts numbers on the 13-row
+ * shape: faceSel is 19 refs over 644 insns (priority 1180) and blinkClosed
+ * 5 over 84 (1190), a 0.8% gap, and the allocno list has them in that order.
+ * So one reference on faceSel, or one insn of live range on blinkClosed,
+ * would flip it -- and neither is reachable. Measured and all exactly 13:
+ * every width of blinkClosed (s32/u16/u32/s16), blinkOpen used in the guard
+ * as well as the stores, blinkClosed derived as `blinkOpen + 1` or
+ * `blinkOpen * 2` (the forced-movable order is the same), blinkOpen used in
+ * the guard alone, and an extra dead local. blink's width is 13 at u32/long
+ * and 14 at s16/u8/u16/s8, so it changes the loop but never that pair.
+ * Assigning blinkOpen *before* the loop rather than at its top is worse
+ * still -- 16 to 51 rows and always +1 instruction, because the loop then
+ * builds its own second constant. A u8 blinkOpen at the loop top is 2 rows,
+ * i.e. exactly the body below: cse folds it away and nothing changes.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
@@ -5308,7 +5323,27 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * original had `d' at 15 refs and `i' still winning, which means its ordering
  * came from something other than this ratio -- worth knowing before anyone
  * spends a budget trying to spell the second access differently.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
+ * The one row is now measured, not guessed. cc1's .lreg dump gives `d` 13
+ * refs over 97 insns and `i` 14 over 99, so allocno_compare ranks i first
+ * and i takes $a3 -- which is the target. Spelling the loop-1 read as
+ * `d->modelCount` adds two loop-weighted refs, d goes to 15, 3*15/97 beats
+ * 3*14/99, and the two exchange registers: 17 rows of pure $a3/$t0 swap.
+ * So the row is not the read's spelling, it is that the target reads through
+ * `d` *and* keeps i ahead of it, which needs i at 16 refs or d at 13.
+ * Everything tried to move either number emits an instruction: duplicating
+ * `i += 1` into both arms of loop 1 or loop 2 is +2/+4 (cross-jumping does
+ * not merge them, the shared loop test is a separate block), the
+ * `if (i) { i += 1; goto adv; }` dead-conditional form is +4/+6, and every
+ * middle-block `d` reference moved to `data` to buy the flip back costs the
+ * one row it was meant to save (unk8 7, next 6, unk2+unk1 5, and in that
+ * last one every register is right and only the two stores' base is $a1).
+ * Also inert or worse, all at 17-18: dropping or resizing the frame pad
+ * (u8[0x10] is required, [0x8] 19, s32[4] 17, none -3 instructions), moving
+ * `i = 0` below the middle block in three places, and adding a `de = desc`
+ * copy to mirror the target's $t1 in three placements. decomp-permuter has
+ * 87,000 iterations on the 1-row body at base score 5 with no improvement.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
 #else

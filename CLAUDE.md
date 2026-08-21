@@ -659,6 +659,24 @@ a near-miss, in rough order of frequency:
   `MATRIX mtx = {{{0x1000,0,0},...}};` makes cc1-psx-26 emit the constant into
   `.rodata` and copy it in with `lw`/`sw` pairs — which also shifts every later
   `.rodata` offset in the unit. Write the fields.
+* **That blob copy is also a scheduling barrier, and the only way past it is
+  to *declare* something above it.** The copy is emitted where the aggregate
+  is declared, so every statement in the function body is scheduled after it
+  -- including a constant materialisation that the target issues as the very
+  first insn of the body. `s32* nearest; ... nearest = (s32*)0x1F800020;`
+  puts the `lui`/`ori` after the copy; `s32* nearest = (s32*)0x1F800020;`
+  written as an initialiser on a declaration placed *above* the aggregate
+  puts it first, which in turn drags the save of that callee-saved register
+  (`sw s3,0x2c(sp)`) in front of `sw ra` in the prologue. Only the position
+  relative to the aggregate matters: initialised at a declaration *below* it
+  the diff is unchanged. The tell is a register save reordered ahead of `ra`
+  with the constant that clobbers that register sitting at the top of the
+  target's body and at the bottom of the entry block in yours.
+  `FieldEntityTriggerCheck` in `src/field/field2.c` matched on this after
+  five statement orderings of the same three assignments had all measured
+  exactly 7 rows -- which is what made the residue read as a scheduling knot
+  with no lever. When statement order is provably inert, try declaration
+  order with an initialiser; they are different knobs.
 * **A local declared in an inner block takes a later stack slot.** Slots go in
   declaration order, and a block-scope declaration is "declared" where the block
   is: moving `MATRIX mtx;` from the function's locals into the `if` that uses it
