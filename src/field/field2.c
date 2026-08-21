@@ -2173,9 +2173,52 @@ extern s16 D_801144CC;
  *     three spellings and the remaining branch-polarity row is not reachable
  *     from the condition.
  *
- * What is left is 96 rows of pure register naming and nothing else: `triId`
- * and `result` swap $s2/$s3, and the three cross products and their operand
- * temporaries rotate with them. A permuter target. */
+ * 145 rows to **99 changed / +4 instructions**. Three levers, all found by
+ * reading the rows rather than by permuting:
+ *
+ *   - Write `D_801144CC` and `D_80113F28` out in all three arms rather than
+ *     sharing a `store:` tail behind an `edge` variable. The two spellings
+ *     differ only in that cross-jumping merges the identical
+ *     `D_80113F28 = *triId;` suffix -- and the target does not merge it: its
+ *     relocation multiset names `D_80113F28` **six** times against our four,
+ *     which is three stores against two. That count is printed by
+ *     `permuter_scratch.sh` and says nothing about registers. Worth 10 rows,
+ *     and worth reaching for whenever a target references a symbol more often
+ *     than the source stores to it.
+ *   - Assign `scratch` *before* `result = 0`, not after the `D_80113F28`
+ *     store. Whichever pseudo is created first wins the first `bgez`'s delay
+ *     slot, and the target puts `lui s0,0x1f80` there. 3 rows.
+ *   - The position-to-mesh conversion on its **own** local. The seed reused
+ *     `px` for `pos->vx`, `pos->vy` and then the mesh-space x the cross
+ *     products need, which welds three unrelated live ranges into one pseudo:
+ *     it takes a `$t` register rather than `$v0`, and the scheduler hoists the
+ *     `pos->vy` load into the block above to cover it. A separate `mesh` local
+ *     is worth **29 rows** and costs nothing. This is the counter-merging
+ *     idiom read backwards -- merge counters that describe the same walk,
+ *     split values that merely happen to be spelled alike.
+ *
+ * Measured and rejected on top of that, none better than 99:
+ *   - the sibling scratch slots as raw `(s32*)0x1F800010` constants (101), as
+ *     `(s32*)(sbase + 0x10)` off a `u8*` twin (112), the triangle base in a
+ *     per-call local (139) and as an integer sum (114). The target reaches the
+ *     second slot with `addiu a0,s0,%lo(D_1F800010)` where we emit
+ *     `ori a0,s0,0x10`: cse relates the two constants either way and picks the
+ *     operator itself, and nothing in the C chooses it.
+ *   - arm 2 as a fall-through behind `if (cross2 >= 0) goto loop;`, which is
+ *     the target's branch polarity at that test -- exactly inert.
+ *   - `scratch` declared `VECTOR*` so the three edge copies are
+ *     MEM_IN_STRUCT_P on both sides, the standing hypothesis for the length
+ *     gap -- exactly inert, 145 to the row.
+ *
+ * Do not read a barrier sweep here as progress: `do { } while (0);` ahead of
+ * the fast-path test scored 132 against the then-current 145 and ahead of the
+ * cross products 127, both by *adding* 8 or 9 load-delay nops (+4 insertions
+ * becomes +12/+13). Rows are only comparable at equal length, so all six
+ * placements were rejected.
+ *
+ * What is left is the three `FieldEntityVectorSub` call sites, which differ
+ * only in whether the +8 lands on the scaled index or on the computed pointer,
+ * and the register rotation behind them. A permuter target. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
@@ -2186,27 +2229,27 @@ s32 FieldEntityWalkmechCross(
     s32 cross1;
     s32 cross2;
     s32 px;
+    s32 mesh;
     s32 py;
     s32* scratch;
     s32 result;
     s32 shift;
     s16 link;
-    s16 edge;
 
+    scratch = (s32*)0x1F800000;
     result = 0;
-    px = pos->vx;
-    if (px < 0) {
-        px += 0xFFF;
+    mesh = pos->vx;
+    if (mesh < 0) {
+        mesh += 0xFFF;
     }
-    *(s32*)0x1F800030 = px >> 12;
-    px = pos->vy;
-    if (px < 0) {
-        px += 0xFFF;
+    *(s32*)0x1F800030 = mesh >> 12;
+    mesh = pos->vy;
+    if (mesh < 0) {
+        mesh += 0xFFF;
     }
-    *(s32*)0x1F800034 = px >> 12;
+    *(s32*)0x1F800034 = mesh >> 12;
     *(s32*)0x1F800038 = 0;
     D_80113F28 = 0xFFFF;
-    scratch = (s32*)0x1F800000;
 loop:
     FieldEntityVectorSub(
         scratch, D_800E4274 + *triId * 0xC + 4, D_800E4274 + *triId * 0xC);
@@ -2251,8 +2294,8 @@ loop:
         if (scratch[4] * delta->vx + scratch[5] * delta->vy >= 0) {
             result = 8;
         }
-        edge = 1;
-        goto store;
+        D_801144CC = 1;
+        D_80113F28 = *triId;
     } else if (cross2 < 0) {
         link = D_80114458[*triId * 3 + 2];
         shift = link >> 3;
@@ -2268,9 +2311,7 @@ loop:
         if (scratch[8] * delta->vx + scratch[9] * delta->vy >= 0) {
             result = 8;
         }
-        edge = 2;
-    store:
-        D_801144CC = edge;
+        D_801144CC = 2;
         D_80113F28 = *triId;
     } else {
         goto loop;
