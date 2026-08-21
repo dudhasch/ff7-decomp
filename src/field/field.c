@@ -1455,28 +1455,61 @@ extern FieldBgOtSlot D_8009ACA2;
  * been measured and is not the problem: both builds compute the same two
  * bases, `addiu <r>,v0,0x10` and `addiu <r>,v0,0x14` at 0x2328, and differ
  * only in which register each lands in.
- * The residue is a *permutation* of the caller-saved set and nothing else:
- * the same registers, the same count, and every row a rename. It is worth
- * writing down exactly which permutation, because that is the only actionable
- * thing left. In layer 1's preheader both builds emit the same seven
- * invariants in the same order -- 0x00FFFFFF, &run[0], &run[2], 0xFF000000,
- * 0x000124DC, &D_80071A48, and the inner sprite index -- and gcc assigns
- * $t0..$t7 in allocno-priority order, so the register a value gets *is* its
- * rank. Ranking them 1..8 by register number:
+ * 96 rows, no insertions, and still nothing but register naming -- but half
+ * of what the note below called unreachable is now closed, and the two levers
+ * that did it are both things no reading of the target suggests.
  *
- *   target: 0xFFFFFF, &run[2], 0xFF000000, sprite, count, 0x124DC,
- *           &D_80071A48, &run[0]
- *   here:   sprite, 0xFFFFFF, &run[2], 0xFF000000, count, &run[0], 0x124DC,
- *           &D_80071A48
+ * Both came out of decomp-permuter and both are *rank* levers, which is what
+ * the analysis below said was needed. gcc assigns $t0..$t9 in allocno-priority
+ * order, priority is `floor_log2(n_refs) * n_refs / live_length * size` with
+ * n_refs weighted by loop depth, so an extra reference at depth 0 -- even one
+ * whose code is deleted again -- reorders the whole caller-saved set.
  *
- * so exactly two allocnos are misplaced: `sprite` is ranked first and belongs
- * fourth, and `&run[0]` is ranked sixth and belongs last. allocno_compare
- * sorts by `floor_log2(n_refs) * n_refs / live_length`, so lowering `sprite`
- * means shedding loop-weighted references from it or lengthening its live
- * range, and neither is reachable from anything tried. The `t8`-against-`s0`
- * row at 0x2478 is the same fact one register further down.
+ *   1. a dead conditional in front of the layer-2 walk's exit:
  *
- * Measured and rejected across two sessions, all against this body:
+ *          if (sprite || ((P_TAG*)&buf->ot[D_8009ACA2.layer4])->addr) {
+ *              run++;
+ *              goto layer3;
+ *          }
+ *          run++;
+ *          goto layer3;
+ *
+ *      Both paths do the same thing and both operands are pure, so nothing of
+ *      it survives to the object -- the insertion count is 0 -- and it is
+ *      worth 56 rows on its own. The condition is load-bearing in every part:
+ *      `sprite ||` alone is 112, the `->addr` term alone is 161, `count` in
+ *      place of `sprite` is 154, dropping the cast so the load is the plain
+ *      `u_long` is 151/2, and a bare `do { } while (0);` -- the barrier that
+ *      finished FieldArrowsAddToRender -- is 159. The `else` arm the permuter
+ *      wrote is not needed (96 either way); the duplicated tail is.
+ *      Repeating the same construct at the layer-1 exit is 98 and at the
+ *      layer-3 exit 165/29, so it belongs to that one exit.
+ *   2. the layer-3 and layer-4 mask tests written through `otSlot`:
+ *
+ *          if (entity == 0 ||
+ *              ((otSlot = buf->BgAnim[sprite + D_801144C8].mask) &
+ *               g_FieldEntityBgTrigger[entity])) {
+ *
+ *      34 rows for the pair, and it has to be `otSlot` -- a fresh `s32 mask`
+ *      local in its place is 99. One site alone is 159 (layer 3) or 184
+ *      (layer 4).
+ *
+ * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
+ * it says the same thing the old analysis did, one place less far out:
+ *
+ *   target: 0x124DC, &D_80071A48, run;   here: run, 0x124DC, &D_80071A48
+ *
+ * so `run` is still ranked one place too high. D_8011448C against $s0, the two
+ * 0xFF000000 materialisations and g_FieldTriggers all follow from it.
+ *
+ * Re-measured against *this* base, since a park note's negatives are only good
+ * for the state they were taken in: a per-layer `sprite` is 151, a per-layer
+ * `count` 119, both split 157. The old note's numbers for the same three
+ * (207/203/207) were taken against the 193-row base and are consistent -- the
+ * counter-merging rule holds either way.
+ *
+ * Measured and rejected across three sessions, all still against a body with
+ * these two levers absent, so re-check before trusting any of them:
  * goto loops (434 rows, no hoisting at all), `break` out of the loops (396),
  * s32 wrap temporaries (frame 0x30, 320 rows), a separate s32 temporary
  * loaded before the wrap test (278), locals for
@@ -1537,6 +1570,10 @@ void AddBackgroundToRender(struct FieldRenderData* buf) {
 layer2:
     for (;;) {
         if (run[0] == 0x7FFF) {
+            if (sprite || ((P_TAG*)&buf->ot[D_8009ACA2.layer4])->addr) {
+                run++;
+                goto layer3;
+            }
             run++;
             goto layer3;
         }
@@ -1605,8 +1642,9 @@ layer3:
                         }
                     }
                     entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
-                    if (entity == 0 || (buf->BgAnim[sprite + D_801144C8].mask &
-                                        g_FieldEntityBgTrigger[entity])) {
+                    if (entity == 0 ||
+                        ((otSlot = buf->BgAnim[sprite + D_801144C8].mask) &
+                         g_FieldEntityBgTrigger[entity])) {
                         addPrim(&buf->ot[D_8009ACA2.layer3], &buf->Bg2[sprite]);
                     }
                     sprite++;
@@ -1659,7 +1697,7 @@ layer4:
                         buf->Bg2[sprite].x0 < D_80071A48[2].x) {
                         entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
                         if (entity == 0 ||
-                            (buf->BgAnim[sprite + D_801144C8].mask &
+                            ((otSlot = buf->BgAnim[sprite + D_801144C8].mask) &
                              g_FieldEntityBgTrigger[entity])) {
                             addPrim(
                                 &buf->ot[D_8009ACA2.layer4], &buf->Bg2[sprite]);
