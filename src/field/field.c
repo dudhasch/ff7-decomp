@@ -1275,6 +1275,42 @@ extern s16 D_801144D0;
  * -- is catastrophic (185/26): with no `--count` on the back edge gcc does not
  * recognise the biv and the whole loop is rebuilt.
  *
+ * Read off the target's own layer-3 body rather than off the diff, the tail is
+ *
+ *     lbu   $v0, 0x5($v1)      ; D_8007EBD4->v
+ *     addiu $a0, $s3, -0x1     ; --count, in that load's delay slot
+ *     sb    $v0, -0x1($s0)     ; sprt->v0
+ *     ...
+ *     ori   $v0, $zero, 0x20   ; one materialisation for both
+ *     sh    $v0, 0x2($s0)      ; sprt->w
+ *     sh    $v0, 0x4($s0)      ; sprt->h
+ *     lhu   $v0, 0x6($v1)
+ *     addu  $s3, $a0, $zero    ; count = a0
+ *     sh    $v0, 0x0($s0)      ; sprt->clut
+ *     lbu   $v0, 0x8($v1)
+ *     sll   $a0, $a0, 16
+ *     sb    $v0, 0x0($s5)      ; pairs[0]
+ *     lhu   $t0, 0x28($sp)     ; sprite34Count, between the two pairs stores
+ *     ...
+ *     sb    $v0, 0x1($s5)      ; pairs[1]
+ *
+ * which confirms three things the diff alone does not. The giv is based at
+ * sprt+0xe (clut at 0, w at 2, h at 4, v0 at -1), so lever 3 is right. The
+ * counter's read-modify-write is *emitted* between the two `pairs` stores even
+ * though writing it there in the source measures worse than lever 10 -- so its
+ * emitted position is sched2's and says nothing about where it was written.
+ * And the 0x20 is materialised once inside the loop and used for both `w` and
+ * `h`, which is what decomp-permuter's best find here (1615 against a base of
+ * 3740) is groping at by assigning 0x20 to a live variable and clobbering it.
+ * Hoisting it honestly, as a `size` local beside `white` at the layer-3 and
+ * layer-4 entries, is 38/14 as `u8`, 42/14 as `s32`, and 38/14 assigned ahead
+ * of `white` instead; writing `h` before `w` is 38/13. All against 34/13.
+ *
+ * So what is left is sched2 preferring the counter's three-insn memory chain
+ * over the `--count` four-insn chain that ends in the loop branch, where the
+ * target prefers the branch chain -- in every one of the four loops, and with
+ * the same instructions on both sides. No source position reaches it.
+ *
  * Deleted from this note along with the levers they described: the pad-size
  * grid (none 64, 0x8 77, 0x10 55, 0x18 through 0x30 all 77), the grid of which
  * counters are address-taken, the eight-row `do { } while (0);` after layer
