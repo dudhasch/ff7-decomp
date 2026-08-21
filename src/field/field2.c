@@ -4469,7 +4469,43 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  * uses are inside a conditional arm -- the same rule as the constant hoist in
  * HandleKawaiDataInModel. Walking a record pointer through the lighting block
  * instead of indexing `records[i]` costs 30 rows, and computing `models`
- * before the scratch pointer costs 5. */
+ * before the scratch pointer costs 5.
+ * **110 rows / -2 instructions -> 46 / -1**, and the note's standing
+ * diagnosis turned out to be right *and* actionable. It said the residue was
+ * "one allocator decision: the target spills `models` (0x38) and `records`
+ * (0x40) to the stack and gives `pkts` the frame-pointer register". It does,
+ * and there is a way to ask for it.
+ *
+ *   - **Take the address of `models` and never dereference it.**
+ *     `FieldModelLoaderData** pmodels; ... pmodels = &models;` sets
+ *     TREE_ADDRESSABLE, which sends the variable through `put_var_into_stack`
+ *     and puts it exactly where the target reads it from, `0x38(sp)`. The
+ *     store to `pmodels` is dead and costs nothing. **76 rows -> 46.** This is
+ *     the same idiom `FieldBackgroundInitPackets` uses for a counter, applied
+ *     to a pointer, and it is the only way to spell "keep this in memory".
+ *   - **The 0x30-record copy is indexed off the counter, not walked.**
+ *     `dm[i * 12 + k] = sm[i * 12 + k]` rather than twelve stores followed by
+ *     `sm += 12; dm += 12;`. The walked form makes both pointers bivs and gcc
+ *     reduces the element addresses onto a second base -- CLAUDE.md's
+ *     `FieldModelLoadBcx` bullet, and worth **110 rows -> 76** here.
+ *
+ * The second loop goes the *other* way and that is measured, not assumed: the
+ * target walks `t5` by 8 and `t6` by 0x30 through it, which reads like an
+ * invitation to write `mw++`/`rw++`, and doing so costs rows every way round
+ * -- models alone 84, records alone 78, both 111, against 46. Read the target
+ * for which form a loop wants and then check it; the two loops in this
+ * function want opposite ones.
+ *
+ * Also measured and rejected: swapping the operands of `words = (buf[0] >> 2)
+ * + ((buf[0] & 3) != 0)` is exactly inert (fold canonicalises the sum), and
+ * splitting it into two statements is 95. Computing `models` before `scratch`
+ * is 115.
+ *
+ * The one instruction and 46 rows left are two clusters. The target evaluates
+ * that sum's `srl` before its `andi` where this body does the mask first --
+ * neither spelling above reaches it. And the second loop's index arithmetic
+ * lands in different registers, which is downstream of the same choice.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
@@ -4479,6 +4515,7 @@ u8* LoadLocalFieldModelAndInitAll(
     MATRIX mtx;
     RECT rect;
     FieldModelLoaderData* models;
+    FieldModelLoaderData** pmodels;
     BsxModelBlock* block;
     BsxModelRecord* rec;
     BsxModelRecord* records;
@@ -4507,6 +4544,7 @@ u8* LoadLocalFieldModelAndInitAll(
 
     scratch = (u8*)0x1F800000;
     models = desc->models;
+    pmodels = &models;
     fileInfo = *(u32**)scratch;
     if (*readFromCd != 0) {
         DS_read(fileInfo[0], fileInfo[1], buf, NULL);
@@ -4584,20 +4622,18 @@ u8* LoadLocalFieldModelAndInitAll(
     dm = (u32*)records;
     sm = (u32*)block->models;
     for (i = 0; i < count; i++) {
-        dm[0] = sm[0];
-        dm[1] = sm[1];
-        dm[2] = sm[2];
-        dm[3] = sm[3];
-        dm[4] = sm[4];
-        dm[5] = sm[5];
-        dm[6] = sm[6];
-        dm[7] = sm[7];
-        dm[8] = sm[8];
-        dm[9] = sm[9];
-        dm[10] = sm[10];
-        dm[11] = sm[11];
-        sm += 12;
-        dm += 12;
+        dm[i * 12 + 0] = sm[i * 12 + 0];
+        dm[i * 12 + 1] = sm[i * 12 + 1];
+        dm[i * 12 + 2] = sm[i * 12 + 2];
+        dm[i * 12 + 3] = sm[i * 12 + 3];
+        dm[i * 12 + 4] = sm[i * 12 + 4];
+        dm[i * 12 + 5] = sm[i * 12 + 5];
+        dm[i * 12 + 6] = sm[i * 12 + 6];
+        dm[i * 12 + 7] = sm[i * 12 + 7];
+        dm[i * 12 + 8] = sm[i * 12 + 8];
+        dm[i * 12 + 9] = sm[i * 12 + 9];
+        dm[i * 12 + 10] = sm[i * 12 + 10];
+        dm[i * 12 + 11] = sm[i * 12 + 11];
     }
 
     pkts = (u8*)block;
