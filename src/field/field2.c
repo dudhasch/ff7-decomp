@@ -2697,7 +2697,30 @@ u8* LoadLocalFieldModelAndInitAll(
 }
 #endif
 
-extern u8* FieldModelCreatePktsForPart(u8* part, u8* pkts, s32 arg2, s32 arg3);
+/* One part of a BSX model: the eight primitive-kind counts, then the offsets
+ * of the four tables FieldModelCreatePktsForPart walks. */
+typedef struct {
+    /* 0x00 */ u8 unk0[4];
+    /* 0x04 */ u8 gt4Count;
+    /* 0x05 */ u8 gt3Count;
+    /* 0x06 */ u8 ft4Count;
+    /* 0x07 */ u8 ft3Count;
+    /* 0x08 */ u8 f3Count;
+    /* 0x09 */ u8 f4Count;
+    /* 0x0A */ u8 g3Count;
+    /* 0x0B */ u8 g4Count;
+    /* 0x0C */ u8 unkC[2];
+    /* 0x0E */ u16 polyOffset;     // the interleaved polygon table
+    /* 0x10 */ u16 texCoordOffset; // u16 pairs, one per vertex
+    /* 0x12 */ u16 texInfoOffset;  // u32 per texture slot: clut, tpage, mode
+    /* 0x14 */ u16 texIndexOffset; // one byte per textured primitive
+    /* 0x16 */ u16 pktSize;        // bytes of packets one pass emits
+    /* 0x18 */ u8* data;
+    /* 0x1C */ u8* pkts;
+} FieldModelPart; // size:0x20
+
+extern u8* FieldModelCreatePktsForPart(
+    FieldModelPart* part, u8* pkts, s32 reset, s32 texY);
 extern void FieldModelScaleModel(FieldModelEntry* model, s16 scale, s32 arg2);
 
 /* Reserves one 32-byte matrix slot per bone at the head of the packet buffer,
@@ -2710,13 +2733,398 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
     pkts += model->boneCount * 32;
     parts = model->modelData + model->partsOffset;
     for (i = 0; i < model->partCount; i++) {
-        pkts = FieldModelCreatePktsForPart(&parts[i * 32], pkts, 0, arg2);
+        pkts = FieldModelCreatePktsForPart(
+            (FieldModelPart*)&parts[i * 32], pkts, 0, arg2);
     }
     FieldModelScaleModel(model, model->scale, 0);
     return pkts;
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldModelCreatePktsForPart);
+/* Builds the drawing packets for one model part, twice -- the renderer
+ * double-buffers them. Eight primitive kinds are emitted in a fixed order,
+ * each from its own run of the part's interleaved polygon table; the four
+ * textured kinds also consume one byte of the texture-index table and one
+ * u32 of the texture-info table per primitive. `texY` shifts every UV by the
+ * position of the part's texture inside the shared page.
+ */
+/* 218 changed / 29 inserted at exactly 727 instructions, from 412/60 and 28
+ * instructions long as a raw m2c seed. Everything below is measured; the
+ * length is exact, so what is left is allocation and scheduling.
+ *
+ * The shape, which the seed does not show: eight primitive kinds emitted in
+ * a fixed order (GT4, GT3, FT4, FT3, F3, F4, G3, G4 -- codes 0x3C, 0x34,
+ * 0x2C, 0x24, 0x20, 0x28, 0x30, 0x38), each from its own run of one
+ * interleaved polygon table walked by a single cursor, and the whole thing
+ * run twice because the renderer double-buffers the packets. Every `unkN`
+ * in the seed resolves against the PSY-Q layouts: `unk-4` is the tag's `len`
+ * byte, `unk0` its `code`, `unk-3` the r0/g0/b0/code word, and the rest are
+ * the u/v pairs and the clut and tpage halfwords. m2c's `var_s4 = var_s3 +
+ * 0x14` walking with negative displacements is one biv plus a combined giv,
+ * so the source has one cursor.
+ *
+ * Seven levers, in the order they were worth:
+ *
+ * 1. **No hand-written zero-trip guard.** `if (count != 0) { for (i = 0; i <
+ *    count; i++) ... }` tests twice -- gcc does not fold the two -- and the
+ *    bare `for` compiles to exactly the `if`/`do`/`while` m2c prints. Worth
+ *    **16 instructions**, two per loop across all eight.
+ *
+ * 2. **The graph-type test is `!= 1 && !=  2` with the arms swapped.** This
+ *    is the whole of the remaining length: every other spelling is +4, one
+ *    instruction per textured loop. `== 1 || == 2` with the arms in the
+ *    target's order is 239/33 at 731, and so is a `goto` chain that
+ *    reproduces the target's CFG literally (`if (gt == 1) goto big; if (gt
+ *    != 2) goto small; big: ... goto joined; small: ...`) -- which is worth
+ *    recording, because that chain gives the target's branch polarity and
+ *    block order and is still two instructions long per loop. What the
+ *    inverted form buys is `t & 0xC0` computed twice rather than three
+ *    times (the two copies land in the two branch delay slots and both arms
+ *    read them) and `((t >> 4) & 0x100) >> 4` surviving as three
+ *    instructions rather than folding to `srl 8`/`andi 0x10`. Neither is
+ *    reachable any other way: all six spellings of that shift measure
+ *    identically (`(u16)` and `(s32)` casts, `/ 16`, `& 0x1000 >> 8`, a
+ *    named intermediate, and splitting it into two `>> 2`), and hoisting
+ *    `t & 0xC0` into a local ahead of the `if` is **+8** because the local
+ *    is then live across both calls and spills.
+ *
+ * 3. **The `!= 2` test needs its own local.** Written inline, `(((t & 0x3F)
+ *    != 2) ? texY : 0)` -- and `texY & -((t & 0x3F) != 2)`, which fold turns
+ *    back into the same COND_EXPR -- reaches `expand_expr` under the `+` and
+ *    comes out as a branch around the addition. Assigned first, `shift = (t
+ *    & 0x3F) != 2;` is a statement of its own, `do_store_flag` runs, and the
+ *    target's `andi`/`xori`/`sltu`/`negu`/`and` appears. Five instructions
+ *    per textured loop.
+ *
+ * 4. **Every base+offset is written offset-first.** `(u8*)(part->
+ *    texIndexOffset + (s32)data)` rather than `data + part->texIndexOffset`:
+ *    fold canonicalises a pointer PLUS so the pointer is op0, and casting it
+ *    to `s32` makes it an ordinary integer PLUS that keeps source order.
+ *    That is what decides which of the two `lhu`/`lw` goes first and the
+ *    `addu`'s operand order, at four sites here.
+ *
+ * 5. **Declaration order decides the spill-slot order.** `expand_decl`
+ *    creates a pseudo per local at the top of the function in declaration
+ *    order, so the slots follow it: the target's are `pass` 0x28, `uOff0`
+ *    0x30, `vOff0` 0x38, `uOff1` 0x40, `vOff1` 0x48, `texInfo` 0x50, and
+ *    declaring them in that order lands every one. Note this is the *only*
+ *    thing declaration order does here -- moving `f` to the end of the list,
+ *    or the four pointers to the front, is exactly inert, which is what
+ *    CLAUDE.md's rule predicts.
+ *
+ * 6. **The pointer bumps belong in the `for` increment.** `for (i = 0; i <
+ *    count; i++, out += sizeof(POLY_GT4), poly += 6)` emits `i++` first and
+ *    the two givs behind it, which is the target's order; as body statements
+ *    they come out ahead of `i++`.
+ *
+ * 7. **`f` is `u8`.** `u32` and `s32` are both 232/31 at +2 -- the extra is
+ *    the `lbu`'s zero-extension no longer folding into the three masks.
+ *
+ * Also measured and rejected: `r = texY - q * 4;` as a named remainder, to
+ * get the target's `q * 4` computed ahead of `q * 32` (263/30 at +1);
+ * computing `poly` before the `if (pass != 0)` rather than after, to stop
+ * `part->data` being reloaded at the join (225/29).
+ *
+ * What is left is three clusters. A rotation of `$s3`/`$s4`/`$s5`/`$s6` --
+ * the target ranks `f` last of the four and we rank it first, with `poly`,
+ * its `+0x14` giv and `out` all shifted one place -- which is
+ * `allocno_compare` and neither `f`'s type nor any declaration order moves
+ * it. The u2/u3 texture-coordinate lookups, where the target computes the
+ * second address into a second register so the first load issues in its
+ * shadow and we serialise them. And `q * 4` being computed after `q * 32`
+ * rather than before, at both of the two divisions.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE(
+    "asm/us/field/nonmatchings/field2", FieldModelCreatePktsForPart);
+#else
+u8* FieldModelCreatePktsForPart(
+    FieldModelPart* part, u8* pkts, s32 reset, s32 texY) {
+    u32 pass;
+    s32 uOff0;
+    s32 vOff0;
+    s32 uOff1;
+    s32 vOff1;
+    u32* texInfo;
+    u8* uv;
+    u8* data;
+    u8* texIdx;
+    u8* out;
+    u32* poly;
+    s32 q;
+    u32 i;
+    u32 count;
+    u8 f;
+    u32 t;
+    u32 v;
+    s32 n;
+    s32 du;
+    s32 dv;
+    s32 shift;
+    s32 tp;
+    s32 tpBit;
+
+    texInfo = (u32*)(part->texInfoOffset + (s32)part->data);
+    uv = (u8*)(part->texCoordOffset + (s32)part->data);
+    if (reset != 0) {
+        part->data = (u8*)part + 0x20;
+    }
+    part->pkts = pkts;
+
+    q = texY / 4;
+    vOff0 = q * 32;
+    uOff0 = (texY - q * 4) * 64;
+    q = texY / 8;
+    vOff1 = q * 32;
+    uOff1 = (texY - q * 8) * 32;
+
+    for (pass = 0; pass < 2; pass++) {
+        out = pkts;
+        data = part->data;
+        texIdx = (u8*)(part->texIndexOffset + (s32)data);
+        if (pass != 0) {
+            out += part->pktSize;
+        }
+        poly = (u32*)(part->polyOffset + (s32)data);
+
+        count = part->gt4Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_GT4), poly += 6) {
+            POLY_GT4* p = (POLY_GT4*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            *(u32*)&p->r1 = poly[2];
+            *(u32*)&p->r2 = poly[3];
+            *(u32*)&p->r3 = poly[4];
+            v = poly[5];
+            *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
+            *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
+            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            *(u16*)&p->u3 = *(u16*)((v >> 24) * 2 + (s32)uv);
+            f = *texIdx++;
+            t = texInfo[f & 0xF];
+            shift = (t & 0x3F) != 2;
+            p->clut =
+                ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
+            if (GetGraphType() != 1 && GetGraphType() != 2) {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
+            } else {
+                tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+                tpBit = (t >> 7) & 0x20;
+            }
+            p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
+            n = t & 0x3F;
+            if (n == 0) {
+                du = uOff0;
+                dv = vOff0;
+            } else {
+                dv = 0;
+                if (n == 1) {
+                    du = uOff1;
+                    dv = vOff1;
+                } else {
+                    du = 0;
+                }
+            }
+            setPolyGT4(p);
+            p->u0 += du;
+            p->v0 += dv;
+            p->u1 += du;
+            p->v1 += dv;
+            p->u2 += du;
+            p->v2 += dv;
+            p->u3 += du;
+            p->v3 += dv;
+            if (f & 0x10) {
+                setcode(p, 0x3E);
+            }
+        }
+
+        count = part->gt3Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_GT3), poly += 5) {
+            POLY_GT3* p = (POLY_GT3*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            *(u32*)&p->r1 = poly[2];
+            *(u32*)&p->r2 = poly[3];
+            v = poly[4];
+            *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
+            *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
+            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            f = *texIdx++;
+            t = texInfo[f & 0xF];
+            shift = (t & 0x3F) != 2;
+            p->clut =
+                ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
+            if (GetGraphType() != 1 && GetGraphType() != 2) {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
+            } else {
+                tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+                tpBit = (t >> 7) & 0x20;
+            }
+            p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
+            n = t & 0x3F;
+            if (n == 0) {
+                du = uOff0;
+                dv = vOff0;
+            } else {
+                dv = 0;
+                if (n == 1) {
+                    du = uOff1;
+                    dv = vOff1;
+                } else {
+                    du = 0;
+                }
+            }
+            setPolyGT3(p);
+            p->u0 += du;
+            p->v0 += dv;
+            p->u1 += du;
+            p->v1 += dv;
+            p->u2 += du;
+            p->v2 += dv;
+            if (f & 0x10) {
+                setcode(p, 0x36);
+            }
+        }
+
+        count = part->ft4Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_FT4), poly += 3) {
+            POLY_FT4* p = (POLY_FT4*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            v = poly[2];
+            *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
+            *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
+            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            *(u16*)&p->u3 = *(u16*)((v >> 24) * 2 + (s32)uv);
+            f = *texIdx++;
+            t = texInfo[f & 0xF];
+            shift = (t & 0x3F) != 2;
+            p->clut =
+                ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
+            if (GetGraphType() != 1 && GetGraphType() != 2) {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
+            } else {
+                tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+                tpBit = (t >> 7) & 0x20;
+            }
+            p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
+            n = t & 0x3F;
+            if (n == 0) {
+                du = uOff0;
+                dv = vOff0;
+            } else {
+                dv = 0;
+                if (n == 1) {
+                    du = uOff1;
+                    dv = vOff1;
+                } else {
+                    du = 0;
+                }
+            }
+            setPolyFT4(p);
+            p->u0 += du;
+            p->v0 += dv;
+            p->u1 += du;
+            p->v1 += dv;
+            p->u2 += du;
+            p->v2 += dv;
+            p->u3 += du;
+            p->v3 += dv;
+            if (f & 0x10) {
+                setcode(p, 0x2E);
+            }
+        }
+
+        count = part->ft3Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_FT3), poly += 3) {
+            POLY_FT3* p = (POLY_FT3*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            v = poly[2];
+            *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
+            *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
+            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            f = *texIdx++;
+            t = texInfo[f & 0xF];
+            shift = (t & 0x3F) != 2;
+            p->clut =
+                ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
+            if (GetGraphType() != 1 && GetGraphType() != 2) {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
+            } else {
+                tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+                tpBit = (t >> 7) & 0x20;
+            }
+            p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
+            n = t & 0x3F;
+            if (n == 0) {
+                du = uOff0;
+                dv = vOff0;
+            } else {
+                dv = 0;
+                if (n == 1) {
+                    du = uOff1;
+                    dv = vOff1;
+                } else {
+                    du = 0;
+                }
+            }
+            setPolyFT3(p);
+            p->u0 += du;
+            p->v0 += dv;
+            p->u1 += du;
+            p->v1 += dv;
+            p->u2 += du;
+            p->v2 += dv;
+            if (f & 0x10) {
+                setcode(p, 0x26);
+            }
+        }
+
+        count = part->f3Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_F3), poly += 2) {
+            POLY_F3* p = (POLY_F3*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            setPolyF3(p);
+        }
+
+        count = part->f4Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_F4), poly += 2) {
+            POLY_F4* p = (POLY_F4*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            setPolyF4(p);
+        }
+
+        count = part->g3Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_G3), poly += 4) {
+            POLY_G3* p = (POLY_G3*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            *(u32*)&p->r1 = poly[2];
+            *(u32*)&p->r2 = poly[3];
+            setPolyG3(p);
+        }
+
+        count = part->g4Count;
+        for (i = 0; i < count; i++, out += sizeof(POLY_G4), poly += 5) {
+            POLY_G4* p = (POLY_G4*)out;
+
+            *(u32*)&p->r0 = poly[1];
+            *(u32*)&p->r1 = poly[2];
+            *(u32*)&p->r2 = poly[3];
+            *(u32*)&p->r3 = poly[4];
+            setPolyG4(p);
+        }
+    }
+    return pkts + part->pktSize * 2;
+}
+#endif
 
 void FieldModelLoadBsxTexToVram(BsxTexHeader* bsx) {
     RECT rect;
