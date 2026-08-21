@@ -7,11 +7,11 @@
  * neighbour. */
 
 /* Seed the background-scroll state machine from the requested scroll mode.
- * Only runs while idle (D_8009AC13 == 0). Modes: 0 stops and recentres; 1 arms
- * scrolling in place; 2/3 begin a single-target scroll; 4 teleports the current
- * position to the alt source; 5-9 begin a dual-target (eased) scroll. The
- * target positions/step/fraction are what FieldBGScrollUpdate consumes each
- * frame.
+ * Only runs while idle (g_FieldStateData.cameraScrollState == 0). Modes: 0
+ * stops and recentres; 1 arms scrolling in place; 2/3 begin a single-target
+ * scroll; 4 teleports the current position to the alt source; 5-9 begin a
+ * dual-target (eased) scroll. The target positions/step/fraction are what
+ * FieldBGScrollUpdate consumes each frame.
  *
  * Modes 7-9 are empty arms, not part of the 5/6 dual-target block: the target's
  * table sends .rodata+0x1c/0x20/0x24 straight to the epilogue while 0x14/0x18
@@ -21,61 +21,56 @@
  * previously mis-read as the jump-table alignment phase; a `.rodata+0xNN` row
  * from checkfn means the table's *contents* differ, and only a `want:/got:` on
  * the table's own address means alignment. */
-extern u8 D_8009AC11;  // scroll mode (jump-table selector)
-extern u8 D_8009AC13;  // scroll state (0 = idle)
-extern s16 D_8009A100; // scroll enable
-extern u16 D_8009AC14; // scroll source X
-extern u16 D_8009ABFE; // alt scroll source X
-extern u16 D_8009AC00; // alt scroll source Y
-extern s16 D_80071E38; // current scroll X
-extern s16 D_80071E3C; // current scroll Y
-extern s16 D_8009C558; // scroll step
-extern s16 D_80075CF8; // scroll sub-position / fraction
-extern s16 D_80075E14; // target scroll X
-extern s16 D_80075E1C; // target scroll Y
-extern s16 D_80075E18; // alt target scroll X
-extern s16 D_80075E20; // alt target scroll Y
+extern s16 D_8009A100;           // scroll enable
+extern s16 D_80071E38;           // current scroll X
+extern s16 D_80071E3C;           // current scroll Y
+extern s16 g_CameraScrollSteps;  // total steps of the active scroll
+extern s16 g_CameraScrollStep;   // current step, 0..g_CameraScrollSteps
+extern s16 g_CameraScrollStartX; // where the scroll began
+extern s16 g_CameraScrollStartY; // where the scroll began
+extern s16 g_CameraScrollEndX;   // copied from cameraScrollTargetX
+extern s16 g_CameraScrollEndY;   // copied from cameraScrollTargetY
 
 void FieldBGScrollInit(void) {
-    if (D_8009AC13 != 0) {
+    if (g_FieldStateData.cameraScrollState != 0) {
         return;
     }
-    switch (D_8009AC11) {
+    switch (g_FieldStateData.cameraScrollMode) {
     case 0:
         D_8009A100 = 0;
         D_80071E38 = 0;
         D_80071E3C = 0;
-        D_8009AC13 = 2;
+        g_FieldStateData.cameraScrollState = 2;
         break;
     case 1:
         D_8009A100 = 1;
-        D_8009AC13 = 1;
+        g_FieldStateData.cameraScrollState = 1;
         break;
     case 2:
     case 3:
         D_8009A100 = 1;
-        D_80075CF8 = 0;
-        D_8009AC13 = 1;
-        D_8009C558 = D_8009AC14;
-        D_80075E14 = D_80071E38;
-        D_80075E1C = D_80071E3C;
+        g_CameraScrollStep = 0;
+        g_FieldStateData.cameraScrollState = 1;
+        g_CameraScrollSteps = g_FieldStateData.cameraScrollNumSteps;
+        g_CameraScrollStartX = D_80071E38;
+        g_CameraScrollStartY = D_80071E3C;
         break;
     case 4:
         D_8009A100 = 1;
-        D_8009AC13 = 2;
-        D_80071E38 = D_8009ABFE;
-        D_80071E3C = D_8009AC00;
+        g_FieldStateData.cameraScrollState = 2;
+        D_80071E38 = g_FieldStateData.cameraScrollTargetX;
+        D_80071E3C = g_FieldStateData.cameraScrollTargetY;
         break;
     case 5:
     case 6:
         D_8009A100 = 1;
-        D_80075CF8 = 0;
-        D_8009AC13 = 1;
-        D_8009C558 = D_8009AC14;
-        D_80075E14 = D_80071E38;
-        D_80075E1C = D_80071E3C;
-        D_80075E18 = D_8009ABFE;
-        D_80075E20 = D_8009AC00;
+        g_CameraScrollStep = 0;
+        g_FieldStateData.cameraScrollState = 1;
+        g_CameraScrollSteps = g_FieldStateData.cameraScrollNumSteps;
+        g_CameraScrollStartX = D_80071E38;
+        g_CameraScrollStartY = D_80071E3C;
+        g_CameraScrollEndX = g_FieldStateData.cameraScrollTargetX;
+        g_CameraScrollEndY = g_FieldStateData.cameraScrollTargetY;
         break;
     case 7:
     case 8:
@@ -238,26 +233,25 @@ s32 FieldBGGetEntityScreenPos(long* screenPos) {
 
 extern s16 D_80071E38;
 extern s16 D_80071E3C;
-extern s16 D_80075CF8;
-extern s16 D_80075E14;
-extern s16 D_80075E18;
-extern s16 D_80075E1C;
-extern s16 D_80075E20;
-extern u8 D_8009AC11;
-extern u8 D_8009AC13;
-extern s16 D_8009C558;
+extern s16 g_CameraScrollStep;
+extern s16 g_CameraScrollStartX;
+extern s16 g_CameraScrollEndX;
+extern s16 g_CameraScrollStartY;
+extern s16 g_CameraScrollEndY;
+extern s16 g_CameraScrollSteps;
 
 /* Per-frame background scroll: on the field's scroll state machine, drive the
  * background X/Y toward the entity's clamped screen position (linear or
  * ease-in-out depending on the mode).
  *
- * The arms that finish a scroll do not each write `D_8009AC13 = 2;` -- the
- * three `!=` arms `goto` the copy inside arm 6. Written out per arm, all four
- * tails are the same nine instructions (`lh D_80075CF8` / `sh D_80071E3C` /
- * `lh D_8009C558` / branch), jump_optimize inverts them to a common polarity
- * and cross-jumps them into one, and the body comes out ten instructions
- * short. The target carries two physical copies: one inline in arm 2 that
- * arms 3 and 5 jump backwards into, and arm 6's.
+ * The arms that finish a scroll do not each write
+ * `g_FieldStateData.cameraScrollState = 2;` -- the three `!=` arms `goto` the
+ * copy inside arm 6. Written out per arm, all four tails are the same nine
+ * instructions (`lh g_CameraScrollStep` / `sh D_80071E3C` / `lh
+ * g_CameraScrollSteps` / branch), jump_optimize inverts them to a common
+ * polarity and cross-jumps them into one, and the body comes out ten
+ * instructions short. The target carries two physical copies: one inline in arm
+ * 2 that arms 3 and 5 jump backwards into, and arm 6's.
  *
  * Three earlier corrections, all read off the target rather than guessed:
  * the jump table has ten entries and not six (`sltiu v0,v1,0xa` on the
@@ -270,8 +264,8 @@ void FieldBGScrollUpdate(void) {
 
 #define SCREEN_X (((s16*)&screenPos)[0])
 #define SCREEN_Y (((s16*)&screenPos)[1])
-    if (D_8009AC13 == 1) {
-        switch (D_8009AC11) {
+    if (g_FieldStateData.cameraScrollState == 1) {
+        switch (g_FieldStateData.cameraScrollMode) {
         case 1:
             FieldBGGetEntityScreenPos(&screenPos);
             FieldBGClampPos((s16*)&screenPos);
@@ -282,11 +276,13 @@ void FieldBGScrollUpdate(void) {
             FieldBGGetEntityScreenPos(&screenPos);
             FieldBGClampPos((s16*)&screenPos);
             D_80071E38 = FieldCalcLinearStep(
-                D_80075E14, -SCREEN_X, D_8009C558, D_80075CF8);
+                g_CameraScrollStartX, -SCREEN_X, g_CameraScrollSteps,
+                g_CameraScrollStep);
             D_80071E3C = FieldCalcLinearStep(
-                D_80075E1C, -SCREEN_Y, D_8009C558, D_80075CF8);
-            if (D_8009C558 != D_80075CF8) {
-                D_80075CF8 = D_80075CF8 + 1;
+                g_CameraScrollStartY, -SCREEN_Y, g_CameraScrollSteps,
+                g_CameraScrollStep);
+            if (g_CameraScrollSteps != g_CameraScrollStep) {
+                g_CameraScrollStep = g_CameraScrollStep + 1;
             } else {
                 goto scrollDone;
             }
@@ -295,36 +291,42 @@ void FieldBGScrollUpdate(void) {
             FieldBGGetEntityScreenPos(&screenPos);
             FieldBGClampPos((s16*)&screenPos);
             D_80071E38 = FieldCalcEaseInOut(
-                D_80075E14, -SCREEN_X, D_8009C558, D_80075CF8);
+                g_CameraScrollStartX, -SCREEN_X, g_CameraScrollSteps,
+                g_CameraScrollStep);
             D_80071E3C = FieldCalcEaseInOut(
-                D_80075E1C, -SCREEN_Y, D_8009C558, D_80075CF8);
-            if (D_8009C558 != D_80075CF8) {
-                D_80075CF8 = D_80075CF8 + 1;
+                g_CameraScrollStartY, -SCREEN_Y, g_CameraScrollSteps,
+                g_CameraScrollStep);
+            if (g_CameraScrollSteps != g_CameraScrollStep) {
+                g_CameraScrollStep = g_CameraScrollStep + 1;
             } else {
                 goto scrollDone;
             }
             break;
         case 5:
             D_80071E38 = FieldCalcLinearStep(
-                D_80075E14, D_80075E18, D_8009C558, D_80075CF8);
+                g_CameraScrollStartX, g_CameraScrollEndX, g_CameraScrollSteps,
+                g_CameraScrollStep);
             D_80071E3C = FieldCalcLinearStep(
-                D_80075E1C, D_80075E20, D_8009C558, D_80075CF8);
-            if (D_8009C558 != D_80075CF8) {
-                D_80075CF8 = D_80075CF8 + 1;
+                g_CameraScrollStartY, g_CameraScrollEndY, g_CameraScrollSteps,
+                g_CameraScrollStep);
+            if (g_CameraScrollSteps != g_CameraScrollStep) {
+                g_CameraScrollStep = g_CameraScrollStep + 1;
             } else {
                 goto scrollDone;
             }
             break;
         case 6:
             D_80071E38 = FieldCalcEaseInOut(
-                D_80075E14, D_80075E18, D_8009C558, D_80075CF8);
+                g_CameraScrollStartX, g_CameraScrollEndX, g_CameraScrollSteps,
+                g_CameraScrollStep);
             D_80071E3C = FieldCalcEaseInOut(
-                D_80075E1C, D_80075E20, D_8009C558, D_80075CF8);
-            if (D_8009C558 == D_80075CF8) {
+                g_CameraScrollStartY, g_CameraScrollEndY, g_CameraScrollSteps,
+                g_CameraScrollStep);
+            if (g_CameraScrollSteps == g_CameraScrollStep) {
             scrollDone:
-                D_8009AC13 = 2;
+                g_FieldStateData.cameraScrollState = 2;
             } else {
-                D_80075CF8 = D_80075CF8 + 1;
+                g_CameraScrollStep = g_CameraScrollStep + 1;
             }
             break;
         case 0:
