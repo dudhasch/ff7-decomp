@@ -804,14 +804,23 @@ a near-miss, in rough order of frequency:
   the table index — so combine cannot fold the zero-extension into the load
   and the target has `lbu` plus `andi`. Assign it to a `u32` and the extension
   disappears into the load. Three rows in `FieldMain`'s exit dispatch.
-* **`lui r/addiu r/op 0(r)` against your `$at` macro means the address is used
-  twice, not that the declaration is wrong.** gcc keeps a symbol's address in
-  a general register once cse has a second reference for it, and maspsx's
-  two-instruction `%hi`/`%lo(at)` expansion is what a single use produces. Six
-  rows in `FieldMain` are still on the wrong side of this, and the following
-  have all been measured and do *not* move it: scalar `extern`, one-element
-  array, struct member, `volatile` on the object, and a `volatile` store
-  through a cast.
+* **`lui r/addiu r/op 0(r)` against your `$at` macro is usually a second
+  reference — and when there is no second reference, it is `volatile`.** gcc
+  keeps a symbol's address in a general register once cse has a second use for
+  it, and maspsx's two-instruction `%hi`/`%lo(at)` expansion is what a single
+  use produces. But a **volatile** MEM is never entered in cse's table at all,
+  so its address is not folded back into the MEM and stays in its own pseudo —
+  the register form, off one reference. `FieldMain` writes `D_8009AC1A` once
+  and reads `D_8009AC3C` once, and both need `extern volatile`; a volatile
+  cast at the access site (`*(volatile s16*)D_8009AC1A = 2`) measures the same.
+  It was worth 12 rows there, not the 4 the cluster was quoted at, because the
+  two extra registers renamed a third of the function — and an earlier version
+  of this bullet recorded volatile as measured and rejected, which was wrong.
+  What genuinely does *not* move it: scalar `extern` against a one-element
+  array, the struct-member spelling of the same address, and a named pointer
+  local (worse). The other way to reach the register form is the symbol_ref
+  bullet above — give the address a second reference by spelling a neighbour
+  as an offset from it.
 * **A scaled subscript folds the symbol into the address register; a
   pre-scaled byte offset does not.** This is the whole of the "`$at`
   rematerialisation wall" that a dozen park notes in `src/field/` describe.

@@ -219,10 +219,15 @@ extern u8 D_8009C6D8;
 extern s8 D_8009A057;
 extern s16 D_8009A100;
 extern volatile u16 D_8009AC18;
-extern s16 D_8009AC1A[1];
+/* volatile: the target holds each of these addresses in a general register
+ * (lui/addiu/op 0(reg)) where a plain declaration gives maspsx's two-
+ * instruction $at macro. A volatile MEM is barred from cse's table, so the
+ * address is never folded back into it. Worth 12 rows; see the note on
+ * FieldMain. Both symbols are written only here. */
+extern volatile s16 D_8009AC1A[1];
 extern volatile s16 D_8009AC1E;
 extern u16 D_8009AC40[1];
-extern u32 D_8009AC3C[1];
+extern volatile u32 D_8009AC3C[1];
 extern void func_800128B8(void);
 extern void func_800129D0(void);
 extern void DebugRunEveryLoop(void);
@@ -304,8 +309,8 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
- * The residue is 77 rows / 4 insertions with that object removed, in five
- * clusters:
+ * The residue is 65 rows / 4 insertions with that object removed, in four
+ * live clusters:
  *   1. the pre-loop block. The target builds &D_8009AC40 into a caller-saved
  *      register, stores through it, and derives `ev` from the *loop's* copy
  *      of that address at the preheader (`addiu s1,s3,-0x4b`, 0xb8 bytes
@@ -313,13 +318,19 @@ extern s16 D_80071E3C;
  *      early. For gcc to hoist it, `ev` has to be assigned inside the loop --
  *      and every placement measured is much worse: loop top 114/12, after the
  *      fade `if` 87/7, before its first use 89/7. 2 rows and 1 insertion.
- *   2. D_8009AC1A[0] = 2 and the D_8009AC3C read: the target materialises the
- *      address into a general register (lui/addiu/op 0(reg)), here both give
- *      the two-instruction $at macro. Spelling them as the struct members they
- *      are -- movieCommandState (+0x26) and nextFieldMusic (+0x48) -- is
- *      codegen-identical, so this is not the symbol_ref lever that fixed the
- *      fadeType store. Also measured and rejected: scalar extern, one-element
- *      array, volatile on each, and a volatile store through a cast. 4 rows.
+ *   2. CLOSED. D_8009AC1A[0] = 2 and the D_8009AC3C read wanted `volatile` on
+ *      the declarations. The target materialises each address into a general
+ *      register (lui/addiu/op 0(reg)) where a plain declaration gives maspsx's
+ *      $at macro; a volatile MEM is never entered in cse's table, so the
+ *      address stays in its own pseudo instead of being folded back into the
+ *      MEM. This note and CLAUDE.md both used to record volatile as measured
+ *      and rejected here -- it is not, and it was worth 12 rows, not the 4 the
+ *      cluster was quoted at, because the two extra registers renamed a third
+ *      of the function. A volatile cast at the access site (`*(volatile
+ *      s16*)D_8009AC1A = 2`) measures the same; spelling them as the struct
+ *      members they are (movieCommandState +0x26, nextFieldMusic +0x48) is
+ *      codegen-identical to the plain form and does not reach it, and named
+ *      pointer locals are worse (80/6).
  *   3. the fade block stores fadeType before fadeSpeed in the target and
  *      after it here. Both are struct stores at distinct constant offsets, so
  *      sched2 is free to swap them; it is not source order. 4 rows.
