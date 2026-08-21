@@ -1178,16 +1178,26 @@ extern FieldLine D_8007E7AC;
  *
  * The leads, in order of size:
  *   - Passes 4 and 6 are three and seven instructions short, and both are the
- *     same shape: gcc folding a computation the target repeats. Pass 4 is two
- *     `andi` short -- `arg0 & 0x2000` is tested in three arms and is
- *     loop-invariant, we materialise it once and the target three times, and
- *     since its uses all sit inside conditional arms move_movables should not
- *     be lifting it. Pass 6 is two `lh` short, and they are the MoveStep
- *     reloads: the target stores `MoveStep = step + 1` and immediately reloads
- *     0x32 into $a3 for the call's fourth argument, then reloads it again for
- *     the second call, where cse hands us the stored register and narrows it
- *     with sll/sra. Measured and inert there: the `s16` local assigned inside
- *     the `else` arm rather than before the `if`, which is what the target's
+ *     same shape: gcc folding a computation the target repeats.
+ *
+ *     Pass 4 is two `andi` short, and the diagnosis is exact: we hoist
+ *     `arg0 & 0x2000` into $s3 in the loop preheader, three lines after the
+ *     `andi s3,s4,0x8000` both builds hoist, and the target computes it three
+ *     times -- once in each of the direction arms. The three tests are
+ *     identical invariant expressions, so `combine_movables` links them and
+ *     `move_movables` lifts one copy; the target's does not, which puts its
+ *     savings at or below the threshold that lets a *conditional* movable
+ *     move at all. Measured and inert: `var_v0_11` as `u8` and as `s32` (the
+ *     `li -32` / `li -96` we emit where the target has `ori 0xE0` / `ori 0xA0`
+ *     is the QImode narrowing of the constant against the `u8 MoveDir` store,
+ *     and the local's type does not reach it).
+ *
+ *     Pass 6 is two `lh` short, and they are the MoveStep reloads: the target
+ *     stores `MoveStep = step + 1` and immediately reloads 0x32 into $a3 for
+ *     the call's fourth argument, then reloads it again for the second call,
+ *     where cse hands us the stored register and narrows it with sll/sra.
+ *     Measured and inert there: the `s16` local assigned inside the `else`
+ *     arm rather than before the `if`, which is what the target's
  *     `move a3,v1` in the branch delay slot looks like it should need.
  *   - Passes 2 (-9), 3 (-6), 7 (-7) and 8 (-9) are over and have not been
  *     read since the switches and the arm split landed.
