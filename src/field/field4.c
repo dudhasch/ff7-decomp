@@ -9475,23 +9475,30 @@ s32 OpcodeFuncCkitm(void) {
 // Begin of field_opcode_special.c
 /////////////////////////////////////////////////
 
-extern u8 D_8009D7D0;
+extern u8 D_8009D7D0[1];
 void func_80033A90(void);
 void SystemMessageSetCharName(u8 charId, u8 nameId);
 
 /* The "special" opcode: one byte of sub-opcode selects among eleven unrelated
  * jobs, from clearing the item/materia inventories to writing a character's
  * name into the message name buffer. Sub-opcodes run 0xF5..0xFF, which is what
- * the jump table's `(u32)(sub - 0xF5) < 0xB` guard checks. */
-/* One instruction out, and it is a scheduling choice, not a semantic one: for
- * the smspd sub-opcode the target computes `nor v0,zero,v0` into the load-delay
- * slot of the `lbu` that PC_INC needs for g_CurrentEntity, and stores to
- * D_8009D7D0 before materialising &g_FieldScriptPC. This build emits the `nor`
- * into a1 immediately after the call and sinks the store past the PC address.
- * Everything else -- all eleven sub-opcodes, the 13 .rodata literals and the
- * jump table at .rodata+0xde0 -- is byte-exact.
+ * the jump table's `(u32)(sub - 0xF5) < 0xB` guard checks.
  *
- * Three findings got it this far, all of them costly to re-derive:
+ * Four findings, all costly to re-derive:
+ *   - `D_8009D7D0` is an array, not a scalar. As a plain `extern u8` the store
+ *     in the SMSPD arm is not MEM_IN_STRUCT_P, so true_dependence lets the
+ *     `g_FieldScriptPC[g_CurrentEntity]` load PC_INC needs float above it: gcc
+ *     issues the `nor` immediately after the call, has to park it in $a1
+ *     because $v0 has gone to &g_FieldScriptPC, and sinks the store past the
+ *     PC address. Declared `u8[1]` and written `D_8009D7D0[0]`, the store is
+ *     in a struct too, the load is pinned below it, the `nor` lands in the
+ *     load-delay slot of the `lbu` and keeps $v0 -- which is the target. That
+ *     was the last row, after a park note had called it "post-reload
+ *     scheduling with equal priorities on both sides"; it is aliasing, and it
+ *     is the same lever AddBackgroundToRender needs run in the other
+ *     direction. A named local for the complement, an `(s32)` cast on the
+ *     operand and `-x - 1` in place of `~x` are all exactly inert, which is
+ *     what says the expression was never the problem.
  *   - `itemId` must be an s32 local. Passing `i | 0xC600` straight to
  *     func_80025288(u16) lets combine narrow the ior to HImode, where the
  *     constant becomes -0x3a00 and can no longer be an `ori` immediate; gcc
@@ -9500,22 +9507,7 @@ void SystemMessageSetCharName(u8 charId, u8 nameId);
  *   - the name copy walks (`*name++`), it does not index (`name[i]`). Indexing
  *     makes gcc build a separate giv and copy the base into it.
  *   - `len` is read before the switch. Reading it after, or folding it and the
- *     switch index into one variable, both cost ~13 rows.
- * Measured and rejected: a u8 temp for the FieldEventReadMemoryU8 result
- * (no change), a u16 itemId (no change). Permuter scratch imported at base
- * score 475.
- *
- * Now 5 rows, all in the SMSPD arm, and all one thing: the target issues the
- * `nor` that complements FieldEventReadMemoryU8's result *after* the
- * g_CurrentEntity load PC_INC needs, and keeps it in $v0; gcc issues it
- * immediately after the call and has to park it in $a1 because $v0 goes to
- * &g_FieldScriptPC. It is post-reload scheduling with equal priorities on both
- * sides. Measured and rejected, all identical: a named `u8 spd` holding the
- * call result, a named local holding the complement, an `(s32)` cast on the
- * operand, and `-x - 1` in place of `~x`. Permuter food. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncSpcal);
-#else
+ *     switch index into one variable, both cost ~13 rows. */
 s32 OpcodeFuncSpcal(void) {
     u8* name;
     s32 itemId;
@@ -9588,14 +9580,14 @@ s32 OpcodeFuncSpcal(void) {
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("smspd", 3);
         }
-        D_8009D7D0 = ~FieldEventReadMemoryU8(4, 3);
+        D_8009D7D0[0] = ~FieldEventReadMemoryU8(4, 3);
         PC_INC(4);
         return 0;
     case 0xF7:
         if (g_DebugLevel & 3) {
             DebugPrintOpcode("gmspd", 3);
         }
-        FieldEventWriteMemoryU8(4, 3, ~D_8009D7D0);
+        FieldEventWriteMemoryU8(4, 3, ~D_8009D7D0[0]);
         PC_INC(4);
         return 0;
     case 0xF6:
@@ -9635,4 +9627,3 @@ s32 OpcodeFuncSpcal(void) {
     PC_INC(2);
     return 0;
 }
-#endif

@@ -1010,7 +1010,7 @@ void FieldEntityAnimationUpdate(s32 entityId) {
     }
 }
 
-extern s32 FieldBattleCheck(s32 encounterTableId);
+extern void FieldBattleCheck(void);
 extern s32 FieldEntityMove(s16 entityId);
 extern /*?*/ s32 D_80074EBC;
 extern /*?*/ s32 D_80074EC0;
@@ -1373,7 +1373,7 @@ void FieldEntityMovementUpdate(s32 arg0) {
                         }
                         if (g_FieldStateData.eventCmd != 1) {
                             if (temp_a0_6 == 1) {
-                                FieldBattleCheck(i);
+                                FieldBattleCheck();
                                 goto block_67;
                             }
                         } else {

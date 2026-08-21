@@ -655,6 +655,24 @@ a near-miss, in rough order of frequency:
   body. `AddBackgroundToRender` reads three such globals — a camera window, two
   ordering-table slots and a per-sprite animation byte pair — and typing them as
   arrays and structs was worth 172 rows and the whole frame layout.
+* **A scalar `extern` store lets the very next statement's array load float
+  above it, and a one-element array pins it.** The store side of the
+  aliasing rule below, and it is worth a whole function: `D_8009D7D0 = ~f();`
+  followed by `PC_INC(4)` puts `g_FieldScriptPC[g_CurrentEntity]`'s load
+  *before* the store, because a plain `extern u8` is not `MEM_IN_STRUCT_P` and
+  `true_dependence` waves the struct load past it. gcc then issues the `nor`
+  immediately after the call and has to park it in a second register, since
+  `$v0` has already gone to the array's address. Declared `extern u8 D_[1];`
+  and written `D_[0] = ~f();`, the store is in a struct too, the load stays
+  below it, and the `nor` falls into the `lbu`'s load-delay slot keeping
+  `$v0` -- which is the target. `OpcodeFuncSpcal` in `src/field/field4.c`
+  matched on this after its park note had called the residue "post-reload
+  scheduling with equal priorities on both sides". The tell is a store that
+  the target issues *earlier* than you do with an address materialisation
+  in between, and the give-away that it is aliasing rather than scheduling is
+  that every spelling of the stored *value* -- a named local, a cast, `-x - 1`
+  for `~x` -- measures exactly the same.
+
 * **A store's struct-ness decides whether a later load may float above it.**
   The companion to the aliasing bullet above, run forwards instead of
   backwards: `true_dependence` lets a `MEM_IN_STRUCT_P` load move past a store
@@ -2446,11 +2464,11 @@ source: repoint every path string, and **move** the `MASPSX_OVERRIDE` `.s`
 files into the new directory by hand — splat never regenerates those, so they
 do not appear there on their own.
 
-Eight of the eleven functions this blocked are now plain matching C: `IfCheck`,
+Nine of the eleven functions this blocked are now plain matching C: `IfCheck`,
 `If2CheckSigned`, `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`,
-`OpcodeFuncSrchx`, `OpcodeFuncFadew` and `FieldEventRequestRun`. The three that
-remain — `OpcodeFuncFade`, `OpcodeFuncSpcal`, `FieldEventWriteMemoryU8` — are
-stuck on ordinary codegen, not on alignment; treat them as normal work.
+`OpcodeFuncSrchx`, `OpcodeFuncFadew` and `FieldEventRequestRun`. The two that
+remain — `OpcodeFuncFade` and `FieldEventWriteMemoryU8` — are stuck on
+ordinary codegen, not on alignment; treat them as normal work.
 
 The seam comments the old single file carried (`// Begin of
 field_event_memory_bank.c`) name the *original* translation units, of which
