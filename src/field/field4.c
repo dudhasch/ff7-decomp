@@ -342,6 +342,45 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPartPkts);
 extern u8 D_800DFCA4[][7]; /* mouth texture page index, per face, per frame */
 extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
 
+/* Reload one model's eye and mouth textures into VRAM: three LoadImage calls
+ * into a per-model 16x32 slot, the two mouth halves side by side at x+0x300
+ * and x+0x308 and the eyes on the row below at y+0x1A0. `faceSel` is the
+ * per-frame selection -- [0] and [1] index the mouth table, [2] the eye
+ * table, [3] the VRAM slot.
+ *
+ * 23 rows / 5 insertions at exactly the target's 113 instructions. The length
+ * is exact and the residue is register naming plus one scheduling choice, so
+ * what is durable here is the set of things that are *not* wrong:
+ *
+ *   - **The two divisions are divisions, not shifts.** `slot` is an `s32`
+ *     assigned from a `u8`, and gcc will not prove it non-negative across the
+ *     `if (slot < 0x21)`, so `slot / 4` emits the round-toward-zero
+ *     `bgez`/`addiu 3`/`sra` triple. Spelling both as `>> 2` and `>> 3` is
+ *     six instructions short (81 rows, -6), which is exactly the two fix-ups
+ *     -- so the target divides.
+ *   - **rect.w and rect.h are stored at every site.** They are the same 8 and
+ *     0x20 all three times and the target keeps them in $s6 and $s5, but it
+ *     re-stores them: setting them once before the three blocks is eight
+ *     instructions short (55 rows, -8).
+ *   - **A named local for the shared column is inert.** The target computes
+ *     `(slot - q * 4) << 4` once and reaches both mouth halves off it
+ *     (`addiu s0,s0,0x308` after the first), but gcc already shares it -- a
+ *     `col` local measures byte-identical.
+ *   - The RECT is filled in field order x, y, w, h, which is what the target
+ *     stores (`sh` at 0x10, 0x12, 0x14, 0x16 in that order at all three
+ *     sites).
+ *   - `D_800DFCA0` is read three times in the target, once per site, because
+ *     each LoadImage call invalidates it -- writing it inline at every use, as
+ *     below, is what reproduces that. `D_800DFCA4` and `D_800DFD94` are each
+ *     addressed once and hoisted.
+ *
+ * What is left: the target stores `rect.x` and only then computes `rect.y`,
+ * filling the gap with `addiu a0,sp,0x10` (the `&rect` argument); ours
+ * computes y first and stores both together. The rest is `a0`/`a1` naming on
+ * the three `faceSel[]` reads. Permuter food -- the length is already exact,
+ * so this is `perm_ins_block` and `perm_temp_for_expr` territory rather than
+ * anything readable off the target.
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiLoadEyesMouthTexToVram);
