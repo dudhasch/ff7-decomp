@@ -3068,7 +3068,17 @@ extern u8 D_801144D8; // blink RNG cursor
  * 68: extending its live range to the loop top makes it a movable of its own.
  * So the three shapes available are 2 rows with the order wrong, 3 rows with
  * the compare rematerialised, and 13 rows with two registers swapped, and the
- * function wants a fourth that C does not appear to spell. */
+ * function wants a fourth that C does not appear to spell.
+ *
+ * decomp-permuter has now had a proper run at it and did not find one:
+ * 47,000 iterations on 11 workers from a clean scratch (no diagnostics,
+ * base.o within 1% of target.o, relocations identical) at base score 20,
+ * with perm_ins_block raised to 20 alongside the settings' own
+ * perm_temp_for_expr 150 and perm_reorder_stmts 15 -- not one improvement
+ * over the base. Declaring the function non-`void`, which is what closed
+ * FieldEntityCheckTalk's last row, is exactly inert here too. That is
+ * consistent with the diagnosis above being right: allocno_compare's
+ * ranking is not something a source-level randomiser can reach. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
