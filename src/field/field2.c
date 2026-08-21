@@ -371,7 +371,7 @@ void FieldBGScrollUpdate(void) {
 
 extern s32 FieldCalcEaseInOut(s32 from, s32 to, s32 total, s32 step);
 extern s32 FieldCalcLinearStep(s32 start, s32 target, s32 duration, s32 step);
-extern s32 FieldCalcPointOnLine(s32 t, s32* line);
+extern void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos);
 extern s16 D_80071A48;
 extern s16 D_80071A4A;
 extern s16 D_80071A4C;
@@ -2333,9 +2333,19 @@ s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
            normal[2];
 }
 
+/* One entry of the map's background-trigger block. Even `type`s arm the
+ * trigger, odd ones disarm it. */
+typedef struct {
+    /* 0x00 */ LinePos pos;
+    /* 0x0C */ u8 entityId;
+    /* 0x0D */ u8 unk0D;
+    /* 0x0E */ u8 type;
+    /* 0x0F */ u8 unk0F;
+} FieldBgTrigger;
+
 u8 FieldEntityLineCheck(FieldEntity*, FieldLine*, VECTOR*); // extern
 extern void FieldEntityTriggerCheck(
-    FieldEntity* entity, void* trigger, VECTOR* dest);
+    FieldEntity* entity, FieldBgTrigger* trigger, VECTOR* dest);
 extern s32 FieldEntityWalkmechCross(
     u16* triId, VECTOR* pos, VECTOR* delta, VECTOR* outEdge);
 extern void OuterProduct0(VECTOR* v0, VECTOR* v1, VECTOR* out);
@@ -3048,16 +3058,6 @@ void FieldEntityGatewayCheck(
     }
 }
 
-/* One entry of the map's background-trigger block. Even `type`s arm the
- * trigger, odd ones disarm it. */
-typedef struct {
-    /* 0x00 */ LinePos pos;
-    /* 0x0C */ u8 entityId;
-    /* 0x0D */ u8 unk0D;
-    /* 0x0E */ u8 type;
-    /* 0x0F */ u8 unk0F;
-} FieldBgTrigger;
-
 /* Declared out here rather than relying on the definition below: that one is
  * inside a NON_MATCHINGS arm, so the matching build never sees it and gcc
  * falls back to an implicit `int` return -- which drops the sign extension
@@ -3147,8 +3147,18 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  * hoists the PosZ load into a second register instead. The instructions are
  * the same ones. Neither the order of the two pointer assignments, nor moving
  * them after the stores (32 rows), nor between them, nor the declaration order
- * of the locals, nor writing the first store through `from` moves it. Good
- * permuter target. Codegen pinned via MASPSX_OVERRIDE. */
+ * of the locals, nor writing the first store through `from` moves it.
+ *
+ * A `do { } while (0);` probe settles which pass to blame, and the answer is
+ * sched2: the barrier is *not* inert -- after the three stores 21 rows,
+ * between the first and second 20, between the second and third 17, between
+ * the pointer setup and the stores 20, against 12 for none. So source
+ * position is a live lever here and register allocation is not the wall;
+ * what is missing is a placement that pulls `addiu s0,s1,0xf` *after* the
+ * PosZ load rather than before it, and none of the four block boundaries
+ * available does that. Good permuter target -- perm_ins_block is the pass,
+ * and the four placements a human can think of are all measured above.
+ * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
 #else

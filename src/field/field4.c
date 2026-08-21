@@ -1,6 +1,25 @@
 //! PSYQ=3.3 CC1=2.6.3
 #include "field_private.h"
 
+/* One model part's polygon groups, as LoadLocalFieldModelAndInitAll splices
+ * them: eight per-primitive-kind counts packed two words to a record, an
+ * offset to the polygon block and the relocated pointer to the model data the
+ * offset is measured from. */
+typedef struct {
+    /* 0x00 */ u32 unk0;
+    /* 0x04 */ u32
+        polyCounts0; // gouraud quad, gouraud tri, then two flat quads
+    /* 0x08 */ u32 polyCounts1; // two flat tris, then a gouraud tri and quad
+    /* 0x0C */ u16 unkC;
+    /* 0x0E */ u16 polyOffset;
+    /* 0x10 */ u16 unk10;
+    /* 0x12 */ u16 unk12;
+    /* 0x14 */ u16 unk14;
+    /* 0x16 */ u16 unk16;
+    /* 0x18 */ u8* data;
+    /* 0x1C */ u8* unk1C;
+} FieldModelPart;
+
 /* Unit 4 of 5, split out of field.c. .rodata 0x800A0104-0x800A0F10, base 4 mod
  * 8 -> --phase 4. The large middle run: 20 of the overlay's jump tables, all 4
  * mod 8. */
@@ -20,7 +39,7 @@ extern u8 D_800DF114;
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiSetVertexColorFromLighting);
 #else
-void KawaiSetVertexColorFromLighting(void* arg0) {
+void KawaiSetVertexColorFromLighting(FieldModelPart* arg0) {
     s32* var_a3;
     u32 temp_t3;
     u32 temp_t3_2;
@@ -57,7 +76,7 @@ void KawaiSetVertexColorFromLighting(void* arg0) {
     if (D_800DF114 != 0) {
         var_a3 += arg0->unk16;
     }
-    temp_t7 = arg0->unk4;
+    temp_t7 = arg0->polyCounts0;
     temp_t3 = temp_t7 & 0xFF;
     var_t0 = 0;
     if (temp_t3 != 0) {
@@ -138,7 +157,7 @@ void KawaiSetVertexColorFromLighting(void* arg0) {
             var_a3 += 0x20;
         } while (var_t0_4 < temp_t3_4);
     }
-    temp_t7_2 = arg0->unk8;
+    temp_t7_2 = arg0->polyCounts1;
     temp_t3_5 = temp_t7_2 & 0xFF;
     var_t0_5 = 0;
     if (temp_t3_5 != 0) {
@@ -363,25 +382,6 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
 #endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
-
-/* One model part's polygon groups, as LoadLocalFieldModelAndInitAll splices
- * them: eight per-primitive-kind counts packed two words to a record, an
- * offset to the polygon block and the relocated pointer to the model data the
- * offset is measured from. */
-typedef struct {
-    /* 0x00 */ u32 unk0;
-    /* 0x04 */ u32
-        polyCounts0; // gouraud quad, gouraud tri, then two flat quads
-    /* 0x08 */ u32 polyCounts1; // two flat tris, then a gouraud tri and quad
-    /* 0x0C */ u16 unkC;
-    /* 0x0E */ u16 polyOffset;
-    /* 0x10 */ u16 unk10;
-    /* 0x12 */ u16 unk12;
-    /* 0x14 */ u16 unk14;
-    /* 0x16 */ u16 unk16;
-    /* 0x18 */ u8* data;
-    /* 0x1C */ u8* unk1C;
-} FieldModelPart;
 
 extern SVECTOR D_800DF520[]; // light normals, indexed by a colour's code byte
 
@@ -9919,6 +9919,22 @@ s32 OpcodeFuncNfade(void) {
  * does not touch the arms at all: declaring `adjust` ahead of `type` is
  * byte-identical, the two not competing, so declaration order is inert here as
  * usual.
+ *
+ * A basic-block barrier does not do it either, and that is worth knowing
+ * because it is the one lever CLAUDE.md recommends for exactly this shape:
+ * `do { } while (0);` inside the `if` before the `return`, after the `if`
+ * before the `break`, with the arm inline and with the arm keeping its own
+ * local, all four measure 9 rows and -3 instructions -- byte-identical to
+ * the plain inline form. The merge is decided by whether the tails match as
+ * hard-register patterns, and ending a block between them changes neither
+ * the patterns nor the fact that both `j` the same label.
+ *
+ * Reading the target settles what the arms look like and deepens the
+ * puzzle rather than solving it: both waiting arms end with the *identical*
+ * four insns -- `beqz v0,<PC_INC> / ori v0,zero,0x1 / j <epilogue> / nop` --
+ * on the same register, and gcc still emitted both copies. So the original
+ * is not holding them apart by register or by block structure, and no
+ * spelling of these two tests reaches it.
  *
  * Permuter food: what is needed is a shape that keeps the two arms apart for
  * some reason other than the register, not another spelling of the same two
