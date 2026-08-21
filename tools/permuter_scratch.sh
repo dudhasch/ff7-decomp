@@ -60,6 +60,7 @@ rm -f "$BK"
 $PY tools/permuter_strip_asm.py "$D"               >/dev/null 2>&1
 $PY tools/permuter_macros.py align "$D" --strings  >/dev/null 2>&1
 $PY tools/permuter_macros.py retarget "$D"         >/dev/null 2>&1
+$PY tools/permuter_rodata_local.py "$D"          >/dev/null 2>&1
 $PY tools/permuter_macros.py weights "$D"          >/dev/null 2>&1
 sed -i -e 's/ -g / /g' -e 's/ -gcoff / /g' "$D/compile.sh"
 
@@ -83,8 +84,15 @@ io.open(path, 'w', encoding='utf-8', newline='').write('\n'.join(out) + '\n')
 PY
 fi
 
+# base.c is not compilable as written when the function uses a macro from
+# [preserve_macros]: those survive only as `#pragma _permuter latedefine`
+# blocks, which cpp ignores, so a plain compile emits a call to PC_INC rather
+# than its expansion and every check below reads as a broken import. See
+# tools/permuter_latedefines.py.
+python3 tools/permuter_latedefines.py "$D/base.c" /tmp/permuter_scratch_check.c
+
 echo "=== $FN: compile diagnostics (must be empty)"
-"./$D/compile.sh" "$D/base.c" x /tmp/permuter_scratch.o 2>&1 | grep -v 'warning:'
+"./$D/compile.sh" /tmp/permuter_scratch_check.c x /tmp/permuter_scratch.o 2>&1 | grep -v 'warning:'
 
 echo "=== $FN: .text size (base must be within a few percent of target)"
 mipsel-linux-gnu-size /tmp/permuter_scratch.o "$D/target.o"
