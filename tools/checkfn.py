@@ -207,7 +207,19 @@ def normalise(text, syms, section_bases):
         if token.startswith("%hi("):
             return "@HI"
         addr = resolve(token, syms, section_bases)
-        return "@%08X" % addr if addr is not None else token
+        if addr is None:
+            return token
+        # A %lo operand *is* the instruction's low 16 bits, and objdump renders
+        # it as the signed immediate rather than as the relocation's addend --
+        # so `g_FieldRenderData + 0x1BA28` prints as `%lo(g_FieldRenderData
+        # -0x45d8)` against the .s's `%lo(D_80100818)`, and resolve() then
+        # computes two addresses 0x20000 apart for what is one address and one
+        # halfword of object code. Compare %lo by the halfword it emits; the
+        # high half is carried by the paired %hi row, which is its own row in
+        # the diff and is still reported if it differs.
+        if token.startswith("%lo("):
+            return "@LO%04X" % (addr & 0xFFFF)
+        return "@%08X" % addr
     return SYM_TOKEN_RE.sub(sub, text)
 
 
