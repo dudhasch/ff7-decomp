@@ -479,6 +479,11 @@ extern s16 D_80071E3C;
  *      (80/5), `i = 0xF` hoisted above the branch too (92/4), `fill` hoisted
  *      instead (97/5), the arms written as a goto rather than an else (77/4,
  *      byte-identical). 3 rows.
+ *      Re-swept against 33/6: the `do`/`while` written as
+ *      `for (; i >= 0; i--)` is byte-identical, the rain arms inverted 38/7,
+ *      `fill` assigned before `i` 36/7, `fillVal` moved below the rain
+ *      if/else 32/7 (a tie on total rows, one more insertion), and `fillVal`
+ *      moved below `fill` 36/7.
  *   6. six rows that were never real. The target names six interior addresses
  *      of g_FieldRenderData by their own splat labels (D_8010068C, D_8010080C,
  *      D_80100818, D_8010081C, D_80100820, D_80100860) where this C reaches
