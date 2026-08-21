@@ -2401,6 +2401,29 @@ a near-miss, in rough order of frequency:
   past the block, and the masks come back. 27 rows and the exact length in
   `FieldBattleCheck`. The `u8` and the split are one lever: widening the
   variable after the split loses the masks again.
+* **When a value has to sit in its own register, widen the local; a `u8` one
+  is inert.** The general form of the two bullets above, and it has now paid
+  three times. cse substitutes a register for a memory reference only when
+  that is *strictly cheaper*, and a `u8` local is free to substitute -- it
+  coalesces with whatever loaded it -- while an `s16`/`s32` local would need an
+  `andi` to widen, which ties the `lbu` on cost and stops the substitution
+  dead. So a `u8` local reads as "no change at all" and the same statement
+  with an `s32` local is worth tens of rows: `sel = faceSel[k];` before each
+  table index in `KawaiLoadEyesMouthTexToVram` is 28 rows as `u8` and 7 as
+  `s32`, and `angle = line->proximityAngle;` in `FieldEntityLineCheck` is 9 as
+  `u8` and 0 as `s32`. When a diff shows a byte in the wrong register, or the
+  target reloading something you kept, name it in a *wide* local -- and do not
+  conclude from a `u8` attempt that the local is not the lever.
+* **A quotient carried in a local is shifted in place; re-derived, the shift
+  gets its own destination.** `eyeQ = slot / 8; ... rect.y = (eyeQ << 5) +
+  K;` emits `sll <q>,<q>,5`, clobbering the quotient and freeing the scheduler
+  to issue it early; writing `rect.y = ((slot / 8) << 5) + K;` lets cse share
+  the division but gives the shift a fresh destination, which is what a target
+  with the quotient still live after the shift is telling you. Same value,
+  same instruction count, and the last row of `KawaiLoadEyesMouthTexToVram`.
+  This is the counter-case to the name-the-temporary idioms: here the local is
+  what is wrong, and CLAUDE.md's standing advice to repeat the whole indexed
+  expression applies to arithmetic too.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
