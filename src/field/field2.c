@@ -1201,10 +1201,17 @@ extern FieldLine D_8007E7AC;
  *     at the rest" case, and CLAUDE.md's advice for it is decomp-permuter's
  *     `perm_temp_for_expr`, once the function is close enough for the search
  *     to mean anything.
- *   - **Do not delete the write-only index locals.** Removing all eleven of
- *     them costs 20 rows and an instruction: they change nothing in passes 7
- *     and 8 (both measure identically) but move pass 4 by one and the
- *     allocation behind it.
+ *   - The write-only index locals are not the recomputation. Dropping the
+ *     two in passes 7 and 8 (`temp_s0_9`, `temp_s0_11`) is exactly inert, so
+ *     gcc does delete them; dropping all eleven costs 20 rows and an
+ *     instruction, and that cost is entirely in passes 4 and 6, which have
+ *     not been read yet. Leave them until those are.
+ *   - A second index local for the frame-advance group alone -- `adv = i;`
+ *     after the block_134/block_175 label, with that group's four accesses
+ *     indexed by it, which is where the target reaches through $a0 -- is also
+ *     exactly inert: cse propagates the copy straight back to `i`. The `idx`
+ *     variants above are levers only because they cover the whole loop body,
+ *     not because an s32 copy is one.
  *   - After SquareRoot0 the target copies the result with `move v1,v0` and
  *     shifts out of $v1; ours coalesces the two and shifts in place, leaving
  *     the branch delay slot empty. One row per pass.
