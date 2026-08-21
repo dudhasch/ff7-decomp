@@ -309,14 +309,15 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
- * The residue is 40 rows / 6 insertions with that object removed. Seven of
- * those 40 are the `.rodata` offsets that object itself causes -- it is 8
- * bytes of `.rodata` that the unparked function would emit as its own RECT
- * blob, so while it is present the jump table sits at `.rodata+0x10` against
- * the target's `+0x8` and every table slot reads wrong. That is the CLAUDE.md
- * trap, seen from the measuring side rather than the landing side; deleting
- * the object and the `#else` arm together is the only honest measurement, and
- * this note quotes the number with it still there.
+ * The residue is **33 rows / 6 insertions**, measured with that object
+ * deleted. Measured with it still in place it reads 40/6, and the extra seven
+ * are the `.rodata` offsets the object itself causes: it is 8 bytes that the
+ * unparked function emits as its own RECT blob, so while both exist the jump
+ * table sits at `.rodata+0x10` against the target's `+0x8` and every table
+ * slot reads wrong. That is the CLAUDE.md trap seen from the measuring side
+ * rather than the landing side. Delete the object in the scratch copy before
+ * quoting a number for this function; everything below is against 33/6 unless
+ * it says otherwise.
  *
  * The lever that took it from 65 to 40 is `volatile` on the *casts*, not on
  * the pointer: `ev` is a `volatile u8*`, but `*(u16*)(ev + 0x63)` casts the
@@ -371,7 +372,31 @@ extern s16 D_80071E3C;
  *      seventeen use sites -- the shape that would let cse hoist it as a
  *      movable derived from the `&D_8009AC40` movable, which is what the
  *      target's preheader shows -- is 81/6. The local is right and its
- *      position is wrong, and no position reaches it.
+ *      position is wrong, and no position reaches it -- but the loop-top
+ *      placement now has a diagnosis rather than just a number. There `ev`
+ *      *is* hoisted into the preheader, ahead of the three constants, as
+ *      `lui s1,%hi(D_8009ABF4) / addiu s1,s1,%lo(D_8009ABF4+0x1)` -- its own
+ *      two-instruction address rather than the target's one-instruction
+ *      `addiu s1,s3,-0x4b` -- and the fade base's own `lui s3 / addiu s3`
+ *      *disappears*, because the fade stores are then addressed as `0x4b(s1)`
+ *      off it. `scan_loop` records movables in insn order and `move_movables`
+ *      hoists them in that order, so whichever of the two is referenced first
+ *      in the loop body becomes the anchor and the other is folded into it.
+ *      `*ev = 0;` sits in the `D_800965EC == 2` block, which is ahead of the
+ *      fade block, so `ev` wins -- and the target wants the fade base to win.
+ *      The only placement that hoists at all is the very top of the loop
+ *      (anything after a conditional branch is not on the always-executed
+ *      path and stays in the body: measured, `lui s1` appears inline there),
+ *      and at the top there is no earlier computation of the fade address in
+ *      the block for cse's `use_related_value` to relate it to. The pre-loop
+ *      assignment gets the `-0x4b` form precisely because the store next to it
+ *      has just materialised that address. Those two requirements -- hoisted,
+ *      and related to a fade address computed earlier in the same block -- have
+ *      no position in this function that satisfies both.
+ *      Also measured against 33/6: the two pre-loop statements swapped 34/7,
+ *      `ev` assigned before `func_800128B8()` 34/7, the pre-loop store written
+ *      through `ev` as `*(volatile u16*)(ev + 0x4B) = 0` 34/5, and written as
+ *      `D_8009AC40[0] = 0` 34/7.
  *   2. CLOSED. D_8009AC1A[0] = 2 and the D_8009AC3C read wanted `volatile` on
  *      the declarations. The target materialises each address into a general
  *      register (lui/addiu/op 0(reg)) where a plain declaration gives maspsx's
