@@ -1108,45 +1108,78 @@ extern FieldLine D_8007E7AC;
  *     every other access in the loop uses the $at macro. Duplicated: 1765
  *     instructions; shared: 1794.
  *
+ * Passes 7 and 8 are near-clones and were 30 instructions short each. Both
+ * defects are the same two levers, and both are about what gcc is allowed to
+ * merge or hoist:
+ *
+ *   - **The carried mask has to be assigned at the END of each ActionArg
+ *     arm.** The two arms differ only in which of arg0's bits drives the step
+ *     and which is carried to the join (0x1000/0x4000 in pass 7,
+ *     0x8000/0x2000 in pass 8), so if that assignment is anywhere but the
+ *     arm's tail the two arms compile to identical tails and cross-jumping
+ *     merges one of them away -- taking a whole frame-decrement group with it:
+ *     5 $at triples, 3 lhu, 2 sh, 1 subu and 1 bgez per pass. m2c writes the
+ *     assignment at the top of the arm and again on every interior path,
+ *     because reorg replicates it into each delay slot on the way to the join,
+ *     and all of those spellings measure the same -80 instructions. One
+ *     assignment after the arm's inner `if` is -42 with pass 7 alone and -3
+ *     with both. Asymmetric placements (top in one arm, end in the other) are
+ *     a row worse either way round.
+ *   - **Each pass hoists two movables into its own preheader**: `ori s6,0x2`
+ *     for the three `ActionState = 2` stores, then
+ *     `lui/addiu s5,%hi/%lo(g_FieldEntity)`, which serves exactly three stores
+ *     -- the two arms' MoveStep and block_134's -- while every other access in
+ *     the loop goes through the $at macro. That is the "same packet reached
+ *     two ways in one loop" idiom, and the order is not free: move_movables
+ *     emits hoists in insn order, so `actionEnd = 2;` has to be written before
+ *     `ents = g_FieldEntity;` at the top of the loop body. Together they are
+ *     worth 68 rows (538 to 470); the pointer alone is 506 and the constant
+ *     alone 534.
+ *
+ * The pointer has to be assigned per pass, inside the loop body. As one
+ * function-scope `FieldEntity* ents = g_FieldEntity;` -- which is what closed
+ * the last two rows of passes 2 and 3 when those were the ones being worked --
+ * the base is materialised at function entry instead, where the target has
+ * nothing, and the whole function is a row worse and three instructions short.
+ * The target materialises it four times: $s1 in pass 2's preheader, $a0 once
+ * inside pass 4, and $s5 in each of passes 7 and 8.
+ *
  * Measured and rejected:
- *   - Routing the shared-block stores through a `FieldEntity*` helps passes 2
- *     and 3 (which are over length) and hurts 7 and 8 (which are under), so it
- *     is applied only to TurnStep and OffsetStep. Applied to all four: 1788.
- *   - `actionEnd = 2;` at the top of passes 7 and 8 to make the constant
- *     hoistable, the HandleKawaiDataInModel lever: 613 rows at 1788, worse
- *     than leaving it in the arms.
+ *   - `actionEnd = 2;` on its own, before the arms were split: 613 rows at
+ *     1788. The same lever is worth 32 rows once they are.
+ *   - Routing the shared-block stores through a `FieldEntity*` in passes 7
+ *     and 8 while they were still 30 short: 1788.
  *   - Snapshotting the step into a local before the call: the target loads
  *     0x3A twice, once for the call and once for the compare.
  *
- * Where the remaining 80 instructions are, per pass (want/got):
- *     1: 44/44   2: 110/117  3: 209/213  4: 224/208
- *     5: 87/87   6: 293/278  7: 433/403  8: 441/411
- * Passes 1 and 5 are exact. Passes 7 and 8 are near-clones of each other and
- * hold 60 of the 80; passes 2 and 3 are 11 over between them.
+ * Where the remaining instructions are, per pass (want/got):
+ *     1: 44/44    2: 110/119  3: 209/215  4: 224/208
+ *     5: 87/87    6: 293/278  7: 433/437  8: 441/447
+ * Passes 1 and 5 are exact. Passes 2, 3, 7 and 8 are now slightly over and 4
+ * and 6 are short; the totals nearly cancel, so the whole function is six
+ * instructions under the target's 1855.
  *
  * The leads, in order of size:
+ *   - Passes 4 (+16) and 6 (+15) have never been read against the target.
  *   - `tools/struct_access_audit.py field2 FieldEntityMovementUpdate
- *      --symbol g_FieldEntity --base 0x80074EA4 --size 0x84` still shows 11
- *     rows: animCurrentFrame is 4 stores and 2 loads short and MoveStep 4
- *     stores over, which is one frame-advance group per pass not being
- *     emitted. That is 3 accesses per pass and the likeliest home of the gap.
- *   - The target hoists `%hi/%lo(g_FieldEntity)` into a callee-saved register
- *     in passes 2 and 7 ($s1 and $s5) and the constants 2 and 3 beside it; we
- *     hoist neither, and the frame is 0x30 short with two extra callee-saved
- *     registers, so the target spills where we do not.
- *   - `andi` is 10 short. `var_v0_20` carries `arg0 & 0x4000` in one arm and
- *     `arg0 & 0x1000` in the other; the target recomputes the mask in branch
- *     delay slots rather than keeping it.
- *   - `bgez` is 3 short: signed divisions by a power of two that this body
- *     still spells as the shift-and-round m2c expanded them into.
- *   - Pass 4 (+16) and pass 6 (+15) have not been read against the target.
+ *      --symbol g_FieldEntity --base 0x80074EA4 --size 0x84` is down to six
+ *     rows, all small: MoveStep is stored six times too often (the census
+ *     counts only %hi-addressed accesses, so the three per pass that now go
+ *     through $s5 are invisible to it -- read that row with care).
+ *   - Passes 7 and 8 each have two `sll`/`sra` pairs the target does not and
+ *     are two stack stores short; the frame is 0x30 short and the target uses
+ *     one more callee-saved register.
+ *   - `li s3,0x3` and the `%hi/%lo(g_FieldEntity)` base are still not hoisted
+ *     in pass 2's preheader, which is the same lever as passes 7 and 8 and
+ *     has not been tried there.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
 #else
 void FieldEntityMovementUpdate(s32 arg0) {
     s16 i;
-    FieldEntity* ents = g_FieldEntity;
+    s16 actionEnd;
+    FieldEntity* ents;
     s32 next;
     s32 lastFrame;
     s32 sp10;
@@ -1257,7 +1290,7 @@ void FieldEntityMovementUpdate(s32 arg0) {
             g_FieldEntity[i].TurnType = 3;
             break;
         turnStep:
-            ents[i].TurnStep = next;
+            g_FieldEntity[i].TurnStep = next;
             break;
         }
     }
@@ -1296,7 +1329,7 @@ void FieldEntityMovementUpdate(s32 arg0) {
             g_FieldEntity[i].OfsType = 3;
             goto ofsEnd;
         ofsStep:
-            ents[i].OffsetStep = next;
+            g_FieldEntity[i].OffsetStep = next;
         ofsEnd:
             if (i == g_PlayerModelId) {
                 FieldEntityLineClear(&D_8007E7AC);
@@ -1476,6 +1509,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
+        actionEnd = 2;
+        ents = g_FieldEntity;
         temp_s0_8 = i * 0x84;
         if (g_FieldEntity[i].scriptedMoveMode == 4) {
             temp_a0_8 = g_FieldModelLoaderData[i].modelEntryIndex;
@@ -1529,41 +1564,36 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     if (i == g_PlayerModelId) {
                         if (g_FieldAnimLock == 0) {
                             if (g_FieldEntity[i].ActionArg == 0) {
-                                var_v0_20 = arg0 & 0x4000;
                                 if (arg0 & 0x1000) {
                                     temp_v0_8 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_8 == 0) {
-                                        g_FieldEntity[i].ActionState = 2;
-                                        var_v0_20 = arg0 & 0x4000;
+                                        g_FieldEntity[i].ActionState =
+                                            actionEnd;
                                     } else {
-                                        g_FieldEntity[i].MoveStep =
-                                            temp_v0_8 - 1;
+                                        ents[i].MoveStep = temp_v0_8 - 1;
                                         temp_v0_9 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
                                             (u16)g_FieldEntity[i].animSpeed;
                                         g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_9;
-                                        var_v0_20 = arg0 & 0x4000;
                                         if (temp_v0_9 < 0) {
                                             g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
-                                            var_v0_20 = arg0 & 0x4000;
                                         }
                                     }
                                 }
+                                var_v0_20 = arg0 & 0x4000;
                             } else {
-                                var_v0_20 = arg0 & 0x1000;
                                 if (arg0 & 0x4000) {
                                     temp_v0_10 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_10 == 0) {
-                                        g_FieldEntity[i].ActionState = 2;
-                                        var_v0_20 = arg0 & 0x1000;
+                                        g_FieldEntity[i].ActionState =
+                                            actionEnd;
                                     } else {
-                                        g_FieldEntity[i].MoveStep =
-                                            temp_v0_10 - 1;
+                                        ents[i].MoveStep = temp_v0_10 - 1;
                                         temp_v0_11 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
@@ -1576,9 +1606,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
                                                     .animLastFrame *
                                                 0x10;
                                         }
-                                        var_v0_20 = arg0 & 0x1000;
                                     }
                                 }
+                                var_v0_20 = arg0 & 0x1000;
                             }
                             if (var_v0_20 != 0) {
                                 var_a0_4 = i * 0x84;
@@ -1598,12 +1628,12 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     temp_v1_7 = g_FieldEntity[i].MoveStep;
                     if (temp_v1_7 == g_FieldEntity[i].MoveSteps) {
                     block_132:
-                        g_FieldEntity[i].ActionState = 2;
+                        g_FieldEntity[i].ActionState = actionEnd;
                         g_FieldEntity[i].PosI = (u16)g_FieldEntity[i].MoveEndI;
                     } else {
                         var_v1_5 = temp_v1_7 + 1;
                     block_134:
-                        g_FieldEntity[i].MoveStep = var_v1_5;
+                        ents[i].MoveStep = var_v1_5;
                         temp_v0_12 = (u16)g_FieldEntity[i].animCurrentFrame +
                                      (u16)g_FieldEntity[i].animSpeed;
                         g_FieldEntity[i].animCurrentFrame = temp_v0_12;
@@ -1628,6 +1658,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
+        actionEnd = 2;
+        ents = g_FieldEntity;
         temp_s0_10 = i * 0x84;
         if (g_FieldEntity[i].scriptedMoveMode == 5) {
             temp_a0_9 = g_FieldModelLoaderData[i].modelEntryIndex;
@@ -1680,41 +1712,36 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     if (i == g_PlayerModelId) {
                         if (g_FieldAnimLock == 0) {
                             if (g_FieldEntity[i].ActionArg == 0) {
-                                var_v0_26 = arg0 & 0x2000;
                                 if (arg0 & 0x8000) {
                                     temp_v0_15 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_15 == 0) {
-                                        g_FieldEntity[i].ActionState = 2;
-                                        var_v0_26 = arg0 & 0x2000;
+                                        g_FieldEntity[i].ActionState =
+                                            actionEnd;
                                     } else {
-                                        g_FieldEntity[i].MoveStep =
-                                            temp_v0_15 - 1;
+                                        ents[i].MoveStep = temp_v0_15 - 1;
                                         temp_v0_16 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
                                             (u16)g_FieldEntity[i].animSpeed;
                                         g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_16;
-                                        var_v0_26 = arg0 & 0x2000;
                                         if (temp_v0_16 < 0) {
                                             g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
-                                            var_v0_26 = arg0 & 0x2000;
                                         }
                                     }
                                 }
+                                var_v0_26 = arg0 & 0x2000;
                             } else {
-                                var_v0_26 = arg0 & 0x8000;
                                 if (arg0 & 0x2000) {
                                     temp_v0_17 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_17 == 0) {
-                                        g_FieldEntity[i].ActionState = 2;
-                                        var_v0_26 = arg0 & 0x8000;
+                                        g_FieldEntity[i].ActionState =
+                                            actionEnd;
                                     } else {
-                                        g_FieldEntity[i].MoveStep =
-                                            temp_v0_17 - 1;
+                                        ents[i].MoveStep = temp_v0_17 - 1;
                                         temp_v0_18 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
@@ -1727,9 +1754,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
                                                     .animLastFrame *
                                                 0x10;
                                         }
-                                        var_v0_26 = arg0 & 0x8000;
                                     }
                                 }
+                                var_v0_26 = arg0 & 0x8000;
                             }
                             if (var_v0_26 != 0) {
                                 var_a0_6 = i * 0x84;
@@ -1749,12 +1776,12 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     temp_v1_10 = g_FieldEntity[i].MoveStep;
                     if (temp_v1_10 == g_FieldEntity[i].MoveSteps) {
                     block_173:
-                        g_FieldEntity[i].ActionState = 2;
+                        g_FieldEntity[i].ActionState = actionEnd;
                         g_FieldEntity[i].PosI = (u16)g_FieldEntity[i].MoveEndI;
                     } else {
                         var_v1_6 = temp_v1_10 + 1;
                     block_175:
-                        g_FieldEntity[i].MoveStep = var_v1_6;
+                        ents[i].MoveStep = var_v1_6;
                         temp_v0_19 = (u16)g_FieldEntity[i].animCurrentFrame +
                                      (u16)g_FieldEntity[i].animSpeed;
                         g_FieldEntity[i].animCurrentFrame = temp_v0_19;
