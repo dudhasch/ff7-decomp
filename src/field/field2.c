@@ -4073,60 +4073,41 @@ extern u8 D_8009C6D8;
  * one row, and it makes the accumulator's width a semantic question for no
  * structural gain, so it is not taken.
  *
- * 62 rows / 1 insertion / -4 -> 40 / 0 / -2, and the answer to the question
- * the paragraph above leaves open is a named pointer local. `s16* cur =
- * &D_8009ABF6;` assigned immediately above the `!= D_8007E774` test, with
- * that test, its store, and the *second* walk's fallback store reaching the
- * symbol through `*cur`, is what makes cse relate the two references instead
- * of fusing each `%lo` into its own access -- which is what puts the address
- * in a callee-saved register across the FieldGetNextRandomU8 call, exactly
- * as the target has it. Scope matters: routing the second walk's `slot`
- * store through `cur` as well is 42, and the first walk's stores must stay
- * on the bare symbol. The remaining rows are all branch displacements off by
- * 8, which is the two instructions still missing.
+ * 62 rows / 1 insertion / -4 -> 40 / 0 / -2 on a named pointer local: `s16*
+ * cur = &D_8009ABF6;` assigned immediately above the `!= D_8007E774` test,
+ * with that test, its store and the *second* walk's fallback store reaching
+ * the symbol through `*cur`. That is what makes cse relate the two references
+ * instead of fusing each `%lo` into its own access, which puts the address in
+ * a callee-saved register across the FieldGetNextRandomU8 call as the target
+ * has it. Scope matters: routing the second walk's `slot` store through `cur`
+ * as well is 42, and the first walk's stores must stay on the bare symbol.
  *
- * 40 / -2 -> 13 / exact length, and the two missing instructions were the
- * `andi <r>,<r>,0xff` masking `roll` at the first and fourth comparisons.
- * They are not reachable from the comparison: `(u8)roll`, `(roll & 0xFF)`,
- * every width of `roll` and both operand orders all measure the same, because
- * combine proves the high bits clear from `roll = FieldGetNextRandomU8() >>
- * 2;` -- a `lbu`-normalised call result shifted right by two -- and folds the
- * mask into the `sltu`. Splitting the statement is what breaks the proof:
- * `roll = FieldGetNextRandomU8(); roll >>= 2;` stores the call result into
- * the `u8` pseudo first, so the shift reads a QImode value whose bound gcc no
- * longer carries to the comparison, and both masks come back. The two forms
- * are the same value and 27 rows apart. `roll >>= 2` and `roll = roll >> 2`
- * are byte-identical; widening `roll` after the split loses the masks again
- * (s32/u32 52, u16 40), so the `u8` and the split are one lever, not two.
+ * The two instructions it was still short were the `andi <r>,<r>,0xff` masking
+ * `roll` at the first and fourth comparisons, and they are not reachable from
+ * the comparison: `(u8)roll`, `(roll & 0xFF)`, every width of `roll` and both
+ * operand orders all measure the same, because combine proves the high bits
+ * clear from `roll = FieldGetNextRandomU8() >> 2;` -- a lbu-normalised call
+ * result shifted right by two -- and folds the mask into the `sltu`. Splitting
+ * the statement breaks the proof: `roll = FieldGetNextRandomU8(); roll >>= 2;`
+ * stores the result into the `u8` pseudo first, so the shift reads a QImode
+ * value whose bound gcc no longer carries past the block. 40 / -2 -> 13 and
+ * the exact length. The `u8` and the split are one lever -- widening `roll`
+ * after the split loses the masks again (s32/u32 52, u16 40).
  *
- * The 13 left are pure register naming in the third and fourth comparisons:
- * the target has slot=$a1, total=$v1, masked roll=$a2 and puts `sum = total +
- * rate` back into sum's own $s0, where this build has slot=$v1, roll=$a1,
- * total=$a2 and computes the new sum into a dead $v0. Nothing structural
- * reaches it -- both operand orders of the two sums, `sum = total; sum +=
- * rate;`, four declaration positions for `total`, `s32 slot`, a separate
- * variable for the third comparison's slot, and re-reading `enc->special[2]`
- * instead of caching it all measure exactly 13 (the re-read is 36). The
- * length is exact and the relocations are clean, so this is a permuter target
- * for which score 0 is reachable.
- *
- * 13 -> 6, and the step is decomp-permuter's `perm_temp_for_expr`: `total =
- * roll;` between the fourth cumulative sum and its comparison, with the
- * comparison reading `total`. `total` is dead there, so it costs no
- * instruction, and reusing *that* variable is the whole of it -- a fresh `s32`
- * local measures 13, `rate` 9, `formation` 13 and `i` 30, so this is an
- * allocno-priority effect on `total` specifically and not an arbitrary
- * spelling. What natural C the original wrote to get it is not recovered; the
- * assignment is ordinary C and semantically inert, which is why it is taken.
- *
- * The 6 left are `slot` and `total` trading $a1 and $v1 across the third
- * comparison. Inert against that: `s32 slot`, four declaration positions for
- * `total`, splitting the third sum into `total = sum; total += ...;`, and
- * re-reading `enc->special[2]` at the store instead of caching it.
- * Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
-#else
+ * The last 13 were `slot` and `total` trading $a1 and $v1 across the third
+ * comparison, and both steps out of it are decomp-permuter's, re-measured with
+ * variant_eval rather than trusted from the score:
+ *   - `total = roll;` between the fourth cumulative sum and its comparison,
+ *     with the comparison reading `total`. 13 -> 6. Reusing *that* variable is
+ *     the whole of it: a fresh `s32` local measures 13, `rate` 9, `formation`
+ *     13 and `i` 30.
+ *   - `D_8009ABF6 = (total = slot) & 0x3FF;` in the third comparison's arm.
+ *     6 -> 0, found in 3,150 candidates from the 6-row body.
+ * Both are dead assignments to `total` -- it is not read again on either path
+ * -- so neither emits an instruction; what they change is `total`'s reference
+ * count, which is the term `block_alloc` ranks on. This is CLAUDE.md's
+ * assign-to-an-existing-local idiom twice over, and what natural C the original
+ * wrote to get there is not recovered. */
 void FieldBattleCheck(void) {
     FieldEncounterTable* enc;
     s16* cur;
@@ -4191,7 +4172,7 @@ void FieldBattleCheck(void) {
                 slot = enc->special[2];
                 total = sum + ((s32)(slot << 16) >> 26);
                 if ((u8)roll < (u8)total) {
-                    D_8009ABF6 = slot & 0x3FF;
+                    D_8009ABF6 = (total = slot) & 0x3FF;
                     return;
                 }
                 if (!(D_80062F1B & 0x80)) {
@@ -4241,7 +4222,6 @@ void FieldBattleCheck(void) {
         }
     }
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_arrow.c
