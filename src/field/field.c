@@ -1382,6 +1382,13 @@ extern s16 D_801144D0;
  * lever and nothing else, which is exactly why it cannot pay for itself: the
  * six nops it costs are real instructions and the alignment it buys is not.
  *
+ * The arm-inversion dimension is closed too, and it is worth stating because
+ * CLAUDE.md records it as a real lever elsewhere: inverting the three
+ * `(flags & 0x80) == 0` SetSemiTrans tests and swapping their arms is
+ * 53/7, inverting the three `run[0] == 0x7FFE` sentinel tests 93/36, and
+ * both together 101/39, against 43/4. Every branch polarity in this
+ * function is already the target's.
+ *
  * decomp-permuter has now been run against this exact body (base score
  * 1937, 126k iterations, `perm_pad_var_decl` at 200 since the residue is
  * stack layout) and its best candidate, 1547, measures **43/4** -- exactly
