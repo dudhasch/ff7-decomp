@@ -1879,8 +1879,22 @@ a near-miss, in rough order of frequency:
   `.lreg` dump prints both terms. `OpcodeFuncMove`'s three-quantity tie scores
   0.75 / 0.62 / 0.33 where the target needs the reverse order outright.
 
-  **Neither term is reachable from C without emitting an instruction, so a
-  residue that reduces to a priority inversion is a park, not a search.**
+  **When it *is* reachable, one loop-weighted reference is the whole lever.**
+  The counter-case to the paragraph below, and the numbers say which you are
+  in before you edit anything. `FieldModelStructInit`'s two competing
+  quantities scored 0.464 (`d`, 15 refs / 97 insns) against 0.424 (`i`, 14 /
+  99) -- a 9% gap, where `OpcodeFuncMove`'s three had to invert outright.
+  Routing *one* of two `d->modelCount` accesses through the parameter instead
+  of the copy drops `d` to 14, and because that reference sits inside a loop
+  (flow weights `REG_N_REFS` by depth) one is enough. Which of the two moves
+  is irrelevant -- all three placements measure identically, which is the
+  evidence that the count is the lever and not the expression. Dropping two
+  *non-loop* references instead does not work: both pointers then stay live
+  and each costs a load. 21 rows to 1, with a store reorder.
+
+  **Neither term is reachable from C without emitting an instruction when the
+  gap is large, so a residue that reduces to a wholesale priority inversion is
+  a park, not a search.**
   `n_refs` is fixed by the arithmetic -- `entryIdx * 36` decomposes into
   `x*8 + x` then `<< 2`, which is three references whatever you call it -- and
   cse re-shares a constant however it is spelled, so an extra reference to a

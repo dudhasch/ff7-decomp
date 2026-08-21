@@ -5180,6 +5180,37 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * loop 2's `entry' through `data' rather than `d' (19/1, but it puts `next'
  * back in $t0 and is structurally further away); a separate counter for the
  * second loop (40/1).
+ *
+ * 21 rows -> **1 changed / 0 inserted**, and the note above was wrong about
+ * why. Reading cc1's `-dl` and `-dg` dumps names the two quantities exactly:
+ * reg 73 is `d' and gets $a3, reg 77 is `i' and gets $t0, and gcc prints its
+ * own ordering -- `;; 9 regs to allocate: 210 213 73 77 76 71 72 96 74'. So
+ * `d' is processed one place ahead of `i', and the published priority does
+ * *not* say the opposite once the right numbers are used: `d' is 15 refs over
+ * 97 insns and `i' is 14 over 99, which is floor_log2(15)*15/97 = 0.464
+ * against 0.424. A 9% gap, and the earlier note had counted references off
+ * the `.s' rather than out of the dump.
+ *
+ * Two changes close it:
+ *   - Route **one** of loop 1's two `d->modelCount' accesses through `data'.
+ *     That drops `d' to 14 refs -- and the reference is inside a loop, which
+ *     flow weights by depth, so one is enough to put `i' first. Which of the
+ *     two moves is irrelevant (all three placements measure identically), and
+ *     that is the evidence it is the count and not the expression. Dropping
+ *     two *non-loop* references instead -- any pair of the five middle stores
+ *     -- does not work: `data' and `d' then both stay live and each costs a
+ *     load, 5 to 7 rows with 2 insertions.
+ *   - Write `entry->animationOffset' **before** `modelData' and
+ *     `partMatrices'. Ours issued those two stores five slots early; the
+ *     target issues them after the shift chain. Worth 4 rows on its own and
+ *     it is what takes the length from +1 to exact. The reorder alone,
+ *     without the reference split, is 17.
+ *
+ * The one row left is that split: the target reads *both* loop-1 accesses
+ * through the copy ($t0) where this build reads one through $a1. So the
+ * original had `d' at 15 refs and `i' still winning, which means its ordering
+ * came from something other than this ratio -- worth knowing before anyone
+ * spends a budget trying to spell the second access differently.
  * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
@@ -5200,7 +5231,7 @@ void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
     if (desc->count != 0) {
         do {
             if (models[i].npcFlag != 0) {
-                models[i].modelEntryIndex = d->modelCount;
+                models[i].modelEntryIndex = data->modelCount;
                 d->modelCount = d->modelCount + 1;
             } else {
                 models[i].modelEntryIndex = 0xFF;
@@ -5238,9 +5269,9 @@ void* FieldModelStructInit(FieldModelFileDesc* desc, FieldModelData* data) {
                 entry->scale = 0x1000;
                 partsOff = models[i].boneCount * 4;
                 entry->partsOffset = partsOff;
+                entry->animationOffset = partsOff + (models[i].partCount << 5);
                 entry->modelData = next;
                 entry->partMatrices = NULL;
-                entry->animationOffset = partsOff + (models[i].partCount << 5);
                 next += (models[i].boneCount * 4) + (models[i].partCount << 5) +
                         (models[i].animationCount * 0x10);
             }
