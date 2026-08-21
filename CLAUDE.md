@@ -2119,6 +2119,29 @@ a near-miss, in rough order of frequency:
   `PreloadNextFieldMap`; a named local for the constant assigned before the
   `if` does not reach it, because cse folds the constant back to the call site.
 
+* **m2c invents a prototype for every extern it sees called, and a narrowing
+  one is worth hundreds of rows.** For `FieldCalcLinearStep(start, target,
+  duration, step)` — whose real definition in `src/field/field.c` takes four
+  `s32` — m2c wrote `s32 FieldCalcLinearStep(s16, s16, u8, u8);` at the top of
+  `field2.c`, reading the parameter types back out of what the *caller*
+  happened to pass. gcc then converts each argument at the call site and
+  `force_to_mode` pushes the narrowing into the load, so an `s32` member reads
+  `lh` instead of `lw` and an `s16` member reads `lbu` instead of `lh`. Every
+  such call site is one wrong opcode, the values are still correct, and the
+  diff reads as register noise. `FieldEntityMovementUpdate` had 44 of them:
+  correcting the two prototypes took it from 608 rows to 572 and removed 28
+  spurious `lbu` outright. Deleting the *casts* m2c also writes at the call
+  sites (`(u8) e->MoveSteps`) is exactly inert — the prototype is what
+  narrows, so fix the declaration. Check every `// extern` line m2c leaves
+  behind against the real definition before reading a single diff row;
+  `grep -rn "<name>" src/ include/` finds it, and the callee usually lives in
+  a sibling unit of the same overlay.
+
+  `tools/struct_access_audit.py` is the check that finds these without
+  reading the diff: it counts every access to an array-of-struct global on
+  both sides, keyed by member offset and opcode, alignment-free, so it stays
+  meaningful while the function is still hundreds of rows out.
+
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
