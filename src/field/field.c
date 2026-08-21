@@ -999,20 +999,45 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * The four run walks are goto loops on purpose. Written as `while` or as
- * `for (;;) { if (...) break; }` gcc's duplicate_loop_exit_test copies the
- * 0x7FFF test to the bottom of each loop, which costs two rows per layer and
- * shifts the whole register allocation; a backward goto is not a loop gcc
- * recognises, so the test stays at the top and is reached by a plain `j`.
+ * 87 changed / 17 inserted, down from 174/23. Four levers got it there and
+ * three of them contradict what this note used to say, so read the rejected
+ * list at the bottom as history, not as evidence.
  *
- * 174 changed / 23 inserted. Read the two numbers separately, because an
- * earlier version of this note quoted only the insertions and made the
- * function look 25 rows from done: the insertions are one register-allocation
- * decision repeated, and the rest are its consequences. The target keeps
- * `modes` in $s8 and spills both sprite counters (0x20(sp) and 0x28(sp));
- * this build keeps spriteCount in $s8 and spills `modes`, so each of the four
- * `modes++` costs an lw/addiu/sw where the target pays one addiu, and every
- * register downstream renames.
+ * 1. The four run walks are `for (;;)` loops left by `goto`, not backward
+ *    gotos. This note previously concluded the opposite, and it had the
+ *    measurements to prove it -- but only for two of the three loop spellings:
+ *    `while` (191/43) and `for (;;) { if (...) break; }` (177/36) both get the
+ *    0x7FFF test copied to the bottom by duplicate_loop_exit_test. The third
+ *    shape, `for (;;) { if (...) goto <next layer>; ... }`, is the one
+ *    CLAUDE.md already records from AddBackgroundToRender: still a loop, so
+ *    the body's references are loop-depth weighted and invariants hoist, but
+ *    the exit is not the loop's own end test, so nothing is duplicated and the
+ *    single top test is reached by a plain `j`. Worth 48 rows here, and it is
+ *    what hands $s8 to `modes`: `REG_N_REFS += loop_depth` in flow, so putting
+ *    all four walks at depth 1 lifts modes' weighted reference count over the
+ *    floor_log2 step at 16, while the two sprite counters -- whose references
+ *    are already inside the inner do-whiles -- gain nothing they did not have.
+ *    The counters then spill to 0x20(sp)/0x28(sp) and `modes` gets the
+ *    register, which is the whole of the old note's "this is the whole
+ *    function". Layers 1+2 alone as loops measures 181/23 and layers 3+4 alone
+ *    171/24 -- it only pays when all four are loops together.
+ *
+ * 2. The SetSemiTrans if/else is written the other way round: the target's
+ *    branch is `bnez` to the `li a1,1` block, so the *then* arm is the zero
+ *    one and the condition is `(flags & 0x80) == 0`. All three sites. 5 rows.
+ *
+ * 3. Layers 3 and 4 write `clut` *after* `w` and `h`. combine_givs bases the
+ *    body's address giv on the last sprt offset referenced in insn order, so
+ *    clut-then-w-then-h bases it at sprt+0x12 (`h`) and every store in the
+ *    body carries a displacement 4 bytes off the target's sprt+0xe. 22 rows
+ *    for moving one line, and it reads as pure scheduling noise in the diff
+ *    because the emitted *order* is w, h, clut either way -- sched2 sinks the
+ *    clut store regardless. Layers 1 and 2 already end with clut and already
+ *    matched at 0xe.
+ *
+ * 4. Layer 2 writes r0, g0, b0 in that order, and layer 2's `modes++` sits
+ *    immediately after its SetDrawMode rather than after the SetSemiTrans
+ *    if/else. 12 rows between them.
  *
  * `white` is not a tidiness variable. The target materialises 0x80 into a
  * callee-saved register once at the layer-3 entry and again at the layer-4
@@ -1021,45 +1046,37 @@ extern s16 D_801144D0;
  * literals gcc rematerialises it inside the loops. That is why layer 4 needs
  * the extra `layer4run:` label -- the walk's back edge targets the run test,
  * not the assignment, so the constant is set once on entry and not per
- * iteration. Worth 2 rows and 2 insertions, and the type is inert (u8, s16
- * and s32 all measure 174/23). Layer 1 must keep its literals: hoisting a
- * `white` there as well costs 51 rows.
+ * iteration. Layer 1 must keep its literals: hoisting a `white` there as well
+ * costs 51 rows.
  *
- * The allocation decision, measured rather than reasoned about. gcc 2.6.3's
- * global_alloc ranks allocnos by `(log2(n_refs) * n_refs - live_length) /
- * live_length`, and `n_refs` *is* weighted by loop depth -- an earlier version
- * of this note asserted the opposite. The evidence is direct: moving layer 2's
- * `spriteCount++` out of its do-while as `spriteCount += count;` before it
- * (identical value, identical static reference count, one less loop level)
- * flips the whole allocation -- `modes` takes $s8, both counters spill, and
- * the spill slots come out in the target's own order. Three shapes reach that
- * flip and all three are wrong, because the target increments spriteCount
- * inside *both* loops (the sh 0x20(sp) triples at .s lines 96 and 186):
- *   - layer 2's increment hoisted:            152/23
- *   - layer 1's increment hoisted:            162/20
- *   - `D_801144C8 = spriteCount` moved to the
- *     layer-4 exit (lengthens the live range): 164/28, but the store then
- *     lands in the wrong block -- the target stores it at the layer-3 entry,
- *     from the stack slot.
- * So the real lever has to shed about four loop-weighted references from
- * spriteCount, or add about four to `modes`, without moving either increment
- * out of its loop. Nothing found yet does that. This is the whole function.
+ * The frame is right and the spill offsets are not, and the two cannot both be
+ * satisfied by padding. `u8 unusedLocals[0x10];` gives the target's 0x78 frame
+ * but puts the three spill slots at 0x28/0x30/0x38 against the target's
+ * 0x18/0x20/0x28; deleting it puts the slots exactly right and the frame at
+ * 0x68. Declared locals are allocated during expand and reload's spill slots
+ * after them, so a declared local always sits *below* the spills and can only
+ * push them up -- measured: none 132 (slots right, frame 0x10 short), 0x8 140,
+ * 0x10 118, 0x18 140, 0x20 140 (frame 0x88, slots at 0x40/0x48). The target's
+ * extra 0x20 sits *above* its three spill slots, which a declared local cannot
+ * produce; it has to be two more spilled pseudos whose references reload later
+ * satisfied from registers. Until one of those is identified, 0x10 is the best
+ * of a bad set, and about 20 of the remaining rows are that offset difference.
  *
- * The frame: `u8 unusedLocals[0x10];` reserves 0x10 the target carries and
- * this C does not create, and is worth 22 rows on its own. The size is exact
- * and was re-measured against the flipped shape, where the spill offsets are
- * visible: none 167, 0x8 174, **0x10 152**, 0x18/0x20/0x28/0x30 all 174.
- *
- * The goto walks are load-bearing and the numbers that used to sit here were
- * insertions, not rows: as `while` loops the body measures 191/43, as
- * `for (;;) { if (...) break; }` 177/36, because duplicate_loop_exit_test
- * copies the 0x7FFF test to the bottom of each of the four walks. A backward
- * goto is not a loop gcc recognises, so the test stays at the top and is
- * reached by a plain `j`. Also measured and rejected:
- * `SetDrawMode(modes++, ...)` at all four sites (172/27); `s32`/`s16`
- * counters and `u32` counters (no change or worse); declaring the counters
- * ahead of the pointers (no change); `s32 count` (216/25); `white` declared
- * ahead of `count` (no change); a `white` at the layer-2 entry (no change).
+ * Also measured and rejected, all against the current base:
+ *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
+ *     and 4 (115 against 96) -- the target loads count with `lh` into a temp
+ *     and copies it to $s3, which is still not reproduced here.
+ *   - `SetDrawMode(modes++, ...)` at the layer-1/3/4 sites (97 against 87).
+ *   - layer 2 written b0, r0, g0 (98 against 87).
+ *   - `D_801144C8 = spriteCount` deferred to the layer-4 entry: it does flip
+ *     the allocation on its own (147/22, before the loop change was found) but
+ *     the store then lands in the wrong block -- the target stores it at the
+ *     layer-3 entry, from the stack slot -- and on top of the loop change it
+ *     measures 123 against 118.
+ *   - `s32`/`s16`/`u32` counters (no change or worse); declaring the counters
+ *     ahead of the pointers (no change); `s32 count` (216/25); `white`
+ *     declared ahead of `count` (no change); a `white` at the layer-2 entry
+ *     (no change).
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
@@ -1086,81 +1103,81 @@ void FieldBackgroundInitPackets(
     tile1 = (FieldBgTile1*)((u8*)data + data->layer1Offset);
     tpages = (u16*)((u8*)data + data->tpageOffset);
 
-layer1:
-    if (run[0] == 0x7FFF) {
-        run++;
-        goto layer2;
-    }
-    if (run[0] == 0x7FFE) {
-        SetDrawMode(modes, 0, 1, *tpages++, NULL);
-        D_8011448C++;
-        modes++;
-    } else {
-        count = run[2];
-        if (count != 0) {
-            do {
-                SetSprt16(sprt16);
-                SetShadeTex(sprt16, 1);
-                SetSemiTrans(sprt16, 0);
-                sprt16->r0 = 0x80;
-                sprt16->g0 = 0x80;
-                sprt16->b0 = 0x80;
-                sprt16->x0 = tile1->x;
-                sprt16->y0 = tile1->y;
-                sprt16->u0 = tile1->u;
-                sprt16->v0 = tile1->v;
-                sprt16->clut = tile1->clut;
-                spriteCount++;
-                tile1++;
-                sprt16++;
-                pairs += 2;
-            } while (--count != 0);
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            run++;
+            goto layer2;
         }
+        if (run[0] == 0x7FFE) {
+            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            D_8011448C++;
+            modes++;
+        } else {
+            count = run[2];
+            if (count != 0) {
+                do {
+                    SetSprt16(sprt16);
+                    SetShadeTex(sprt16, 1);
+                    SetSemiTrans(sprt16, 0);
+                    sprt16->r0 = 0x80;
+                    sprt16->g0 = 0x80;
+                    sprt16->b0 = 0x80;
+                    sprt16->x0 = tile1->x;
+                    sprt16->y0 = tile1->y;
+                    sprt16->u0 = tile1->u;
+                    sprt16->v0 = tile1->v;
+                    sprt16->clut = tile1->clut;
+                    spriteCount++;
+                    tile1++;
+                    sprt16++;
+                    pairs += 2;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
     }
-    run += 3;
-    goto layer1;
 
 layer2:
     D_8011448C = spriteCount - D_8011448C;
     data = *D_8009D848;
     tile2 = (FieldBgTile2*)((u8*)data + data->layer2Offset);
 
-layer2run:
-    if (run[0] == 0x7FFF) {
-        run++;
-        goto layer3;
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            run++;
+            goto layer3;
+        }
+        count = run[2];
+        if (count != 0) {
+            do {
+                SetDrawMode(modes, 0, 1, tile2->tpage, NULL);
+                modes++;
+                D_801144D0++;
+                SetSprt16(sprt16);
+                SetShadeTex(sprt16, 1);
+                if ((tile2->flags & 0x80) == 0) {
+                    SetSemiTrans(sprt16, 0);
+                } else {
+                    SetSemiTrans(sprt16, 1);
+                }
+                sprt16->r0 = tile2->rg;
+                sprt16->g0 = tile2->rg >> 8;
+                sprt16->b0 = 0x80;
+                sprt16->x0 = tile2->x;
+                sprt16->y0 = tile2->y;
+                sprt16->u0 = tile2->u;
+                sprt16->v0 = tile2->v;
+                sprt16->clut = tile2->clut;
+                pairs[0] = tile2->flags;
+                pairs[1] = tile2->param;
+                spriteCount++;
+                tile2++;
+                sprt16++;
+                pairs += 2;
+            } while (--count != 0);
+        }
+        run += 3;
     }
-    count = run[2];
-    if (count != 0) {
-        do {
-            SetDrawMode(modes, 0, 1, tile2->tpage, NULL);
-            D_801144D0++;
-            SetSprt16(sprt16);
-            SetShadeTex(sprt16, 1);
-            if (tile2->flags & 0x80) {
-                SetSemiTrans(sprt16, 1);
-            } else {
-                SetSemiTrans(sprt16, 0);
-            }
-            modes++;
-            sprt16->r0 = tile2->rg;
-            sprt16->b0 = 0x80;
-            sprt16->g0 = tile2->rg >> 8;
-            sprt16->x0 = tile2->x;
-            sprt16->y0 = tile2->y;
-            sprt16->u0 = tile2->u;
-            sprt16->v0 = tile2->v;
-            sprt16->clut = tile2->clut;
-            pairs[0] = tile2->flags;
-            pairs[1] = tile2->param;
-            spriteCount++;
-            tile2++;
-            sprt16++;
-            pairs += 2;
-        } while (--count != 0);
-    }
-    run += 3;
-    goto layer2run;
 
 layer3:
     white = 0x80;
@@ -1168,90 +1185,90 @@ layer3:
     data = *D_8009D848;
     D_8007EBD4 = (FieldBgTile3*)((u8*)data + data->layer34Offset);
 
-layer3run:
-    if (run[0] == 0x7FFF) {
-        run++;
-        goto layer4;
-    }
-    if (run[0] == 0x7FFE) {
-        SetDrawMode(modes, 0, 1, *tpages++, NULL);
-        modes++;
-    } else {
-        count = run[2];
-        run[1] = sprite34Count;
-        if (count != 0) {
-            do {
-                SetSprt(sprt);
-                SetShadeTex(sprt, 1);
-                if (D_8007EBD4->flags & 0x80) {
-                    SetSemiTrans(sprt, 1);
-                } else {
-                    SetSemiTrans(sprt, 0);
-                }
-                sprt->r0 = white;
-                sprt->g0 = white;
-                sprt->b0 = white;
-                sprt->x0 = D_8007EBD4->x;
-                sprt->y0 = D_8007EBD4->y;
-                sprt->u0 = D_8007EBD4->u;
-                sprt->v0 = D_8007EBD4->v;
-                sprt->clut = D_8007EBD4->clut;
-                sprt->w = 0x20;
-                sprt->h = 0x20;
-                pairs[0] = D_8007EBD4->flags;
-                pairs[1] = D_8007EBD4->param;
-                sprite34Count++;
-                D_8007EBD4++;
-                sprt++;
-                pairs += 2;
-            } while (--count != 0);
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            run++;
+            goto layer4;
         }
+        if (run[0] == 0x7FFE) {
+            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            modes++;
+        } else {
+            count = run[2];
+            run[1] = sprite34Count;
+            if (count != 0) {
+                do {
+                    SetSprt(sprt);
+                    SetShadeTex(sprt, 1);
+                    if ((D_8007EBD4->flags & 0x80) == 0) {
+                        SetSemiTrans(sprt, 0);
+                    } else {
+                        SetSemiTrans(sprt, 1);
+                    }
+                    sprt->r0 = white;
+                    sprt->g0 = white;
+                    sprt->b0 = white;
+                    sprt->x0 = D_8007EBD4->x;
+                    sprt->y0 = D_8007EBD4->y;
+                    sprt->u0 = D_8007EBD4->u;
+                    sprt->v0 = D_8007EBD4->v;
+                    sprt->w = 0x20;
+                    sprt->h = 0x20;
+                    sprt->clut = D_8007EBD4->clut;
+                    pairs[0] = D_8007EBD4->flags;
+                    pairs[1] = D_8007EBD4->param;
+                    sprite34Count++;
+                    D_8007EBD4++;
+                    sprt++;
+                    pairs += 2;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
     }
-    run += 3;
-    goto layer3run;
 
 layer4:
     white = 0x80;
-layer4run:
-    if (run[0] == 0x7FFF) {
-        return;
-    }
-    if (run[0] == 0x7FFE) {
-        SetDrawMode(modes, 0, 1, *tpages++, NULL);
-        modes++;
-    } else {
-        count = run[2];
-        run[1] = sprite34Count;
-        if (count != 0) {
-            do {
-                SetSprt(sprt);
-                SetShadeTex(sprt, 1);
-                if (D_8007EBD4->flags & 0x80) {
-                    SetSemiTrans(sprt, 1);
-                } else {
-                    SetSemiTrans(sprt, 0);
-                }
-                sprt->r0 = white;
-                sprt->g0 = white;
-                sprt->b0 = white;
-                sprt->x0 = D_8007EBD4->x;
-                sprt->y0 = D_8007EBD4->y;
-                sprt->u0 = D_8007EBD4->u;
-                sprt->v0 = D_8007EBD4->v;
-                sprt->clut = D_8007EBD4->clut;
-                sprt->w = 0x20;
-                sprt->h = 0x20;
-                pairs[0] = D_8007EBD4->flags;
-                pairs[1] = D_8007EBD4->param;
-                sprite34Count++;
-                D_8007EBD4++;
-                sprt++;
-                pairs += 2;
-            } while (--count != 0);
+    for (;;) {
+        if (run[0] == 0x7FFF) {
+            return;
         }
+        if (run[0] == 0x7FFE) {
+            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            modes++;
+        } else {
+            count = run[2];
+            run[1] = sprite34Count;
+            if (count != 0) {
+                do {
+                    SetSprt(sprt);
+                    SetShadeTex(sprt, 1);
+                    if ((D_8007EBD4->flags & 0x80) == 0) {
+                        SetSemiTrans(sprt, 0);
+                    } else {
+                        SetSemiTrans(sprt, 1);
+                    }
+                    sprt->r0 = white;
+                    sprt->g0 = white;
+                    sprt->b0 = white;
+                    sprt->x0 = D_8007EBD4->x;
+                    sprt->y0 = D_8007EBD4->y;
+                    sprt->u0 = D_8007EBD4->u;
+                    sprt->v0 = D_8007EBD4->v;
+                    sprt->w = 0x20;
+                    sprt->h = 0x20;
+                    sprt->clut = D_8007EBD4->clut;
+                    pairs[0] = D_8007EBD4->flags;
+                    pairs[1] = D_8007EBD4->param;
+                    sprite34Count++;
+                    D_8007EBD4++;
+                    sprt++;
+                    pairs += 2;
+                } while (--count != 0);
+            }
+        }
+        run += 3;
     }
-    run += 3;
-    goto layer4run;
 }
 #endif
 
