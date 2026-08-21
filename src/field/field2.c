@@ -1176,9 +1176,31 @@ extern FieldLine D_8007E7AC;
  *   - Pass 4 (+16 short) has never been read against the target, and pass 2
  *     (-9) and pass 3 (-6) have not been looked at since the switches landed.
  *   - Passes 7 and 8 recompute `i * 0x84` twice more than the target does,
- *     near the end of the loop body -- the target keeps it in $s0 for the
- *     whole iteration. m2c's `temp_s0_8 = i * 0x84;` at the loop top is
- *     write-only and gcc drops it, so each block re-derives the index.
+ *     near the end of the loop body, and their whole residue is that: pass 7
+ *     is `sll` +4, `sra` +2, `addu` +1 and pass 8 one more of each.
+ *
+ *     **A single `s32` index local is not the answer, and the target says so
+ *     outright.** `idx = i;` at the top of the loop body with every
+ *     `g_FieldEntity[i]` rewritten to `g_FieldEntity[idx]` takes passes 7 and
+ *     8 from +7/+9 to -2/-4 and the whole function to exactly 1855
+ *     instructions -- and costs 13 rows. Rewriting *every* use of `i` in the
+ *     two loops takes them to +3/+1, the lowest per-pass error measured, and
+ *     costs 23. Both are wrong: at want@225 the target re-extends the counter
+ *     inside the second arm (`sll v1,s2,16` / `sra v1,v1,16`), and with one
+ *     `s32` index that pair cannot exist -- `sra` goes from 14 (two too many)
+ *     to 8 (four too few) and never through 12. The target holds the scaled
+ *     index in two registers at once, $s0 for most of the body and $a0 for
+ *     the frame-advance group, and re-derives it rather than keeping one.
+ *
+ *     The scope of the local is not decomposable either: `idx` on the two
+ *     array subscripts and `idx` on the array subscripts plus the
+ *     g_PlayerModelId compares measure identically (457 rows), and so do the
+ *     write-only `temp_s0_8 = idx * 0x84` variant and the plain one; adding
+ *     the call arguments on top of the subscripts is 508. That is the
+ *     "a scaled-index local can be right at some of its use sites and wrong
+ *     at the rest" case, and CLAUDE.md's advice for it is decomp-permuter's
+ *     `perm_temp_for_expr`, once the function is close enough for the search
+ *     to mean anything.
  *   - **Do not delete the write-only index locals.** Removing all eleven of
  *     them costs 20 rows and an instruction: they change nothing in passes 7
  *     and 8 (both measure identically) but move pass 4 by one and the
