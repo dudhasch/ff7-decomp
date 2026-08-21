@@ -365,6 +365,16 @@ extern s16 D_80071E3C;
  *      0x40-range arm inert, and reusing it again as the `ev + 1` offset
  *      inert. The `otSlot` trick that was worth 34 rows in
  *      AddBackgroundToRender does not transfer to this function.
+ *      Nor does the inserted-block class, swept a second time across the
+ *      whole function rather than around the addPrim: after the pre-loop
+ *      `fadeType = 0` store 88/2, after the `ev` assignment 87/1, after the
+ *      rain fill loop inert, after the fade block's last store inert. The two
+ *      that move anything move it the wrong way -- they cut the insertion
+ *      count by pulling the `ev` derivation to the *top* of the block, where
+ *      the target derives it from the fade base further down, which is
+ *      cluster 1 undone. The 87 is not 87 independent faults either: one
+ *      instruction of length difference renames every branch offset after it,
+ *      so a body that is one insertion closer can read twenty rows worse.
  *   5. the fill loop's two constants. `fillVal = -1;` written *above* the rain
  *      if/else is what puts `li a0,-1` in the guard's delay slot, the way the
  *      target has it -- the same lever as the `white` local in
@@ -1059,9 +1069,10 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 55 changed / 14 inserted, down from 174/23. Seven levers got it there and
- * three of them contradict what this note used to say, so read the rejected
- * list at the bottom as history, not as evidence.
+ * 34 changed / 13 inserted, down from 174/23. Ten levers got it there and
+ * several of them contradict what this note used to say, so read the rejected
+ * list at the bottom as history, not as evidence. Levers 8-10 in particular
+ * deleted three levers that were each real when they were found.
  *
  * 1. The four run walks are `for (;;)` loops left by `goto`, not backward
  *    gotos. This note previously concluded the opposite, and it had the
@@ -1140,75 +1151,73 @@ extern s16 D_801144D0;
  * iteration. Layer 1 must keep its literals: hoisting a `white` there as well
  * costs 51 rows.
  *
- * The frame is right and the spill offsets were not, and half of that is now
- * closed -- by taking `sprite34Count`'s address. `u8 unusedLocals[0x10];`
- * gives the target's 0x78 frame but leaves three *reload* spill slots at
- * 0x28/0x30/0x38 against the target's 0x18/0x20/0x28; deleting it puts them
- * exactly right and the frame at 0x68, and no size in between helps
- * (measured against the seven-lever base: none 64, 0x8 77, 0x10 55, 0x18 77,
- * 0x20 77, 0x28 77, 0x30 77; and earlier against the pre-lever base: none 132,
- * 0x8 140, 0x10 118, 0x18 140, 0x20 140). Declared locals are allocated during
- * expand and reload's spill slots after them, so a declared local always sits
- * *below* the spills and can only push them up.
+ * 8. No frame pad and no address-taking: the frame and every stack offset are
+ *    exact. This replaces four paragraphs of this note that reconstructed the
+ *    layout out of `u8 unusedLocals[0x10];` plus a never-dereferenced
+ *    `&sprite34Count`, and it is a warning about fitting one number at a time.
+ *    Declared locals are allocated during expand and reload's spills after
+ *    them, so a declared local always sits *below* the spills and can only
+ *    push them up; taking a local's address moves it into the declared pool.
+ *    The pad-and-address combination put `sprite34Count` at 0x28, which is
+ *    where the target has it -- and it got there from the wrong side, with the
+ *    other two slots 0x18 high and the frame only right because the pad paid
+ *    for it. With both levers deleted the three slots come out 0x18 / 0x20 /
+ *    0x28 in the target's own order and the frame is 0x10 short; with lever 9
+ *    the frame is 0x78 as well, because the missing 0x10 is two more reload
+ *    slots that only exist once `count` is spelled the way the target spells
+ *    it. The two clusters were one cause, and neither is visible while the
+ *    other is being fitted.
  *
- * What does move a value between those two pools is taking its address:
- * `addrOfSprite34Count = &sprite34Count;` sets TREE_ADDRESSABLE, so
- * `put_var_into_stack` gives the counter an expand-time slot rather than a
- * reload one, and it lands at 0x28 -- exactly where the target keeps it. The
- * pointer is never dereferenced and costs nothing; assigning it as the first
- * statement and reading the counter normally everywhere measures the same
- * 55/10 as decomp-permuter's own find (a pointer assigned at the first
- * `run[1] = sprite34Count;` and dereferenced *there only* -- dereferencing it
- * at both sites is 82/12, because the second read then goes through a pointer
- * that may alias). What the original wrote to make this counter addressable is
- * not recoverable; the address-taking is, and it is worth four insertions.
+ * 9. `count` is assigned from `run[2]` and the guard re-reads `run[2]`, in
+ *    layers 3 and 4:
  *
- * It does not generalise, which is the useful half of the finding: the same
- * never-dereferenced pointer applied to `spriteCount` measures 107/12 on top
- * of this and 82/16 on its own, to `count` 165/21, to `white` 74/25, to
- * `tpages` 116/18 and to `run` 160/27. Declaring `sprite34Count` as a
- * one-element array indexed at every use is inert (55/14) -- gcc keeps a
- * one-element local array in a register, so that is not a way to spell it.
- * Swapping the two counters' declaration order and moving `unusedLocals` to
- * the front or next to the counters are all inert (55/10).
+ *        run[1] = sprite34Count;
+ *        count = run[2];
+ *        if (run[2] != 0) { do { ... } while (--count != 0); }
  *
- * That leaves `spriteCount` at 0x38 against 0x20 and a four-byte slot at 0x30
- * against 0x18 -- the same shape one pool down, and about ten of the remaining
- * rows. The grid of pad size against which counters are address-taken has been
- * measured and 0x10-with-only-sprite34Count is the corner: with both counters
- * taken, pad none 108/12, 0x8 108/12, 0x10 107/12, 0x18 86/12; with only
- * sprite34Count taken, pad 0x8 is 78/10 against 0x10's 55/10. Whatever holds
- * the target's other two slots one pool lower is not reachable by taking more
- * addresses.
+ *    which is what produces the target's `lh v0,4(s4)` -- a *signed* load,
+ *    because the guard's own tree promotes an `s16` to int -- with `move
+ *    s3,v0` for the assignment behind it. Written `if (count != 0)` the value
+ *    is only ever compared for zero and decremented, combine narrows the load
+ *    to `lhu` straight into $s3, and the copy the target has is gone. Order
+ *    matters as much as the re-read: with the assignment ahead of `run[1] =`
+ *    it is 66/9, moved inside the arm 44/12, and in the form above 40/10.
+ *    Layers 1 and 2 keep the plain `count = run[2]; if (count != 0)` -- they
+ *    have no `run[1]` store and the re-read there is worse.
  *
- * `sprite34Count++` goes between the two `pairs` stores, not after them.
- * decomp-permuter found it once the scratch was honest, and it is the
- * scheduling companion to the addressability lever: the counter's slot is a
- * memory RMW, so sched2 hoists its load to the top of the block wherever the
- * source puts the increment, and the only thing that decides where the RMW
- * lands is which store it is written between. Both layer-3 and layer-4 sites
- * want it, and they want it together -- one site alone is 53/8 either way,
- * both 51/6, neither 55/10.
+ * 10. The two counter increments go *between* the two pointer bumps, not
+ *    between the two `pairs` stores: `sprt++; sprite34Count++; pairs += 2;` in
+ *    layers 3 and 4, `sprt16++; pairs += 2; spriteCount++;` in layers 1 and 2.
+ *    Worth six rows over lever 9 alone. Once the increment is past the pointer
+ *    bumps sched2 has full freedom and the exact slot stops mattering --
+ *    after `pairs += 2`, before it, and swapped with the pointer bump all
+ *    measure identically -- so this dimension is finished, not merely
+ *    unexplored.
  *
- * A `do { } while (0);` after the *layer-4* run walk's inner do/while -- inside
- * the `if (count != 0)`, after the loop closes -- is worth eight rows and two
- * insertions (51/6 to 43/4). Placement is the whole of it: the same barrier
- * after layer 2's inner loop is 51/6, after layer 3's inert on top of the
- * layer-4 one, and doubling the layer-4 one gives the 51/6 back. This is the
- * `perm_ins_block` class, the same as the three that took AddBackgroundToRender
- * from 193 to 65, and as there the identity of what the original wrote is not
- * recoverable -- what it emitted was a NOTE_INSN_LOOP_BEG/END pair and an exit
- * CODE_LABEL after the walk's own loop.
+ * What is left is one pattern, three times over (the layer-1/2 pair and each
+ * of layers 3 and 4), and it is scheduling with no source knob found:
  *
- * Re-measured against the 51/6 base, since a note's negatives are only good
- * for the state they were taken in and this body has moved twice: `run[1] =
- * sprite34Count;` ahead of `count = run[2];` is 73/6 at layer 3, at layer 4 or
- * at both; `count` assigned inside the arm behind `if (run[2] != 0)` is 77/10
- * for both and 73/8 for layer 4 alone; `spriteCount++` moved between layer 2's
- * two `pairs` stores is 54/6 and above `sprt16++` 54/6, where the same move in
- * layer 1 is inert; `count = countCopy = run[2]` with an unused `u32`
- * -- decomp-permuter's best find at 1767 against a base of 2157 -- is exactly
- * inert at either site or both.
+ *        want: addiu a0,s3,-1 / move s3,a0 / sll a0,a0,0x10 / <counter RMW>
+ *        got:  nop / nop / addiu v1,s3,-1 / <counter RMW> / move s3,v1
+ *
+ * The target issues the whole `--count` chain first, filling two load-delay
+ * slots with it, and the counter's memory read-modify-write last; ours issues
+ * the RMW first and leaves the slots empty. Every position of the increment
+ * has been swept (lever 10) and none of them moves it, which says the order is
+ * decided by readiness rather than by insn order. Writing the decrement as the
+ * loop body's *first* statement -- `do { count--; ... } while (count != 0);`
+ * -- is catastrophic (185/26): with no `--count` on the back edge gcc does not
+ * recognise the biv and the whole loop is rebuilt.
+ *
+ * Deleted from this note along with the levers they described: the pad-size
+ * grid (none 64, 0x8 77, 0x10 55, 0x18 through 0x30 all 77), the grid of which
+ * counters are address-taken, the eight-row `do { } while (0);` after layer
+ * 4's inner loop (51/6 to 43/4, and inert or worse at every other walk), and
+ * `sprite34Count++` between the two `pairs` stores (55/10 to 51/6). All four
+ * were real against the body they were measured on and all four are now
+ * harmful on the body that replaced them: re-measured on the lever 8-10 base,
+ * the pad is 71/13, the address-taking 48/9, the two together 69/9 and the
+ * layer-4 barrier 37/15, against 34/13.
  *
  * Also measured and rejected, all against the current base:
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
@@ -1254,10 +1263,7 @@ void FieldBackgroundInitPackets(
     u8 white;
     u16 spriteCount;
     u16 sprite34Count;
-    u16* addrOfSprite34Count;
-    u8 unusedLocals[0x10];
 
-    addrOfSprite34Count = &sprite34Count;
     spriteCount = 0;
     sprite34Count = 0;
     D_8011448C = 0;
@@ -1294,8 +1300,8 @@ void FieldBackgroundInitPackets(
                     sprt16->clut = tile1->clut;
                     tile1++;
                     sprt16++;
-                    spriteCount++;
                     pairs += 2;
+                    spriteCount++;
                 } while (--count != 0);
             }
         }
@@ -1337,8 +1343,8 @@ layer2:
                 pairs[1] = tile2->param;
                 tile2++;
                 sprt16++;
-                spriteCount++;
                 pairs += 2;
+                spriteCount++;
             } while (--count != 0);
         }
         run += 3;
@@ -1360,9 +1366,9 @@ layer3:
             tpages++;
             modes++;
         } else {
-            count = run[2];
             run[1] = sprite34Count;
-            if (count != 0) {
+            count = run[2];
+            if (run[2] != 0) {
                 do {
                     SetSprt(sprt);
                     SetShadeTex(sprt, 1);
@@ -1382,10 +1388,10 @@ layer3:
                     sprt->h = 0x20;
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
-                    sprite34Count++;
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
+                    sprite34Count++;
                     pairs += 2;
                 } while (--count != 0);
             }
@@ -1404,9 +1410,9 @@ layer4:
             tpages++;
             modes++;
         } else {
-            count = run[2];
             run[1] = sprite34Count;
-            if (count != 0) {
+            count = run[2];
+            if (run[2] != 0) {
                 do {
                     SetSprt(sprt);
                     SetShadeTex(sprt, 1);
@@ -1426,10 +1432,10 @@ layer4:
                     sprt->h = 0x20;
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
-                    sprite34Count++;
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
+                    sprite34Count++;
                     pairs += 2;
                 } while (--count != 0);
                 do {
