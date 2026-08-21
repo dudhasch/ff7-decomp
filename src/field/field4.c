@@ -9334,51 +9334,47 @@ s32 OpcodeFuncSolid(void) {
 /* Every instruction matches except the tail merge: gcc cross-jumps the whole
  * shared PC_INC(7) tail, where the original keeps the
  * &g_FieldScriptPC[g_CurrentEntity] computation duplicated in both arms. */
-/* 23 rows, and the whole of it is one hoist in the else arm: gcc computes
- * `g_FieldState->viewOffsetNumSteps = 0;` *before* the FieldEventReadMemoryS16
- * call -- it loads g_FieldState into $v0 and puts the `sb zero,0x12(v0)` in the
- * call's delay slot -- where the target does not touch g_FieldState until after
- * the call and then shares one load between the 0x12 and 0x16 stores. Because
- * g_FieldState is a pointer *global*, every store through it may alias it, so
- * gcc reloads it between statement groups; the grouping is the tell, and the
- * target's is {0x12,0x16}, {0x13}, {0x14,0x18,0x1a} against our {0x12},
- * {0x13,0x16}, {0x14}, {0x18,0x1a}. Measured and rejected: hoisting the call
- * result into an `s16` or `s32` local ahead of both stores (22 rows, 3
- * inserted) and swapping the two statements so the call is first (18 rows, 5
- * inserted) -- both trade changed rows for inserted ones and are worse.
+/* VWOFT: set the view offset, either as a ramp (mode nonzero: start, target,
+ * step count and mode, with the current step reset) or immediately (mode 0:
+ * everything cleared and the offset written straight).
  *
- * The tail merge above has now been attacked directly and all three spellings
- * are worse, so it is not simply a matter of writing the exit twice.
- * Duplicating `PC_INC(7); return 0;' into both arms, either inside the
- * if/else or with the first arm as an early return, emits the whole tail
- * twice with no cross-jumping at all (48 rows, 8 inserted, both spellings).
- * Computing `pc = &g_FieldScriptPC[g_CurrentEntity];' per arm and doing
- * `*pc += 7;' once after gets the shape right on paper but costs a pseudo
- * (27 rows). Note both builds already put &g_FieldScriptPC in $s0 across the
- * function, so the register is not the difference -- only how many copies of
- * the four-instruction index computation survive.
+ * 24 rows / -4 -> 12 / exact, on two things, and both had been measured before
+ * against a body that made them look worse than they are:
  *
- * And duplication cannot be the answer, which is worth knowing before trying
- * it again: cross-jumping runs before sched2, so at that point both copies of
- * `PC_INC(7); return 0;' are the identical eight-insn sequence and the merge
- * walks all the way back through `lui a0' -- one copy, in the join block, not
- * the target's two. Re-measured with the else arm reordered as well: 48
- * changed / 10 inserted, against 48 / 8 for duplication alone and 18 / 5 for
- * the reorder alone. Whatever puts the index computation in both arms is in
- * the source, not in the tail.
+ *   - the four instructions this was short are a *second* copy of
+ *     `&g_FieldScriptPC[g_CurrentEntity]`, one per arm, with only the
+ *     `lhu`/`addiu`/`sh` shared. Duplicating `PC_INC(7); return 0;` cannot
+ *     produce that -- cross-jumping runs after reload, both copies are the
+ *     identical eight-insn sequence, and the merge walks all the way back
+ *     through `lui a0` (58 rows here, 48 before). A named `u16* pc` assigned
+ *     as the last statement of each arm, with `*pc += 7;` after the if/else,
+ *     does: the else arm's last insns are then its two `sh zero` stores and
+ *     the if arm's is the address, so the suffixes differ at the first insn
+ *     and nothing merges. Worth 3 of the 4.
+ *   - the fourth is the else arm's statement order. `viewOffsetNumSteps = 0;`
+ *     written before `viewOffset = FieldEventReadMemoryS16(1, 2);` makes gcc
+ *     load g_FieldState before the call and put the store in its delay slot;
+ *     with the call first, g_FieldState is not touched until after it and one
+ *     load serves both the 0x12 and 0x16 stores, which is the target's
+ *     grouping. 28 -> 12. Hoisting the call result into a local instead is 20
+ *     -- it gets the call up but keeps the two loads apart.
  *
- * A named `u16* pc` assigned in both arms, so that `PC_INC(7)` becomes
- * `*pc += 7;` and the address chain is computed per arm, does not do it
- * either -- and the asymmetric placement that would stop find_cross_jump
- * merging the two (the assignment last in the if arm but mid-block in the
- * else, so the arms' final insns differ) is no better than the symmetric
- * one: 28 rows both ways against 24 for the plain PC_INC. The pointer is
- * dead on the return path, so gcc sinks its materialisation into the join
- * wherever the source puts it. Permuter food. */
+ * The 12 left are one quantity-ordering tie, twice: the target computes the
+ * PC index in place (`lbu a0` / `sll a0,a0,1` / `addu a0,a0,s0`) and gives
+ * g_FieldState $v0 for the trailing stores, where this build puts the index
+ * in $v0 and g_FieldState in $v1. Both are three-reference block-local
+ * quantities born a few insns apart, so this is `block_alloc`'s tie-break on
+ * qty number, i.e. insn order -- and source order does not reach it: `pc`
+ * assigned after `viewOffsetMode`, after `viewOffsetStart`, or last in the
+ * arm all measure exactly 12, and first in the arm 18. Every spelling of the
+ * address is inert too (`g_FieldScriptPC + g_CurrentEntity`, the
+ * `n + (s32)p` cast form, `pc[0] += 7`). Permuter food, and now at the exact
+ * length, so score 0 is reachable. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
 s32 OpcodeFuncVwoft(void) {
+    u16* pc;
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("vwoft", 6);
     }
@@ -9388,15 +9384,17 @@ s32 OpcodeFuncVwoft(void) {
         g_FieldState->viewOffsetNumSteps = FieldEventReadMemoryS16(2, 4);
         g_FieldState->viewOffsetMode = GET_PARAM_U8(6);
         g_FieldState->viewOffsetCurrentStep = 0;
+        pc = &g_FieldScriptPC[g_CurrentEntity];
     } else {
-        g_FieldState->viewOffsetNumSteps = 0;
         g_FieldState->viewOffset = FieldEventReadMemoryS16(1, 2);
+        g_FieldState->viewOffsetNumSteps = 0;
         g_FieldState->viewOffsetCurrentStep = 0;
         g_FieldState->viewOffsetMode = 0;
         g_FieldState->viewOffsetStart = 0;
         g_FieldState->viewOffsetTarget = 0;
+        pc = &g_FieldScriptPC[g_CurrentEntity];
     }
-    PC_INC(7);
+    *pc += 7;
     return 0;
 }
 #endif
