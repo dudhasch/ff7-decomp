@@ -358,7 +358,13 @@ extern s16 D_80071E3C;
  *      the row count reads. One barrier is the whole of it; two, three, four
  *      and a barrier before the store all measure the same 59/5 or worse, as
  *      does a temporary for the addPrim address the same candidate carried
- *      (inert on its own).
+ *      (inert on its own). Its next find after the target.s rewrite (1920
+ *      against 2505) is four mutations and all four are inert or worse here:
+ *      `preloadId` as `u16` 67/4, a `DRAWENV*` temp for the SetDefDrawEnv
+ *      argument inert, reusing `fillVal` for the `D_80095DD4 = 1` store in the
+ *      0x40-range arm inert, and reusing it again as the `ev + 1` offset
+ *      inert. The `otSlot` trick that was worth 34 rows in
+ *      AddBackgroundToRender does not transfer to this function.
  *   5. the fill loop's two constants. `fillVal = -1;` written *above* the rain
  *      if/else is what puts `li a0,-1` in the guard's delay slot, the way the
  *      target has it -- the same lever as the `white` local in
