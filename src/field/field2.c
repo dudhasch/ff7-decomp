@@ -1938,38 +1938,39 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
  * which is true and was the wrong place to look, because the mask comes from
  * the expression, not the declaration.
  *
- * One row left, and it is half of what this note used to describe. The two
- * `li v1,<const>` of the final test -- the 1 of `requestTalkScript = 1` and
- * the 0x40 of `best != 0x40` -- were each one instruction late. The first is
- * fixed, and the lever is the chained-assignment rule read the other way
- * round: `expand_assignment` computes the destination address before the
- * value, so `g_FieldEntity[bestId].requestTalkScript = 1;` emits the index
- * arithmetic ahead of the constant, while `talk = 1;` as its own statement
- * emits the constant first and the store second. It has to be an `s16` local;
- * an `s32` puts a widening node back into the halfword store. Two rows to one.
+ * The last two rows were both about where a constant lands, and neither was
+ * a codegen question.
  *
- * The 0x40 is a pure sched2 permutation and stays. The two blocks hold the
- * same four instructions and differ only in which one reorg finds first in
- * the fall-through thread -- target `beq / ori v1,0x40 / sll / sra`, ours
- * `beq / sll / sra / li v1,0x40`. sched2 ranks by longest path to the end of
- * the block, and `sll -> sra -> beq` is one longer than `ori -> beq`, so the
- * shift always goes first. Measured and byte-identical to the body below:
- * `0x40 != best`, `(s16)0x40 != best`, nesting the two conditions instead of
- * `&&`, `talk = 1;` hoisted next to `best = 0x40;`, and the loop bound as
- * `g_FieldStateData.modelCount` rather than `D_8009AC1C` (28 aliases instead
- * of 22, but the same rows -- the sibling idiom that makes
- * FieldEntityCollisionCheck match does not apply here). Measured and worse:
- * `g_PlayerModelId != bestId` for the first test (11), `talk = 1;`
- * immediately above the `if` (11), and swapping the two conditions (15 -- it
- * also swaps a2 and a3 for the whole tail, so the `&&` order is load-bearing
- * and correct as written). It needs a reason for the 0x40 to have a longer
- * dependence chain, or the sign extension a shorter one; that is
- * decomp-permuter's perm_ins_block territory, not a reading exercise.
- * Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
-#else
-void FieldEntityCheckTalk(void) {
+ *   - `requestTalkScript = 1` needs its value in its own statement.
+ *     `expand_assignment` computes the destination address before the value,
+ *     so `g_FieldEntity[bestId].requestTalkScript = 1;` emits the index
+ *     arithmetic ahead of the constant, while `talk = 1;` first emits the
+ *     constant and then the store, which is the target's order. The local has
+ *     to be `s16`; an `s32` puts a widening node back into the halfword store.
+ *
+ *   - **The function is not `void`.** The remaining row was `ori v1,zero,0x40`
+ *     for the final `best != 0x40` test, one instruction later than the
+ *     target has it -- the target puts it in the delay slot of the `beq` that
+ *     branches to the epilogue. This note previously called that a pure sched2
+ *     permutation, on the reasoning that `sll -> sra -> beq` is a longer
+ *     dependence chain than `ori -> beq` so the shift always goes first, and
+ *     listed six spellings measured byte-identical and three measured worse.
+ *     All of that is true and none of it was the lever: declaring a return
+ *     type the body never uses matches outright. It is the same rule
+ *     CLAUDE.md records for FieldMainLoop, arrived at from the other side --
+ *     there a `void` function was needed to *fill* a slot, here a non-`void`
+ *     one is. `s32`, `u8` and `s16` all match, so the .s cannot tell them
+ *     apart; `s32` is written here because K&R implicit `int` is the likely
+ *     original spelling, and the one caller (src/field/field.c) discards the
+ *     result and has no prototype in scope, so it is unaffected either way.
+ *
+ *     decomp-permuter found this in 721 iterations from a base score of 60,
+ *     via `perm_randomize_internal_type`, after a hand search had exhausted
+ *     the statement-level dimensions. It is not something reading the target
+ *     suggests: the return type is invisible in a function that never sets
+ *     $v0.
+ */
+s32 FieldEntityCheckTalk(void) {
     VECTOR from;
     VECTOR to;
     s16 quality[16];
@@ -2026,7 +2027,6 @@ void FieldEntityCheckTalk(void) {
         g_FieldEntity[bestId].requestTalkScript = talk;
     }
 }
-#endif
 
 s16 FieldEntityGetDirVectorX(u8 arg0) { return g_FieldDirVectors[arg0][0]; }
 

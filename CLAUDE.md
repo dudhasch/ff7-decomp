@@ -828,6 +828,19 @@ a near-miss, in rough order of frequency:
   it never uses. `FieldMainLoop` needs `s32`; K&R implicit `int` is the likely
   original spelling. Only branches straight to the epilogue are affected —
   branches into a shared tail still get their slots filled either way.
+
+  The rule runs in both directions, and the other one is easier to miss
+  because the return type is invisible in a function that never sets `$v0`.
+  `FieldEntityCheckTalk` in `src/field/field2.c` sat one row out with
+  `ori v1,zero,0x40` landing one instruction *after* the branch-to-epilogue
+  whose delay slot the target fills -- and a park note that had reasoned its
+  way to "a pure sched2 permutation, since `sll -> sra -> beq` is a longer
+  dependence chain than `ori -> beq`", with six spellings measured
+  byte-identical and three measured worse. Declaring the function non-`void`
+  matches outright. `s32`, `u8` and `s16` all match, so the `.s` cannot tell
+  them apart. decomp-permuter found it in 721 iterations through
+  `perm_randomize_internal_type`; nothing about reading the target suggests
+  it, which is exactly the case the permuter is for.
 * **`x++` on a `volatile` re-reads it; `x = x + 1` does not.** The increment is
   an expression whose value gcc materialises even when the statement discards
   it, and for a volatile that means a fourth instruction pair (`lui`/`lhu`)
