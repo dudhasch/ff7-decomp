@@ -3241,36 +3241,25 @@ s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     return changed;
 }
 
-/* The four trigger sound-effect ids. This is the .rodata blob of the local
- * `s16 seIds[4]` initialiser inside FieldEntityTriggerCheck below, and it is
- * spelled out here only because that function is still pinned: its .s
- * references D_800A00BC by name, so the definition has to exist. Delete this
- * line in the same change that unparks the function -- gcc emits the
- * initialiser's own copy into the constant pool ahead of the function body,
- * and two copies shift every later .rodata offset. */
-const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
-
 /* Walk the 12 background triggers against one entity and arm/disarm each it
  * crosses or comes near. In-proximity arms directly when the entity stands on
  * the line, else needs the entity facing it within +/-64; crossing types 4/5
  * arm/disarm on the back-side sign test. Each state change plays the trigger's
  * sound effect.
  *
- * 12 rows out, from an m2c seed that did not compile (`trigger->pos` on a
- * FieldBgTrigger whose first twelve bytes were declared `u8 unk00[0xC]`).
- * What the rewrite established, in the order it was worth:
+ * Six things this needed, in the order they were worth:
  *   - `trigger` is a walking pointer bumped in the `for` header, not
- *     `&triggers[i]`. The pointer form makes it a biv, and gcc reduces the
- *     record's byte fields onto a second base at +0xF -- which is the
+ *     `&triggers[i]`: the pointer form makes it a biv and gcc reduces the
+ *     record's byte fields onto a second base at +0xF, which is the
  *     `addiu s0,s1,0xf` and the negative offsets all through the loop. The
- *     subscript form has one base and no giv: 105 rows against 69.
+ *     subscript form has one base and no giv -- 105 rows against 69.
  *   - `from` and `nearest` are named `s32*` locals. Without them the two
  *     scratchpad addresses are rebuilt through the assembler's $at macro at
- *     every use and the function ends up two callee-saved registers and 8
- *     bytes of frame short of the target: 69 rows against 14. The three
- *     opening stores stay spelled as absolute casts even so -- the target
- *     writes `0(s5)` for the first and `4($at)`/`8($at)` for the other two,
- *     which is cse relating only the first to the pointer's own pseudo.
+ *     every use and the function is two callee-saved registers and 8 bytes
+ *     of frame short: 69 rows against 14. The three opening stores stay
+ *     spelled as absolute casts even so -- the target writes `0(s5)` for the
+ *     first and `4($at)`/`8($at)` for the other two, which is cse relating
+ *     only the first to the pointer's own pseudo.
  *   - the sound-effect table is a local `u16 seIds[4]` initialiser. The
  *     target copies it in with lwl/lwr and swl/swr, the unaligned block move
  *     an `s16`-aligned initialiser gets, and reads it back with `lhu`.
@@ -3279,55 +3268,29 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  *   - the direction test wants an `s32` local for the call result (so the
  *     return is zero-extended into it) and a second `s32` local for the
  *     masked difference (so the comparison is `slti`, not `sltiu`).
+ *   - `&entity->PosZ` in an `s32*` local, read by the third store. That
+ *     splits the PosZ load off its `sra`/`sw` chain so sched2 can spread the
+ *     two `addiu`s into the load-delay slots the way the target does; it was
+ *     decomp-permuter's `perm_temp_for_expr`, not a reading of the target.
  *
- * 12 rows -> 7, and the step was decomp-permuter's, not a reading of the
- * target: `perm_temp_for_expr` names `&entity->PosZ` in an `s32*` local and
- * reads the third store through it, which took the scratch from base score
- * 580 to 185 and the real diff from 12 rows to 7. Both positions are
- * load-bearing in the usual way -- the declaration between `cross` and `dir`,
- * the assignment between the PosX and PosY stores -- and it is exactly the
- * knot the note below describes, which is why it worked: naming the pointer
- * splits the PosZ load off its `sra`/`sw` chain so sched2 can spread the two
- * `addiu`s into the load-delay slots the way the target does.
- *
- * The 7 left are one displacement and nothing else: the target materialises
- * 0x1F800020 into $s3 as the *first* body insn, which drags `sw s3,0x2c(sp)`
- * to the front of the register saves ahead of `sw ra`; ours schedules the
- * `lui/ori` after all five saves. Statement order does not reach it -- with
- * the permuter's local in place, all five arrangements of {from, nearest,
- * posZ} ahead of the stores measure exactly 7, as do the two orders measured
- * before it (and moving the pointer assignments after the stores is still
- * 32). A `do { } while (0);` probe on the older body was *not* inert (17-21
- * against 12), so sched2 is the pass and perm_ins_block is the weight to
- * raise; none of the four placements a human can think of is the right one.
- *
- * The residue is one scheduling knot in the entry block: the target spreads
- * `addiu s2,sp,0x10` and `addiu s0,s1,0xf` into the load-delay slots of the
- * PosY and PosZ loads, where ours emits them together ahead of the stores and
- * hoists the PosZ load into a second register instead. Neither the order of
- * the two pointer assignments, nor moving them after the stores (32 rows),
- * nor between them, nor the declaration order of the locals, nor writing the
- * first store through `from` moves it.
- *
- * One thing to know before running the permuter on it: the scratch cannot
- * reach score 0. `seIds`' initialiser is a local `.rodata` blob in our object,
- * so every reference relocates against `.rodata`; the target reaches the same
- * bytes through `D_800A00BC`, which lives in *another* unit's `.rodata` and is
- * therefore not defined in `target.s` at all. `permuter_rodata_local.py`
- * demotes labels the target file defines and has nothing to demote here, and
- * `align --strings` has no declaration to rewrite. So `--stop-on-zero` will
- * not fire even on a byte-identical candidate: run it with `--better-only` and
- * re-measure every output with `variant_eval.py` instead of trusting the
- * score.
- * Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
-#else
+ * The last row was the two pointers' *declarations*, and it is a general
+ * rule worth keeping: a local aggregate initialiser is a block copy emitted
+ * at its declaration, so it is a scheduling barrier, and anything that has
+ * to issue ahead of it must be declared above it. Written as statements
+ * after the declaration block, `nearest`'s `lui`/`ori` is scheduled after
+ * the `seIds` copy; written as an initialiser on a declaration placed ahead
+ * of `seIds`, gcc emits it as the function's first body insn, which drags
+ * `sw s3,0x2c(sp)` in front of `sw ra` in the register saves -- which is
+ * what the target has. Only the position relative to `seIds` matters:
+ * initialised at a declaration *below* `seIds` it is still 9 rows, and every
+ * arrangement above it matches. Five statement orderings of {from, nearest,
+ * posZ} had been measured at exactly 7 before this, which is what made the
+ * residue look like a scheduling knot with no lever. */
 void FieldEntityTriggerCheck(
     FieldEntity* entity, FieldBgTrigger* trigger, VECTOR* dest) {
+    s32* from = (s32*)0x1F800000;
+    s32* nearest = (s32*)0x1F800020;
     u16 seIds[4] = {0x0, 0x36, 0x7A, 0x12A};
-    s32* from;
-    s32* nearest;
     s32 sqrDist;
     s32 cross;
     s32* posZ;
@@ -3335,8 +3298,6 @@ void FieldEntityTriggerCheck(
     s32 rel;
     s32 i;
 
-    from = (s32*)0x1F800000;
-    nearest = (s32*)0x1F800020;
     *(s32*)0x1F800000 = entity->PosX >> 12;
     posZ = &entity->PosZ;
     *(s32*)0x1F800004 = entity->PosY >> 12;
@@ -3386,7 +3347,6 @@ void FieldEntityTriggerCheck(
         }
     }
 }
-#endif
 
 /* FieldEntityBgTriggerInit below is left as INCLUDE_ASM: every instruction of
  * the C matches, but gcc precedes the switch's jump table with `.align 3` and
