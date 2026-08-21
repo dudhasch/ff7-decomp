@@ -1145,6 +1145,51 @@ a near-miss, in rough order of frequency:
   statements — the parameter load first, then the base — which is the same
   `scan_loop` ordering lever as the bullet above, applied to a straight-line
   block instead of a loop.
+* **`&((T*)(base + K))[i]` is an ARRAY_REF and survives fold; `i * sizeof(T) +
+  K + (s32)base` is a PLUS_EXPR and does not.** For a packet at a fixed offset
+  inside a big buffer, the integer sum is reassociated to `(base + K) + i *
+  sizeof(T)` — `addiu <base>,K` then `addu <idx>` — where the target computes
+  `addiu <idx>,K` then `addu <base>`. No spelling of the sum reaches it: casts
+  to `s32` or `u32` (a conversion to a type the operand already has is not a
+  NOP_EXPR at all, so the C front end's `convert` returns the operand unchanged
+  and fold never sees a barrier), explicit parentheses, and named locals for
+  either half were all measured and are inert or much worse. The subscript form
+  works because an ARRAY_REF is not a PLUS_EXPR — there is nothing for
+  `associate` to take apart. This is the lever that finished
+  `FieldArrowsAddToRender` in `src/field/field2.c` after a park note had
+  concluded that "the two remaining levers do not exist in C"; it had tried
+  every spelling of the sum and none of the subscript. Note the limit: it only
+  helps when the *whole* address is one ARRAY_REF. The same function reads
+  `g_FieldTriggers + i * 0x10 + 0x230` two lines earlier, where the base is a
+  runtime load that still has to be added to the scaled index, and there all
+  six spellings — including `((VECTOR*)((u8*)g + 0x230))[i].vx` — give the
+  identical `addu` operand order.
+* **A scaled-index local can be right at *some* of its use sites and wrong at
+  the rest, and the split is not guessable.** `off = i * 0x10;` used at every
+  one of `FieldArrowsAddToRender`'s seven sites costs 43 rows, used at none
+  costs 2, and used at exactly five of them — with `pos.vy` and one of two
+  stores through the same cast keeping the inline multiply — matches. This is
+  the "same packet reached two ways in one loop" idiom above, one level down:
+  the asymmetry is the answer, not noise to be tidied away. Nothing about the
+  target's asm predicts which sites, so this is decomp-permuter's job
+  (`perm_temp_for_expr`), not a reading exercise — and it is only reachable
+  once the function is already within a couple of rows, which is the practical
+  case for CLAUDE.md's "correct the program first, then hand it to the
+  permuter". The local's declaration slot among the other locals is
+  load-bearing as well.
+* **A basic-block boundary in the middle of an `if` body is sometimes
+  load-bearing and no natural construct is known to produce one.**
+  `FieldArrowsAddToRender` needs 7 rows' worth of one right after an addPrim,
+  before the `if`'s join, and the only spellings found are `do { } while (0);`
+  and `while (0) { }` — byte-identical to each other, so what the original
+  wrote there emitted `NOTE_INSN_LOOP_BEG`/`END` and `expand_end_loop`'s exit
+  `CODE_LABEL`. Plain braces, an inverted guard with a label before the loop
+  increment, the barrier moved outside the `if`, rewriting the neighbouring
+  `if` as a `goto` over its body, and moving the addPrim above its neighbours
+  are all exactly 7 rows short. decomp-permuter's `perm_ins_block` is the pass
+  that finds these. When one is needed, take it, and say in the comment that
+  its identity is not recoverable — the same standing as the
+  `unusedLocals[0xNN]` frame reservations.
 * **A `u8` field and the byte behind it, stored together, are one halfword
   store.** `sh` where you have `sb`, at an offset whose field is a `u8`
   followed by a padding or `unkNN` byte, means the original wrote both at once:
