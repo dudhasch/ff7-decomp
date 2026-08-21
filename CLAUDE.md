@@ -1177,7 +1177,13 @@ a near-miss, in rough order of frequency:
   split, the address computation fills those slots instead.
   `AddColorStrNextDebugRow`'s `hdr->headRow = row + 1` needs `s16 next = row + 1;`
   ahead of the `hdr = ...` assignment — and it has to be `s16`, since an `s32`
-  local puts a widening node back into the store.
+  local puts a widening node back into the store. It is not only arithmetic values:
+  a plain **constant** stored through an indexed lvalue needs the same split,
+  because `expand_assignment` computes the destination address first either
+  way. `g_FieldEntity[bestId].requestTalkScript = 1;` emits the index
+  arithmetic ahead of the `li`, and `talk = 1;` as its own statement emits the
+  `li` first — one row in `FieldEntityCheckTalk`, and the same `s16`-not-`s32`
+  caveat applies.
 * **Two sibling pointers off one global base want three separate statements:
   widen, base, index.** For `p = (u16*)(SYM + id * 32)` gcc's fold canonicalises
   the tree to `(mult) + (symbol)` and expand then evaluates the multiply first,
