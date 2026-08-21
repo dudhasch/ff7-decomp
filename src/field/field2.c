@@ -2333,7 +2333,377 @@ s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
            normal[2];
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldEntityMove);
+u8 FieldEntityLineCheck(FieldEntity*, FieldLine*, VECTOR*); // extern
+extern void FieldEntityTriggerCheck(
+    FieldEntity* entity, void* trigger, VECTOR* dest);
+extern s32 FieldEntityWalkmechCross(
+    u16* triId, VECTOR* pos, VECTOR* delta, VECTOR* outEdge);
+extern void OuterProduct0(VECTOR* v0, VECTOR* v1, VECTOR* out);
+extern s32 VectorNormal(VECTOR* v0, VECTOR* out);
+extern /*?*/ s32 D_80074F10;
+extern s16 D_8009AC22;
+extern s16 D_8009AC24;
+extern u8 D_8009AC2A;
+extern u8 g_FieldLineCheckResult;
+
+/* Step one field entity along its current direction, sliding along walkmesh
+ * edges when the straight path is blocked.
+ *
+ * The walkmesh triangle the entity stands on is three SVECTORs, 0x18 apart in
+ * the mesh data; the two edge vectors and their cross product give the
+ * triangle's plane, VectorNormal turns that into a unit normal, and the two
+ * horizontal components are divided out to a 1.12 slope that the vertical step
+ * follows. The entity is then probed three times per attempt -- at its
+ * direction, at +0x20 and at -0x20 -- and the direction is nudged by 8 until
+ * one of them clears, up to sixteen times.
+ *
+ * 325 rows / 56 insertions at 786 instructions against 759: the first numbers
+ * this function has ever had. The m2c seed did not compile at all -- it read
+ * the scratchpad through `(void*)0x1F800040->unkNN`, opened with four
+ * `saved_reg_sN` reads, and invented prototypes for five callees. What the
+ * rewrite established:
+ *
+ *   - The scratchpad from 0x1F800040 is six VECTORs, not the flat words m2c
+ *     renders: edge0, edge1, the slope, the destination, the probe position
+ *     and the step delta, at 0x40, 0x50, 0x60, 0x70, 0x80 and 0x90. m2c writes
+ *     them three different ways -- `*(s32*)0x1F8000NN`, `*(void*)0x1F8000NN`
+ *     and `(void*)0x1F800040->unkNN` -- and all three are the same objects.
+ *   - **One base pointer, not six.** `VECTOR* spad = (VECTOR*)0x1F800040;`
+ *     with `spad[0..5]` is worth 18 instructions and 25 rows over six named
+ *     pointers: as six locals they spill and every use is an `lw`, where the
+ *     target derives each from one register with an `addiu`. That is the same
+ *     lever the parked FieldEntityWalkmechCross note above describes for the
+ *     scratchpad at 0x1F800000, arrived at independently here.
+ *   - The entity index wants an `s32` local. `g_FieldEntity[entityId]` with the
+ *     `s16` parameter re-extends and re-scales at each of 37 subscripts;
+ *     `s32 id = entityId;` is worth 19 instructions.
+ *   - m2c's prototypes were wrong for all five callees. The real ones:
+ *     `FieldEntityWalkmechCross(u16*, VECTOR*, VECTOR*, VECTOR*)` (m2c wrote
+ *     the last two `void*`), `OuterProduct0(VECTOR*, VECTOR*, VECTOR*)` and
+ *     `VectorNormal(VECTOR*, VECTOR*)` -- m2c gave each an extra argument it
+ *     read out of caller register setup -- and FieldEntityTriggerCheck's
+ *     middle parameter is a pointer, not the `s32` m2c inferred.
+ *   - The four `var_X = saved_reg_X;` reads at the top are m2c modelling
+ *     locals that really are read uninitialised: on the path where the probe
+ *     block is skipped entirely, sp20, sp28, var_s5, var_s6 and var_fp reach
+ *     the final test unwritten. Deleting the reads is faithful.
+ *
+ * 27 instructions over, and the residue is one shape: `addu` +12 and `sll` +11
+ * are still index arithmetic the target does not repeat, against `addiu` -7.
+ * m2c's seed carried three byte-offset locals (temp_s0, temp_s3, temp_a1) for
+ * exactly the three points where the target recomputes `entityId * 0x84`, so
+ * the next thing to try is the byte-offset access form CLAUDE.md prescribes
+ * for the $at wall -- `*(s32*)((u8*)g_FieldEntity + off + 0x0C)` -- with those
+ * three locals restored, rather than the subscripts used here. The gap tool
+ * puts the largest missing runs at want[211] (an index computation and a
+ * store) and want[128] (`mflo lui lw sll mult`, a multiply the slope
+ * calculation does not have here). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMove);
+#else
+s32 FieldEntityMove(s16 entityId) {
+    VECTOR* spad = (VECTOR*)0x1F800040;
+    s32 id = entityId;
+    u16 sp10;
+    s16 sp18;
+    s32 sp20;
+    s32 sp28;
+    s32 sp30;
+    s32 sp38;
+    s32 sp40;
+
+    FieldEntity* temp_s0_2;
+    FieldModelLoaderData* var_v0_10;
+    s16 temp_a3;
+    s16* var_a2_2;
+    s32 temp_a0;
+    s32 temp_a1;
+    s32 temp_lo;
+    s32 temp_lo_2;
+    s32 temp_lo_3;
+    s32 temp_lo_4;
+    s32 temp_s0;
+    s32 temp_s3;
+    s32 temp_t3;
+    s32 temp_t3_2;
+    s32 temp_v0_2;
+    s32 temp_v0_3;
+    s32 temp_v0_4;
+    s32 temp_v0_5;
+    s32 temp_v0_6;
+    s32 var_a0;
+    s32 var_a0_2;
+    s32 var_a2;
+    s32 var_fp;
+    s32 var_s4;
+    s32 var_s5;
+    s32 var_s6;
+    s32 var_v0;
+    s32 var_v0_2;
+    s32 var_v0_3;
+    s32 var_v0_4;
+    s32 var_v0_5;
+    s32 var_v0_6;
+    s32 var_v0_7;
+    s32 var_v0_8;
+    s32 var_v1;
+    s32 var_v1_2;
+    s8 var_v0_9;
+    u32 var_s7;
+    u8 var_a0_3;
+    SVECTOR* tri;
+    sp10 = g_FieldEntity[id].PosI;
+    tri = (SVECTOR*)((u8*)D_800E4274 + sp10 * 0x18);
+    spad[0].vx = (s32)(tri[1].vx - tri[0].vx);
+    spad[0].vy = tri[1].vy - tri[0].vy;
+    spad[0].vz = tri[1].vz - tri[0].vz;
+    spad[1].vx = tri[2].vx - tri[1].vx;
+    temp_a3 = tri[1].vy;
+    spad[1].vy = tri[2].vy - temp_a3;
+    sp18 = entityId;
+    spad[1].vz = tri[2].vz - tri[1].vz;
+    OuterProduct0(&spad[0], &spad[1], &spad[2]);
+    var_v0_2 = spad[2].vx;
+    if (var_v0_2 < 0) {
+        var_v0_2 += 0xFF;
+    }
+    var_v1 = spad[2].vy;
+    spad[2].vx = var_v0_2 >> 8;
+    if (var_v1 < 0) {
+        var_v1 += 0xFF;
+    }
+    var_a2 = spad[2].vz;
+    spad[2].vy = (s32)(var_v1 >> 8);
+    if (var_a2 < 0) {
+        var_a2 += 0xFF;
+    }
+    spad[2].vz = (s32)(var_a2 >> 8);
+    VectorNormal(&spad[2], &spad[2]);
+    temp_v0_2 = spad[2].vx;
+    var_v1_2 = temp_v0_2 * temp_v0_2;
+    if (var_v1_2 < 0) {
+        var_v1_2 += 0xFFF;
+    }
+    temp_v0_3 = spad[2].vz;
+    var_a0 = temp_v0_3 * temp_v0_3;
+    if (var_a0 < 0) {
+        var_a0 += 0xFFF;
+    }
+    temp_a0 = spad[2].vz;
+    temp_v0_4 = spad[2].vy;
+    var_v0_3 = temp_v0_4 * temp_v0_4;
+    spad[2].vx = (s32)(temp_a0 << 0xC) /
+                 SquareRoot12((var_v1_2 >> 0xC) + (var_a0 >> 0xC));
+    if (var_v0_3 < 0) {
+        var_v0_3 += 0xFFF;
+    }
+    var_a0_2 = temp_a0 * temp_a0;
+    if (var_a0_2 < 0) {
+        var_a0_2 += 0xFFF;
+    }
+    temp_lo = (s32)(spad[2].vz << 0xC) /
+              SquareRoot12((var_v0_3 >> 0xC) + (var_a0_2 >> 0xC));
+    spad[2].vy = temp_lo;
+    if (spad[2].vx >= 0x1001) {
+        spad[2].vx = 0x1000;
+    }
+    if (spad[2].vx < -0x1000) {
+        spad[2].vx = -0x1000;
+    }
+    if (temp_lo >= 0x1001) {
+        spad[2].vy = 0x1000;
+    }
+    if (spad[2].vy < -0x1000) {
+        spad[2].vy = -0x1000;
+    }
+    if (spad[2].vz >= 0x1001) {
+        spad[2].vz = 0x1000;
+    }
+    if (spad[2].vz < -0x1000) {
+        spad[2].vz = -0x1000;
+    }
+    temp_t3 = spad[2].vx;
+    sp38 = temp_t3;
+    if (temp_t3 < 0) {
+        sp38 = -temp_t3;
+    }
+    temp_t3_2 = spad[2].vy;
+    sp40 = temp_t3_2;
+    if (temp_t3_2 < 0) {
+        sp40 = -temp_t3_2;
+    }
+    var_s7 = 0;
+    temp_s0 = sp18 * 0x84;
+loop_31:
+    var_s7 += 1;
+    if (sp18 == g_PlayerModelId) {
+        var_v0_4 = var_s7 < 0x11U;
+        if (g_FieldLineCheckResult == 1) {
+            if (var_s7 >= 3U) {
+                g_FieldLineCheckResult = 0;
+            } else {
+                goto block_37;
+            }
+        } else {
+            goto block_36;
+        }
+    } else {
+        var_v0_4 = var_s7 < 0x11U;
+    block_36:
+        if (var_v0_4 != 0) {
+        block_37:
+            var_v0_5 =
+                FieldEntityGetDirVectorX(g_FieldEntity[id].MoveDir) * sp38;
+            if (var_v0_5 < 0) {
+                var_v0_5 += 0xFFF;
+            }
+            spad[3].vx = (s32)(var_v0_5 >> 0xC);
+            var_v0_6 =
+                -(FieldEntityGetDirVectorY(g_FieldEntity[id].MoveDir) * sp40);
+            if (var_v0_6 < 0) {
+                var_v0_6 += 0xFFF;
+            }
+            spad[3].vy = (s32)(var_v0_6 >> 0xC);
+            var_v0_7 = g_FieldEntity[id].MoveSpeed * spad[3].vx;
+            if (var_v0_7 < 0) {
+                var_v0_7 += 0xFF;
+            }
+            spad[3].vx = (s32)(var_v0_7 >> 8);
+            var_v0_8 = g_FieldEntity[id].MoveSpeed * spad[3].vy;
+            if (var_v0_8 < 0) {
+                var_v0_8 += 0xFF;
+            }
+            spad[3].vy = (s32)(var_v0_8 >> 8);
+            spad[3].vx = (s32)(g_FieldEntity[id].PosX + spad[3].vx);
+            spad[3].vy = (s32)(g_FieldEntity[id].PosY + spad[3].vy);
+            spad[3].vz = (s32)g_FieldEntity[id].PosZ;
+            spad[5].vx = (s32)(FieldEntityGetDirVectorX(
+                                   (g_FieldEntity[id].MoveDir + 0x20) & 0xFF) *
+                               g_FieldEntity[id].SolidRange);
+            temp_lo_2 = -FieldEntityGetDirVectorY(
+                            (g_FieldEntity[id].MoveDir + 0x20) & 0xFF) *
+                        g_FieldEntity[id].SolidRange;
+            spad[4].vz = (s32)spad[3].vz;
+            spad[5].vy = temp_lo_2;
+            spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
+            spad[4].vy = (s32)(spad[3].vy + spad[5].vy);
+            sp20 =
+                FieldEntityWalkmechCross(&sp10, &spad[4], &spad[5], &spad[1]);
+            temp_v0_5 = FieldEntityCollisionCheck(sp18, &spad[4]);
+            sp10 = g_FieldEntity[id].PosI;
+            sp28 = temp_v0_5 != 0;
+            spad[5].vx = (s32)(FieldEntityGetDirVectorX(
+                                   (g_FieldEntity[id].MoveDir - 0x20) & 0xFF) *
+                               g_FieldEntity[id].SolidRange);
+            temp_lo_3 = -FieldEntityGetDirVectorY(
+                            (g_FieldEntity[id].MoveDir - 0x20) & 0xFF) *
+                        g_FieldEntity[id].SolidRange;
+            spad[4].vz = (s32)spad[3].vz;
+            spad[5].vy = temp_lo_3;
+            spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
+            spad[4].vy = (s32)(spad[3].vy + spad[5].vy);
+            var_fp =
+                FieldEntityWalkmechCross(&sp10, &spad[4], &spad[5], &spad[2]);
+            temp_v0_6 = FieldEntityCollisionCheck(sp18, &spad[4]);
+            sp10 = g_FieldEntity[id].PosI;
+            var_s6 = temp_v0_6 != 0;
+            spad[5].vx =
+                (s32)(FieldEntityGetDirVectorX(g_FieldEntity[id].MoveDir) *
+                      g_FieldEntity[id].SolidRange);
+            var_s4 = 0;
+            temp_lo_4 = -FieldEntityGetDirVectorY(g_FieldEntity[id].MoveDir) *
+                        g_FieldEntity[id].SolidRange;
+            spad[4].vz = (s32)spad[3].vz;
+            spad[5].vy = temp_lo_4;
+            spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
+            spad[4].vy = (s32)(spad[3].vy + spad[5].vy);
+            var_s5 =
+                FieldEntityWalkmechCross(&sp10, &spad[4], &spad[5], &spad[0]);
+            if (FieldEntityCollisionCheck(sp18, &spad[4]) != 0) {
+                var_s4 = (var_s5 == 0) * 8;
+            }
+            if ((var_s5 != 0) || (sp20 != 0) || (var_fp != 0) ||
+                (var_s4 != 0) || (sp28 != 0) || (var_s6 != 0)) {
+                if ((sp18 == g_PlayerModelId) && (g_FieldAnimLock == 0)) {
+                    if ((var_s4 == 0) && (sp28 == 0) && (var_s6 == 0)) {
+                        goto block_68;
+                    }
+                } else {
+                    if ((var_s5 != 0) && (sp20 == 0) && (var_fp == 0)) {
+                        var_v0_9 = g_FieldEntity[id].MoveDir - var_s5;
+                        goto block_67;
+                    }
+                    if ((var_s4 != 0) && (sp28 == 0) && (var_s6 == 0)) {
+                        var_v0_9 = g_FieldEntity[id].MoveDir - var_s4;
+                    block_67:
+                        g_FieldEntity[id].MoveDir = var_v0_9;
+                    }
+                block_68:
+                    if (sp20 != 0) {
+                        if (var_fp == 0) {
+                            goto block_72;
+                        }
+                    } else {
+                        if (sp28 != 0) {
+                        block_72:
+                            g_FieldEntity[id].MoveDir =
+                                g_FieldEntity[id].MoveDir + 0xF8;
+                        } else if ((var_fp != 0) || (var_s6 != 0)) {
+                            g_FieldEntity[id].MoveDir =
+                                g_FieldEntity[id].MoveDir + 8;
+                        }
+                        goto loop_31;
+                    }
+                }
+            }
+        }
+    }
+    temp_s3 = sp18 * 0x84;
+    sp30 = FieldEntityWalkmechCross(
+        &g_FieldEntity[id].PosI, &spad[3], &spad[5], &spad[0]);
+    if ((sp18 == g_PlayerModelId) && (g_FieldAnimLock == 0)) {
+        temp_s0_2 = &g_FieldEntity[id];
+        g_FieldLineCheckResult =
+            FieldEntityLineCheck(temp_s0_2, &D_8007E7AC, &spad[3]);
+        if (g_FieldStateData.mapJumpDisabled == 0) {
+            FieldEntityGatewayCheck(
+                temp_s0_2, g_FieldTriggers + 0x38, &spad[3]);
+        }
+        FieldEntityTriggerCheck(temp_s0_2, g_FieldTriggers + 0x158, &spad[3]);
+    }
+    var_v0 = 0;
+    if ((var_s5 == 0) && (sp20 == 0) && (var_fp == 0) && (var_s4 == 0) &&
+        (sp28 == 0) && (var_s6 == 0) && (sp30 == 0)) {
+        temp_a1 = sp18 * 0x84;
+        g_FieldEntity[id].PosX = spad[3].vx;
+        g_FieldEntity[id].PosY = spad[3].vy;
+        g_FieldEntity[id].PosZ = spad[3].vz << 0xC;
+        var_v0 = 1;
+        if (g_FieldEntity[id].scriptedMoveMode == 0) {
+            var_v0 = 1;
+            if (sp18 == g_PlayerModelId) {
+                g_FieldEntity[id].animSpeed = 0x10;
+                if (g_FieldPadRaw & 0x40) {
+                    var_a2_2 = &g_FieldStateData.runAnimId;
+                    var_v0_10 = &g_FieldModelLoaderData[sp18];
+                } else {
+                    var_a2_2 = &g_FieldStateData.walkAnimId;
+                    var_v0_10 = &g_FieldModelLoaderData[sp18];
+                }
+                var_a0_3 = 0;
+                if (*var_a2_2 < (s32)g_FieldModelData
+                                    ->modelEntries[var_v0_10->modelEntryIndex]
+                                    .animationCount) {
+                    var_a0_3 = (u8)*var_a2_2;
+                }
+                g_FieldEntity[id].activeAnimId = var_a0_3;
+                var_v0 = 1;
+            }
+        }
+    }
+    return var_v0;
+}
+#endif
 
 extern s16 D_8009AC1C;
 
