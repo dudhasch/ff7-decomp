@@ -4101,6 +4101,31 @@ extern u8 D_8009C6D8;
  * store through `cur` as well is 42, and the first walk's stores must stay
  * on the bare symbol. The remaining rows are all branch displacements off by
  * 8, which is the two instructions still missing.
+ *
+ * 40 / -2 -> 13 / exact length, and the two missing instructions were the
+ * `andi <r>,<r>,0xff` masking `roll` at the first and fourth comparisons.
+ * They are not reachable from the comparison: `(u8)roll`, `(roll & 0xFF)`,
+ * every width of `roll` and both operand orders all measure the same, because
+ * combine proves the high bits clear from `roll = FieldGetNextRandomU8() >>
+ * 2;` -- a `lbu`-normalised call result shifted right by two -- and folds the
+ * mask into the `sltu`. Splitting the statement is what breaks the proof:
+ * `roll = FieldGetNextRandomU8(); roll >>= 2;` stores the call result into
+ * the `u8` pseudo first, so the shift reads a QImode value whose bound gcc no
+ * longer carries to the comparison, and both masks come back. The two forms
+ * are the same value and 27 rows apart. `roll >>= 2` and `roll = roll >> 2`
+ * are byte-identical; widening `roll` after the split loses the masks again
+ * (s32/u32 52, u16 40), so the `u8` and the split are one lever, not two.
+ *
+ * The 13 left are pure register naming in the third and fourth comparisons:
+ * the target has slot=$a1, total=$v1, masked roll=$a2 and puts `sum = total +
+ * rate` back into sum's own $s0, where this build has slot=$v1, roll=$a1,
+ * total=$a2 and computes the new sum into a dead $v0. Nothing structural
+ * reaches it -- both operand orders of the two sums, `sum = total; sum +=
+ * rate;`, four declaration positions for `total`, `s32 slot`, a separate
+ * variable for the third comparison's slot, and re-reading `enc->special[2]`
+ * instead of caching it all measure exactly 13 (the re-read is 36). The
+ * length is exact and the relocations are clean, so this is a permuter target
+ * for which score 0 is reachable.
  * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
@@ -4143,7 +4168,8 @@ void FieldBattleCheck(void) {
                 StopFieldMapPreload();
                 D_8009ABF5 = 2;
                 D_8007EBC8 = 1;
-                roll = FieldGetNextRandomU8() >> 2;
+                roll = FieldGetNextRandomU8();
+                roll >>= 2;
                 if (!(D_80062F1B & 0x80)) {
                     sum = (s32)(enc->special[0] << 16) >> 26;
                 } else {
@@ -4184,7 +4210,8 @@ void FieldBattleCheck(void) {
                     return;
                 }
                 sum = 0;
-                roll = FieldGetNextRandomU8() >> 2;
+                roll = FieldGetNextRandomU8();
+                roll >>= 2;
                 D_8009ABF6 = enc->fallback & 0x3FF;
                 for (i = 0; i < 5; i++) {
                     slot = ((u16*)enc)[i + 1];
@@ -4200,7 +4227,8 @@ void FieldBattleCheck(void) {
                     return;
                 }
                 sum = 0;
-                roll = FieldGetNextRandomU8() >> 2;
+                roll = FieldGetNextRandomU8();
+                roll >>= 2;
                 *cur = enc->fallback & 0x3FF;
                 for (i = 0; i < 5; i++) {
                     slot = ((u16*)enc)[i + 1];
