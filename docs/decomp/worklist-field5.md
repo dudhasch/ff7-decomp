@@ -5,10 +5,10 @@ do not hand-edit. See CLAUDE.md §1 for how to use it.
 
 | | count |
 | --- | --- |
-| remaining `INCLUDE_ASM` | 1 |
+| remaining `INCLUDE_ASM` | 0 |
 | handwritten — can never match | 0 |
 | blocked on a `.rodata` group | 0 |
-| **actionable** | **1** |
+| **actionable** | **0** |
 | …of which already parked near-miss | 0 |
 
 Columns: `i` instructions, `calls` direct calls, `*` indirect call,
@@ -20,5 +20,4 @@ the `.c` — those are the cheapest wins left, finish them first.
 
 | # | function | i | calls | * | div | jt | rodata | rank | P |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `FieldDebugRenderPage` | 1341 | 1 |  |  |  |  |  |  |
 

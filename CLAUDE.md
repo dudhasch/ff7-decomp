@@ -2179,6 +2179,63 @@ a near-miss, in rough order of frequency:
   both sides, keyed by member offset and opcode, alignment-free, so it stays
   meaningful while the function is still hundreds of rows out.
 
+* **Arms that each carry the *whole* argument setup mean the call is written
+  twice, not hoisted after the `if`/`else`.** The companion to the
+  `PreloadNextFieldMap` bullet below, and the commoner shape: where that one
+  duplicates a call so cross-jumping pushes the *shared* setup above the
+  branch, this is the case where nothing is shared. `lui a0,%hi(g_DebugText)/
+  addiu a0/lui a1,%hi(str)/addiu a1/j` in one arm and the same four
+  instructions with a different `a1` in the other, with a single
+  `jal`/delay-slot tail after the join, is `f(x, A)` and `f(x, B)` written out
+  in the two arms -- cross-jumping merges only the `jal` and its delay slot,
+  because the tails differ from the second instruction back. A single call
+  after the `if`/`else` over a variable emits the setup once and is short by
+  the whole duplicated prologue, four to eleven instructions *per site*.
+  `DebugUpdateActor` in `src/field/field4.c` has 36 such arms -- eleven flag
+  characters, three transparency markers, two colour ladders -- and they were
+  worth 119 instructions, two thirds of everything it was under length. The
+  tell is a pair of blocks that load the same `a0` and a different `a1`, which
+  is the *same* tell as the `SetSemiTrans` bullet above; read whether the
+  shared argument is loaded inside the arms (duplicate the call) or before the
+  branch (hoist it).
+* **A pre-scaled byte offset only defeats the folded base if it is a local.**
+  Sharpening the `$at` rematerialisation bullet above: what `associate` takes
+  apart is a `PLUS` whose operands are a symbolic constant and a `MULT`, and an
+  index written inline is still a `MULT` however the address is spelled. So
+  `*(s16*)((u8*)&SYM + 0x4 + arr[i] * 0x18)` hands gcc
+  `(plus (symbol+4) (mult (reg) 0x18))`, fold lifts the bare `SYM` out as the
+  common subexpression of all the fields, and one `lui`/`addiu` in a
+  callee-saved register then serves every access. Assigning
+  `off = arr[i] * 0x18;` as its own statement immediately above each access
+  gives `(plus (symbol) (reg))`, which stays in the `mem` and comes out as the
+  assembler's `lui at/addiu at/addu at` per field. Both halves are needed:
+  hoisting *one* `off` for the whole block deletes the re-derivations the
+  target has and measures -42 instructions, and spelling the interior address
+  as a member (`&SYM.pos.z1`) rather than `&SYM + 0x4` is exactly inert.
+  `DebugUpdateActor`'s six FieldLine reads needed it, 35 rows.
+* **A scalar global whose *address* the target keeps in a register, read many
+  times, is a named pointer local -- not `volatile`.** CLAUDE.md already gives
+  two routes to the register form, a second reference and `volatile`; there is
+  a third, and on a global read nine times it is the only cheap one.
+  `lui s3,%hi(SYM)/addiu s3` once with `lh 0(s3)` at every read, against a
+  `lui %hi` per read in your build, is `s16* p = &SYM;` and `*p`. `volatile`
+  reaches the same address form and brings its own cost -- every `lh` becomes
+  `lhu` plus a separate `sll`/`sra` -- so on a target that loads signed it is
+  a wrong answer that *looks* right in the `lui` column alone (measured on
+  `D_8009AC1E` in `DebugUpdateActor`: 148 rows as a pointer local, 204 and
+  +27 instructions as `volatile`). Where the pointer is assigned is
+  load-bearing as usual: at the top of the block that uses it, 148 rows; at
+  the top of the function, 179.
+* **Read the parameter types off the prologue before anything else.**
+  `addu $s6,$a1,$zero` -- a plain copy -- cannot come from a `u8` parameter,
+  which gcc masks on entry with `andi $s6,$a1,0xff`; and `sll/sra 16` at every
+  use with no extended copy kept is what a `short` parameter looks like. m2c
+  infers narrow parameter types from what the *caller* passes and then writes
+  `(s16)` casts at every use to model the re-extension, which reads as
+  faithful and is a different program. `DebugUpdateActor`'s declared
+  `(s32, u8)` was `(s16, s16)`, worth 8 instructions and 25 rows; the four
+  spellings measured 256 (s16,s16), 259 (s32,s16), 261 (s32,s32), 278
+  (s16,u8), 281 (s32,u8).
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
