@@ -347,6 +347,15 @@ extern s16 D_80071E3C;
  *      pre-loop block is exactly inert at all five placements measured: the
  *      address is `sp + 0x18`, cse rematerialises it, and a pointer local
  *      cannot pin it.
+ *      Every in-loop placement of `ev` re-measured on the 40/6 base and all
+ *      much worse: loop top 100/13, after `g_FieldPreloadMapId = 0` 100/13,
+ *      before the `D_800965EC == 2` block 53/8, before the `D_80095DD4` spin
+ *      134/19, before the fade `if` 133/15, before FieldEnablePartyModels
+ *      127/15. Dropping the local and spelling the expression inline at all
+ *      seventeen use sites -- the shape that would let cse hoist it as a
+ *      movable derived from the `&D_8009AC40` movable, which is what the
+ *      target's preheader shows -- is 81/6. The local is right and its
+ *      position is wrong, and no position reaches it.
  *   2. CLOSED. D_8009AC1A[0] = 2 and the D_8009AC3C read wanted `volatile` on
  *      the declarations. The target materialises each address into a general
  *      register (lui/addiu/op 0(reg)) where a plain declaration gives maspsx's
@@ -360,9 +369,15 @@ extern s16 D_80071E3C;
  *      members they are (movieCommandState +0x26, nextFieldMusic +0x48) is
  *      codegen-identical to the plain form and does not reach it, and named
  *      pointer locals are worse (80/6).
- *   3. the fade block stores fadeType before fadeSpeed in the target and
- *      after it here. Both are struct stores at distinct constant offsets, so
- *      sched2 is free to swap them; it is not source order. 4 rows.
+ *   3. the fade block. The target stores fadeType, fadeAdjust, fadeSpeed
+ *      (offsets 0, 4, 2 from $s3); this build stores fadeAdjust, fadeType,
+ *      fadeSpeed. All six source orders have been measured and the dimension
+ *      is finished, not merely unexplored: fadeType/fadeSpeed/fadeAdjust --
+ *      what is written here -- is 40, fadeType/fadeAdjust/fadeSpeed 42, and
+ *      the four that do not write fadeType first are 98 to 100. So fadeType
+ *      first is load-bearing and the remaining swap is sched2's, not source
+ *      order's: three constant stores at distinct offsets off one hoisted
+ *      base, all ready at once, and the tie goes the other way. 6 rows.
  *   4. the tail. Half of this closed: the `(s16)` cast on `fieldId` in
  *      `if ((s16)fieldId != preloadId)` was producing a sll/sra pair on a
  *      value that `lhu` had already zero-extended. Dropping it -- the two
@@ -1673,8 +1688,25 @@ extern FieldBgOtSlot D_8009ACA2;
  * address three different objects, here `count` and `sprite` describe the
  * same walk four times over and merging them is correct.
  *
+ * The obvious way to change the rank -- a reference to one of the two
+ * constants, added inside an inner loop where flow weights it double -- has
+ * been tried in the shape that worked for levers 1 and 3 and does not work
+ * here. A dead `if (x) { addPrim } else { addPrim }` around the layer-1
+ * sprite addPrim is 125/1, around the layer-2 one 74/2, both 132/3, and with
+ * `D_80071A48[0].x` as the condition instead of `buf->Bg1[sprite].y0` 125/1
+ * and 78/2. Every one of them costs an insertion, which is the difference
+ * from levers 1 and 3: there the two arms were byte-identical after reload
+ * and cross-jumping deleted the whole construct, here the guard's load
+ * survives. So the reference-count lever is real and the spelling that
+ * delivers it without emitting anything is not one this reading found.
+ *
  * This one belongs to decomp-permuter, and the scratch must be re-imported
- * against this body rather than an older one.
+ * against this body rather than an older one. The pass that matters is
+ * `perm_refer_to_var` -- it adds a reference to a variable, which is exactly
+ * the term in `allocno_compare` that has to move -- with `perm_var_cond_block`,
+ * `perm_dummy_comma_expr` and `perm_add_self_assignment` behind it; a 55,000
+ * iteration run at the default weights, which spend most of their budget on
+ * `perm_temp_for_expr`, found nothing at all.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddBackgroundToRender);
