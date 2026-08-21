@@ -2269,11 +2269,45 @@ extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
  * emits `? FieldDebugRenderString(...)` for a callee defined later in the
  * unit, which is a parse error, and gcc 2.6.3 keeps generating code after it.
  *
- * What is left is a whole function of codegen: the body is 41 instructions
- * short, so at least one construct here is a different program, not a
- * different schedule. The first thing to read is the frame -- `addiu
- * sp,sp,-0x88` against our -0x58 -- which by CLAUDE.md's rule is 0x30 of
- * locals this body does not declare. Start there, not at the diff.
+ * 821 changed / 127 inserted at 1353 instructions against 1341, from 971/154
+ * and 41 instructions *short*. Four corrections got it there and all four are
+ * program, not codegen:
+ *
+ * 1. **m2c's offsets are in bytes and the page arrays are `s16[]`,** so every
+ *    `*(g_FieldDebugPageY + off)` was double-scaled. The byte-offset form
+ *    CLAUDE.md records for the sibling debug functions --
+ *    `*(s16*)((u8*)SYM + off)` -- is what the target has, and its `$at` macro
+ *    expansions are **389 of the function's 1341 instructions**. 53 sites.
+ * 2. **The five index temporaries m2c emits are one variable, computed once.**
+ *    Worth 28 instructions. Note the two forms either side of it are both
+ *    worse and by a lot: recomputing `off` at each of the five blocks is +27,
+ *    and writing `page * 0x17A` inline at all 93 uses is -77, because cse
+ *    then folds it into far fewer than the target's six.
+ * 3. `s32` for the row cursor rather than `s16`, worth 13.
+ * 4. `u8 unusedLocals[0x30];`. The target's frame is 0x88 with s0-s5 and ra
+ *    saved from 0x68, ours was 0x50 with s0-s3 -- so 0x30 of locals that no
+ *    instruction names. Six rows and the frame.
+ *
+ * The per-symbol reference counts are now within one or two of the target at
+ * every global (`g_FieldDebugRb` 33 against 35, `PageY` 19 against 18,
+ * `D_800E0748` 18 against 17, and R/G/B, `D_800E074C`, `Row` and `H` exact),
+ * so the addressing structure is right.
+ *
+ * `pageIdx` is deliberate and is worth reading before touching it. The target
+ * keeps the raw `s16` parameter in `$s5` and a *separate* sign-extended copy
+ * in `$s4`, and passes the copy to the call (`addu $a0, $s4, $zero`) while
+ * recomputing the sign extension from `$s5` for each offset. Routing the call
+ * through an `s32` local reproduces that split: 821 rows against 831 without
+ * it, at a cost of two instructions. Both numbers are here because the
+ * length rule and the row count disagree, and the register evidence is what
+ * breaks the tie -- the target demonstrably has both copies.
+ *
+ * What is left is 821 rows of register naming with the length within twelve,
+ * and one unexplained fact worth starting from: the target expands
+ * `page * 0x17A` **six** times (six `sll`/`subu`/`sll` triples) where this
+ * body expands it once, and is still eleven instructions shorter. That is
+ * about thirty instructions of waste somewhere in here that the target does
+ * not pay, and it is not the offsets.
  *
  * The page arrays it walks are now named (g_FieldDebugPageY/H/R/G/B/Row/
  * HeadRow/Hidden), so the byte-offset addressing the debug functions all
@@ -2285,6 +2319,8 @@ extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
 #else
 void FieldDebugRenderPage(s16 page) {
+    s32 pageIdx;
+    u8 unusedLocals[0x30];
     s32 off;
     s16 row;
     s32 y;
@@ -2353,12 +2389,13 @@ void FieldDebugRenderPage(s16 page) {
     LINE_F3* var_v1_2;
     if (g_FieldDebugRRect < 0x18) {
         off = page * 0x17A;
+        pageIdx = page;
         row = 0;
         rowText = (u8*)g_FieldDebugRowText + off;
         y = *(s16*)((u8*)g_FieldDebugPageY + off) + 2;
         while (y < *(s16*)((u8*)g_FieldDebugPageY + off) +
                        *(s16*)((u8*)g_FieldDebugPageH + off) - 8) {
-            FieldDebugRenderString(page, row, rowText + row * 0xE,
+            FieldDebugRenderString(pageIdx, row, rowText + row * 0xE,
                                    *(s16*)((u8*)D_800E0748 + off) + 2, y);
             row++;
             y += 0xA;
@@ -2369,14 +2406,16 @@ void FieldDebugRenderPage(s16 page) {
             temp_a0_2->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
             temp_a0_2->y0 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) + 0xA);
-            temp_a0_2->x1 =
-                (s16)(*(s16*)((u8*)D_800E0748 + off) + (*(s16*)((u8*)D_800E074C + off) - 2));
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                      0xA);
+            temp_a0_2->x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                                  (*(s16*)((u8*)D_800E074C + off) - 2));
             temp_a0_2->y1 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) + 0xA);
-            temp_a0_2->x2 =
-                (s16)(*(s16*)((u8*)D_800E0748 + off) + (*(s16*)((u8*)D_800E074C + off) - 2));
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                      0xA);
+            temp_a0_2->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                                  (*(s16*)((u8*)D_800E074C + off) - 2));
             temp_t5 = page * 4;
             temp_a0_2->y2 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
@@ -2395,17 +2434,19 @@ void FieldDebugRenderPage(s16 page) {
                 (s32)((*(s32*)temp_a3 & 0xFF000000) | (*temp_a1_2 & 0xFFFFFF));
             *temp_a1_2 = (*temp_a1_2 & 0xFF000000) |
                          ((s32)(temp_a2 + (temp_a0_3 + D_800E3B28)) & 0xFFFFFF);
-            temp_a2_2 = &((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + temp_t0];
+            temp_a2_2 =
+                &((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + temp_t0];
             temp_a2_2->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
             temp_a2_2->y0 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) + 0xA);
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                      0xA);
             temp_a2_2->x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
             temp_a2_2->y1 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
                       ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA));
-            temp_a2_2->x2 =
-                (s16)(*(s16*)((u8*)D_800E0748 + off) + (*(s16*)((u8*)D_800E074C + off) - 2));
+            temp_a2_2->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                                  (*(s16*)((u8*)D_800E074C + off) - 2));
             g_FieldDebugRRect = temp_t0;
             temp_a2_2->y2 =
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
@@ -2453,9 +2494,10 @@ void FieldDebugRenderPage(s16 page) {
             if (temp_v0_2 != 0) {
                 var_s1_2 = temp_v0_2 - 1;
             } else {
-                var_s1_2 = ((*(s16*)((u8*)g_FieldDebugPageH + off) + 2) / 10) - 1;
+                var_s1_2 =
+                    ((*(s16*)((u8*)g_FieldDebugPageH + off) + 2) / 10) - 1;
             }
-                temp_a0_7 = &((
+            temp_a0_7 = &((
                 LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
             temp_a0_7->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
             temp_a1_5 = var_s1_2 * 0xA;
@@ -2467,7 +2509,8 @@ void FieldDebugRenderPage(s16 page) {
                 (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + temp_a1_5 + 0xA);
             temp_a0_7->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
                                   (*(s16*)((u8*)D_800E074C + off) - 2));
-            temp_a0_7->y2 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + temp_a1_5);
+            temp_a0_7->y2 =
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + temp_a1_5);
             temp_a0_7->r0 =
                 (s8)(((u8) * (g_FieldDebugPageR + off) >> 1) | 0x3F);
             ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
@@ -2490,12 +2533,12 @@ void FieldDebugRenderPage(s16 page) {
         temp_a0_9->x0 = (u16) * (D_800E0748 + off);
         temp_a0_9->y0 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
                               *(s16*)((u8*)g_FieldDebugPageH + off));
-        temp_a0_9->x1 =
-            (s16)(*(s16*)((u8*)D_800E0748 + off) + *(s16*)((u8*)D_800E074C + off));
+        temp_a0_9->x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                              *(s16*)((u8*)D_800E074C + off));
         temp_a0_9->y1 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
                               *(s16*)((u8*)g_FieldDebugPageH + off));
-        temp_a0_9->x2 =
-            (s16)(*(s16*)((u8*)D_800E0748 + off) + *(s16*)((u8*)D_800E074C + off));
+        temp_a0_9->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                              *(s16*)((u8*)D_800E074C + off));
         temp_a0_9->y2 = (u16) * (g_FieldDebugPageY + off);
         if (page == (u8)g_FieldDebugCurPage) {
             temp_a0_9->r0 = (u8)((u8) * (g_FieldDebugPageR + off) >> 1);
@@ -2528,8 +2571,8 @@ void FieldDebugRenderPage(s16 page) {
                               *(s16*)((u8*)g_FieldDebugPageH + off));
         temp_a3_5->x1 = (u16) * (D_800E0748 + off);
         temp_a3_5->y1 = (u16) * (g_FieldDebugPageY + off);
-        temp_a3_5->x2 =
-            (s16)(*(s16*)((u8*)D_800E0748 + off) + *(s16*)((u8*)D_800E074C + off));
+        temp_a3_5->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
+                              *(s16*)((u8*)D_800E074C + off));
         g_FieldDebugRRect = temp_t3;
         temp_a3_5->y2 = (u16) * (g_FieldDebugPageY + off);
         if (page == (u8)g_FieldDebugCurPage) {
