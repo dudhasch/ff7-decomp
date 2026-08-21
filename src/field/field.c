@@ -1160,7 +1160,7 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 34 changed / 13 inserted, down from 174/23. Ten levers got it there and
+ * 26 changed / 11 inserted, down from 174/23. Eleven levers got it there and
  * several of them contradict what this note used to say, so read the rejected
  * list at the bottom as history, not as evidence. Levers 8-10 in particular
  * deleted three levers that were each real when they were found.
@@ -1331,10 +1331,26 @@ extern s16 D_801144D0;
  * layer-4 entries, is 38/14 as `u8`, 42/14 as `s32`, and 38/14 assigned ahead
  * of `white` instead; writing `h` before `w` is 38/13. All against 34/13.
  *
- * So what is left is sched2 preferring the counter's three-insn memory chain
- * over the `--count` four-insn chain that ends in the loop branch, where the
- * target prefers the branch chain -- in every one of the four loops, and with
- * the same instructions on both sides. No source position reaches it.
+ * 11. a `do { } while (0);` as the last statement of the layer-3 and layer-4
+ *    inner loop bodies, after `pairs += 2`. 34/13 to **26/11**, and both
+ *    layers want it: layer 3 alone and layer 4 alone are both 30/12. Position
+ *    is the whole of it, as it was for the other members of this class --
+ *    before `pairs += 2` 36/13, before `sprite34Count++` 38/19, before
+ *    `sprt++` 36/19, doubled at the end 26/11 (identical, so the second one is
+ *    deleted), and the same barrier at the end of the layer-1 or layer-2
+ *    bodies 27/11 and 35/12 on top of this one, i.e. it does not generalise to
+ *    the loops that walk `sprt16`.
+ *
+ * What is left is sched2 preferring the counter's three-insn memory chain over
+ * the `--count` four-insn chain that ends in the loop branch, where the target
+ * prefers the branch chain -- in every one of the four loops, and with the
+ * same instructions on both sides. No source position reaches it. Lever 11
+ * changes the shape of that residue without removing it: with the barrier, the
+ * layer-3 and layer-4 chains are in a block of their own and come out as three
+ * `nop`s followed by the four instructions, where the target fills those three
+ * slots with the chain itself. Nine of the remaining rows are that, six are the
+ * layer-1/2 counter RMW landing before `addiu s7,s7,0xe` instead of after, and
+ * the rest are branch offsets that follow from the length.
  *
  * Deleted from this note along with the levers they described: the pad-size
  * grid (none 64, 0x8 77, 0x10 55, 0x18 through 0x30 all 77), the grid of which
@@ -1523,6 +1539,8 @@ layer3:
                     sprt++;
                     sprite34Count++;
                     pairs += 2;
+                    do {
+                    } while (0);
                 } while (--count != 0);
             }
         }
@@ -1567,6 +1585,8 @@ layer4:
                     sprt++;
                     sprite34Count++;
                     pairs += 2;
+                    do {
+                    } while (0);
                 } while (--count != 0);
                 do {
                 } while (0);
