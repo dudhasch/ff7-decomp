@@ -2239,7 +2239,403 @@ void FieldDebugRender(u_long* ot) {
     addPrims(ot, D_800E41C8[g_FieldDebugRb], &D_800E41C8[g_FieldDebugRb][6]);
 }
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
+extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
+
+/* 971 changed / 154 inserted at 1300 instructions against 1341, from a raw
+ * m2c seed that did not compile. Parked at the point where the *types* are
+ * settled and the codegen work has not started; that is the durable half and
+ * it is what the seed could not give.
+ *
+ * Three primitive arrays, all read straight off the field offsets rather than
+ * guessed at:
+ *
+ *   D_800E3B28  LINE_F3[]  stride 0x18, two buffers of 24 -- the page frames.
+ *               r0/g0/b0/code at 4..7 and three points at 8, 0xC and 0x10,
+ *               which is what `unk10`/`unk12` in the seed identify: a TILE
+ *               has no third point.
+ *   D_800E3FA8  TILE[]     stride 0x10, two buffers of 12 -- the page fills.
+ *               x0/y0 at 8/0xA, w/h at 0xC/0xE.
+ *   D_800E41C8  the ordering table the two link into, reached as a `u32*` for
+ *               the tag word. m2c writes the addPrim expansion out by hand
+ *               (`*p = (*p & 0xFF000000) | (*ot & 0xFFFFFF)`), and it is left
+ *               that way deliberately -- see AddBackgroundToRender's note on
+ *               why the two uses of the ot slot are independent knobs.
+ *
+ * They are declared `u8[]` in field_private.h because FieldDebugInitBuffers,
+ * which matches, walks them as bytes; so the types go on at the use site as
+ * casts rather than in the header.
+ *
+ * The seed also needed FieldDebugRenderString's prototype hoisted -- m2c
+ * emits `? FieldDebugRenderString(...)` for a callee defined later in the
+ * unit, which is a parse error, and gcc 2.6.3 keeps generating code after it.
+ *
+ * What is left is a whole function of codegen: the body is 41 instructions
+ * short, so at least one construct here is a different program, not a
+ * different schedule. The first thing to read is the frame -- `addiu
+ * sp,sp,-0x88` against our -0x58 -- which by CLAUDE.md's rule is 0x30 of
+ * locals this body does not declare. Start there, not at the diff.
+ *
+ * The page arrays it walks are now named (g_FieldDebugPageY/H/R/G/B/Row/
+ * HeadRow/Hidden), so the byte-offset addressing the debug functions all
+ * share is legible: `*(g_FieldDebugPageY + page * 0x17A)` is the y of one
+ * page, and the `page * 189` / `page * 378` strides in the setters are the
+ * same table seen as s16 and u8.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
+#else
+void FieldDebugRenderPage(s16 page) {
+    s16 temp_t0;
+    s16 temp_t3;
+    s16 temp_v0;
+    s16 temp_v0_2;
+    s16 temp_v1_2;
+    s16 var_a2;
+    s16 var_s1_2;
+    s16 var_s2;
+    s32 temp_a0;
+    s32 temp_a0_10;
+    s32 temp_a0_3;
+    s32 temp_a0_8;
+    s32 temp_a1;
+    s32 temp_a1_10;
+    s32 temp_a1_11;
+    s32 temp_a1_12;
+    s32 temp_a1_3;
+    s32 temp_a1_4;
+    s32 temp_a1_5;
+    s32 temp_a1_6;
+    s32 temp_a1_8;
+    s32 temp_a1_9;
+    s32 temp_a2;
+    s32 temp_a2_11;
+    s32 temp_a2_3;
+    s32 temp_a2_5;
+    s32 temp_a2_7;
+    s32 temp_a2_9;
+    s32 temp_a3_3;
+    s32 temp_a3_4;
+    s32 temp_a3_7;
+    s32 temp_t5;
+    s32 temp_t7;
+    s32 var_a1;
+    s32 var_s1;
+    s32* temp_a0_13;
+    s32* temp_a0_14;
+    s32* temp_a0_4;
+    s32* temp_a0_6;
+    s32* temp_a1_2;
+    s8 var_v0_2;
+    s8 var_v1_4;
+    u16 temp_v1;
+    u32 var_v0;
+    u32* temp_a0_11;
+    u32* temp_a1_7;
+    u32* temp_t0_2;
+    u8 var_v1_3;
+    TILE* temp_a0_12;
+    LINE_F3* temp_a0_2;
+    TILE* temp_a0_5;
+    LINE_F3* temp_a0_7;
+    LINE_F3* temp_a0_9;
+    TILE* temp_a2_10;
+    LINE_F3* temp_a2_2;
+    TILE* temp_a2_4;
+    LINE_F3* temp_a2_6;
+    LINE_F3* temp_a2_8;
+    LINE_F3* temp_a3;
+    LINE_F3* temp_a3_2;
+    LINE_F3* temp_a3_5;
+    LINE_F3* temp_a3_6;
+    u8* temp_a3_8;
+    TILE* var_v0_3;
+    TILE* var_v0_4;
+    LINE_F3* var_v1;
+    LINE_F3* var_v1_2;
+    if (g_FieldDebugRRect < 0x18) {
+        temp_a0 = page * 0x17A;
+        var_s1 = 0;
+        temp_v1 = *(g_FieldDebugPageY + temp_a0);
+        temp_v0 = temp_v1 + 2;
+        var_s2 = temp_v0;
+        var_a2 = temp_v0;
+        if (var_a2 < (((s16)temp_v1 + *(g_FieldDebugPageH + temp_a0)) - 8)) {
+            var_a1 = 0 << 0x10;
+            do {
+                var_s1 += 1;
+                temp_a1 = var_a1 >> 0x10;
+                FieldDebugRenderString(
+                    page, temp_a1,
+                    temp_a0 + g_FieldDebugRowText + (temp_a1 * 0xE),
+                    *(D_800E0748 + temp_a0) + 2, (s32)var_a2);
+                temp_v1_2 = var_s2 + 0xA;
+                var_s2 = temp_v1_2;
+                var_a2 = temp_v1_2;
+                var_a1 = var_s1 << 0x10;
+            } while (var_a2 < ((*(g_FieldDebugPageY + temp_a0) +
+                                *(g_FieldDebugPageH + temp_a0)) -
+                               8));
+        }
+        temp_t7 = page * 0x17A;
+        if (*(g_FieldDebugPageRow + temp_t7) != 0) {
+            temp_a0_2 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+            temp_a0_2->x0 = (s16)(*(D_800E0748 + temp_t7) + 2);
+            temp_a0_2->y0 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA) + 0xA);
+            temp_a0_2->x1 =
+                (s16)(*(D_800E0748 + temp_t7) + (*(D_800E074C + temp_t7) - 2));
+            temp_a0_2->y1 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA) + 0xA);
+            temp_a0_2->x2 =
+                (s16)(*(D_800E0748 + temp_t7) + (*(D_800E074C + temp_t7) - 2));
+            temp_t5 = page * 4;
+            temp_a0_2->y2 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA));
+            temp_a0_2->r0 = (s8)(*(g_FieldDebugPageR + temp_t7) | 0x3F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)((u8) * (g_FieldDebugPageG + temp_t7) >> 1);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .b0 = (u8) * (g_FieldDebugPageB + temp_t7);
+            temp_a2 = g_FieldDebugRb * 0x240;
+            temp_a0_3 = g_FieldDebugRRect * 0x18;
+            temp_a3 = &D_800E3B28[temp_a2 + temp_a0_3];
+            temp_a1_2 = (g_FieldDebugRb * 0x1C) + temp_t5 + D_800E41C8;
+            temp_t0 = g_FieldDebugRRect + 1;
+            *(s32*)temp_a3 =
+                (s32)((*(s32*)temp_a3 & 0xFF000000) | (*temp_a1_2 & 0xFFFFFF));
+            *temp_a1_2 = (*temp_a1_2 & 0xFF000000) |
+                         ((s32)(temp_a2 + (temp_a0_3 + D_800E3B28)) & 0xFFFFFF);
+            temp_a2_2 = &((LINE_F3*)D_800E3B28)[(temp_a2) / 0x18 + temp_t0];
+            temp_a2_2->x0 = (s16)(*(D_800E0748 + temp_t7) + 2);
+            temp_a2_2->y0 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA) + 0xA);
+            temp_a2_2->x1 = (s16)(*(D_800E0748 + temp_t7) + 2);
+            temp_a2_2->y1 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA));
+            temp_a2_2->x2 =
+                (s16)(*(D_800E0748 + temp_t7) + (*(D_800E074C + temp_t7) - 2));
+            g_FieldDebugRRect = temp_t0;
+            temp_a2_2->y2 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA));
+            temp_a2_2->r0 = (s8)((*(g_FieldDebugPageR + temp_t7) * 4) | 0x7F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)(*(g_FieldDebugPageG + temp_t7) | 0x3F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .b0 = (s8)((*(g_FieldDebugPageB + temp_t7) * 2) | 0x3F);
+            temp_a2_3 = g_FieldDebugRb * 0x240;
+            temp_a1_3 = g_FieldDebugRRect * 0x18;
+            temp_a3_2 = &D_800E3B28[temp_a2_3 + temp_a1_3];
+            temp_a0_4 = (g_FieldDebugRb * 0x1C) + temp_t5 + D_800E41C8;
+            *(s32*)temp_a3_2 = (s32)((*(s32*)temp_a3_2 & 0xFF000000) |
+                                     (*temp_a0_4 & 0xFFFFFF));
+            *temp_a0_4 =
+                (*temp_a0_4 & 0xFF000000) |
+                ((s32)(temp_a2_3 + (temp_a1_3 + D_800E3B28)) & 0xFFFFFF);
+            temp_a0_5 = &(
+                (TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+            temp_a0_5->x0 = (s16)(*(D_800E0748 + temp_t7) + 2);
+            g_FieldDebugRRect += 1;
+            temp_a0_5->y0 =
+                (s16)(*(g_FieldDebugPageY + temp_t7) +
+                      ((*(g_FieldDebugPageRow + temp_t7) - 1) * 0xA));
+            temp_a0_5->h = 0xA;
+            temp_a0_5->w = (s16)(*(D_800E074C + temp_t7) - 4);
+            temp_a0_5->r0 = (s8)((*(g_FieldDebugPageR + temp_t7) * 2) | 0x7F);
+            ((TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines].g0 =
+                (s8)((u8) * (g_FieldDebugPageG + temp_t7) >> 1);
+            ((TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines].b0 =
+                (s8)(*(g_FieldDebugPageB + temp_t7) | 0x3F);
+            temp_a1_4 = g_FieldDebugRb * 0xC0;
+            temp_a3_3 = g_FieldDebugRLines * 0x10;
+            temp_a2_4 = &D_800E3FA8[temp_a1_4 + temp_a3_3];
+            temp_a0_6 = (g_FieldDebugRb * 0x1C) + temp_t5 + D_800E41C8;
+            *(s32*)temp_a2_4 = (s32)((*(s32*)temp_a2_4 & 0xFF000000) |
+                                     (*temp_a0_6 & 0xFFFFFF));
+            g_FieldDebugRLines += 1;
+            *temp_a0_6 =
+                (*temp_a0_6 & 0xFF000000) |
+                ((s32)(temp_a1_4 + (temp_a3_3 + D_800E3FA8)) & 0xFFFFFF);
+        } else {
+            temp_v0_2 = *(g_FieldDebugPageHeadRow + temp_t7);
+            if (temp_v0_2 != 0) {
+                var_s1_2 = temp_v0_2 - 1;
+            } else {
+                var_s1_2 = ((*(g_FieldDebugPageH + temp_t7) + 2) / 10) - 1;
+            }
+            temp_a2_5 = page * 0x17A;
+            temp_a0_7 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+            temp_a0_7->x0 = (s16)(*(D_800E0748 + temp_a2_5) + 2);
+            temp_a1_5 = var_s1_2 * 0xA;
+            temp_a0_7->y0 =
+                (s16)(*(g_FieldDebugPageY + temp_a2_5) + temp_a1_5 + 0xA);
+            temp_a0_7->x1 = (s16)(*(D_800E0748 + temp_a2_5) +
+                                  (*(D_800E074C + temp_a2_5) - 2));
+            temp_a0_7->y1 =
+                (s16)(*(g_FieldDebugPageY + temp_a2_5) + temp_a1_5 + 0xA);
+            temp_a0_7->x2 = (s16)(*(D_800E0748 + temp_a2_5) +
+                                  (*(D_800E074C + temp_a2_5) - 2));
+            temp_a0_7->y2 = (s16)(*(g_FieldDebugPageY + temp_a2_5) + temp_a1_5);
+            temp_a0_7->r0 =
+                (s8)(((u8) * (g_FieldDebugPageR + temp_a2_5) >> 1) | 0x3F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)((*(g_FieldDebugPageG + temp_a2_5) * 4) | 0x7F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .b0 = (s8)(*(g_FieldDebugPageB + temp_a2_5) | 0x3F);
+            temp_a1_6 = g_FieldDebugRb * 0x240;
+            temp_a0_8 = g_FieldDebugRRect * 0x18;
+            temp_a2_6 = &D_800E3B28[temp_a1_6 + temp_a0_8];
+            temp_t0_2 = &(*D_800E41C8)[page + (g_FieldDebugRb * 7)];
+            *(s32*)temp_a2_6 = (s32)((*(s32*)temp_a2_6 & 0xFF000000) |
+                                     (*temp_t0_2 & 0xFFFFFF));
+            *temp_t0_2 =
+                (*temp_t0_2 & 0xFF000000) |
+                ((s32)(temp_a1_6 + (temp_a0_8 + D_800E3B28)) & 0xFFFFFF);
+            g_FieldDebugRRect += 1;
+        }
+        temp_a2_7 = page * 0x17A;
+        temp_a0_9 =
+            &((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+        temp_a0_9->x0 = (u16) * (D_800E0748 + temp_a2_7);
+        temp_a0_9->y0 = (s16)(*(g_FieldDebugPageY + temp_a2_7) +
+                              *(g_FieldDebugPageH + temp_a2_7));
+        temp_a0_9->x1 =
+            (s16)(*(D_800E0748 + temp_a2_7) + *(D_800E074C + temp_a2_7));
+        temp_a0_9->y1 = (s16)(*(g_FieldDebugPageY + temp_a2_7) +
+                              *(g_FieldDebugPageH + temp_a2_7));
+        temp_a0_9->x2 =
+            (s16)(*(D_800E0748 + temp_a2_7) + *(D_800E074C + temp_a2_7));
+        temp_a0_9->y2 = (u16) * (g_FieldDebugPageY + temp_a2_7);
+        if (page == (u8)g_FieldDebugCurPage) {
+            temp_a0_9->r0 = (u8)((u8) * (g_FieldDebugPageR + temp_a2_7) >> 1);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)((u8) * (g_FieldDebugPageG + temp_a2_7) >> 1);
+            var_v1 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+            var_v0 = (u8) * (g_FieldDebugPageB + temp_a2_7) >> 1;
+        } else {
+            temp_a0_9->r0 = (u8) * (g_FieldDebugPageR + temp_a2_7);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (u8) * (g_FieldDebugPageG + temp_a2_7);
+            var_v0 = (u32) * (g_FieldDebugPageB + temp_a2_7);
+            var_v1 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+        }
+        var_v1->b0 = (s8)var_v0;
+        temp_a3_4 = g_FieldDebugRb * 0x240;
+        temp_a0_10 = g_FieldDebugRRect * 0x18;
+        temp_a2_8 = &D_800E3B28[temp_a3_4 + temp_a0_10];
+        temp_a1_7 = &(*D_800E41C8)[page + (g_FieldDebugRb * 7)];
+        temp_t3 = g_FieldDebugRRect + 1;
+        *(s32*)temp_a2_8 =
+            (s32)((*(s32*)temp_a2_8 & 0xFF000000) | (*temp_a1_7 & 0xFFFFFF));
+        *temp_a1_7 = (*temp_a1_7 & 0xFF000000) |
+                     ((s32)(temp_a3_4 + (temp_a0_10 + D_800E3B28)) & 0xFFFFFF);
+        temp_a1_8 = page * 0x17A;
+        temp_a3_5 = &((LINE_F3*)D_800E3B28)[(temp_a3_4) / 0x18 + temp_t3];
+        temp_a3_5->x0 = (u16) * (D_800E0748 + temp_a1_8);
+        temp_a3_5->y0 = (s16)(*(g_FieldDebugPageY + temp_a1_8) +
+                              *(g_FieldDebugPageH + temp_a1_8));
+        temp_a3_5->x1 = (u16) * (D_800E0748 + temp_a1_8);
+        temp_a3_5->y1 = (u16) * (g_FieldDebugPageY + temp_a1_8);
+        temp_a3_5->x2 =
+            (s16)(*(D_800E0748 + temp_a1_8) + *(D_800E074C + temp_a1_8));
+        g_FieldDebugRRect = temp_t3;
+        temp_a3_5->y2 = (u16) * (g_FieldDebugPageY + temp_a1_8);
+        if (page == (u8)g_FieldDebugCurPage) {
+            temp_a3_5->r0 = (s8)((*(g_FieldDebugPageR + temp_a1_8) * 4) | 0x7F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)((*(g_FieldDebugPageG + temp_a1_8) * 4) | 0x7F);
+            var_v1_2 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+            var_v0_2 = (*(g_FieldDebugPageB + temp_a1_8) * 4) | 0x7F;
+        } else {
+            temp_a3_5->r0 = (s8)((*(g_FieldDebugPageR + temp_a1_8) * 2) | 0x3F);
+            ((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]
+                .g0 = (s8)((*(g_FieldDebugPageG + temp_a1_8) * 2) | 0x3F);
+            var_v1_2 = &((
+                LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect];
+            var_v0_2 = (*(g_FieldDebugPageB + temp_a1_8) * 2) | 0x3F;
+        }
+        var_v1_2->b0 = var_v0_2;
+        temp_a2_9 = g_FieldDebugRb * 0x240;
+        temp_a1_9 = g_FieldDebugRRect * 0x18;
+        temp_a3_6 = &D_800E3B28[temp_a2_9 + temp_a1_9];
+        temp_a0_11 = &(*D_800E41C8)[page + (g_FieldDebugRb * 7)];
+        *(s32*)temp_a3_6 =
+            (s32)((*(s32*)temp_a3_6 & 0xFF000000) | (*temp_a0_11 & 0xFFFFFF));
+        *temp_a0_11 = (*temp_a0_11 & 0xFF000000) |
+                      ((s32)(temp_a2_9 + (temp_a1_9 + D_800E3B28)) & 0xFFFFFF);
+        temp_a1_10 = page * 0x17A;
+        temp_a0_12 =
+            &((TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+        temp_a0_12->x0 = (u16) * (D_800E0748 + temp_a1_10);
+        temp_a0_12->y0 = (u16) * (g_FieldDebugPageY + temp_a1_10);
+        temp_a0_12->w = (u16) * (D_800E074C + temp_a1_10);
+        g_FieldDebugRRect += 1;
+        temp_a0_12->h = (u16) * (g_FieldDebugPageH + temp_a1_10);
+        if (page == (u8)g_FieldDebugCurPage) {
+            temp_a0_12->r0 = (u8)(*(g_FieldDebugPageR + temp_a1_10) * 2);
+            ((TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines].g0 =
+                (s8)(*(g_FieldDebugPageG + temp_a1_10) * 2);
+            var_v0_3 = &(
+                (TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+            var_v1_3 = *(g_FieldDebugPageB + temp_a1_10) * 2;
+        } else {
+            temp_a0_12->r0 = (u8) * (g_FieldDebugPageR + temp_a1_10);
+            ((TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines].g0 =
+                (u8) * (g_FieldDebugPageG + temp_a1_10);
+            var_v1_3 = *(g_FieldDebugPageB + temp_a1_10);
+            var_v0_3 = &(
+                (TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+        }
+        var_v0_3->b0 = var_v1_3;
+        switch ((s16)g_FieldDebugTransp) { // irregular
+        case 1:
+            var_v0_4 = &(
+                (TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+            var_v1_4 = var_v0_4->code | 2;
+        block_24:
+            var_v0_4->code = var_v1_4;
+            temp_a1_11 = g_FieldDebugRb * 0xC0;
+            temp_a3_7 = g_FieldDebugRLines * 0x10;
+            temp_a2_10 = &D_800E3FA8[temp_a1_11 + temp_a3_7];
+            temp_a0_13 = (g_FieldDebugRb * 0x1C) +
+                         ((s32)(page << 0x10) >> 0xE) + D_800E41C8;
+            *(s32*)temp_a2_10 = (s32)((*(s32*)temp_a2_10 & 0xFF000000) |
+                                      (*temp_a0_13 & 0xFFFFFF));
+            g_FieldDebugRLines += 1;
+            *temp_a0_13 =
+                (*temp_a0_13 & 0xFF000000) |
+                ((s32)(temp_a1_11 + (temp_a3_7 + D_800E3FA8)) & 0xFFFFFF);
+            break;
+        case 2:
+            var_v0_4 = &(
+                (TILE*)D_800E3FA8)[(g_FieldDebugRb * 12) + g_FieldDebugRLines];
+            var_v1_4 = var_v0_4->code & 0xFD;
+            goto block_24;
+        }
+        temp_a2_11 = g_FieldDebugRb * 0x48;
+        temp_a1_12 = g_FieldDebugRDm * 0xC;
+        temp_a3_8 = &D_800E4128[temp_a2_11 + temp_a1_12];
+        temp_a0_14 =
+            (g_FieldDebugRb * 0x1C) + ((s32)(page << 0x10) >> 0xE) + D_800E41C8;
+        *temp_a3_8 =
+            (s32)((*temp_a3_8 & 0xFF000000) | (*temp_a0_14 & 0xFFFFFF));
+        g_FieldDebugRDm += 1;
+        *temp_a0_14 =
+            (*temp_a0_14 & 0xFF000000) |
+            ((s32)(temp_a2_11 + (temp_a1_12 + D_800E4128)) & 0xFFFFFF);
+    }
+}
+#endif
 
 extern u8 D_800E1036[];
 
