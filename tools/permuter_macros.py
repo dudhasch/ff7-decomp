@@ -1374,16 +1374,26 @@ def cmd_align(args: argparse.Namespace) -> int:
             continue
         idx = off // size
         before = new
-        new = re.sub(
-            r"\b" + re.escape(base) + r"\s*\[\s*([^][]*?)\s*\+\s*" + str(idx) + r"\s*\]",
-            rf"(&{sym})[\1]",
-            new,
+        # Only rewrite *expressions*. `extern volatile u32 D_8009AC3C[1];`
+        # holds the string `D_8009AC3C[1]` as an array bound, and rewriting it
+        # to `extern volatile u32 (&D_8009AC40)[0];` leaves the base symbol
+        # undeclared -- gcc 2.6.3 folds it to 0 and the whole search then runs
+        # against a program that is not the one being matched. Declarations in
+        # an import.py scratch are all file-scope externs, so skipping those
+        # lines is enough; permuter_scratch.sh's diagnostics check catches the
+        # rest.
+        plus_pat = (
+            r"\b" + re.escape(base)
+            + r"\s*\[\s*([^][]*?)\s*\+\s*" + str(idx) + r"\s*\]"
         )
-        new = re.sub(
-            r"\b" + re.escape(base) + r"\s*\[\s*" + str(idx) + r"\s*\]",
-            f"(&{sym})[0]",
-            new,
-        )
+        flat_pat = r"\b" + re.escape(base) + r"\s*\[\s*" + str(idx) + r"\s*\]"
+        out_lines = []
+        for line in new.split("\n"):
+            if not re.match(r"\s*(extern|static)\b", line):
+                line = re.sub(plus_pat, rf"(&{sym})[\1]", line)
+                line = re.sub(flat_pat, f"(&{sym})[0]", line)
+            out_lines.append(line)
+        new = "\n".join(out_lines)
         if new != before:
             interior_decls.append(f"extern {elem} {sym};")
             print(f"interior {base}[...+{idx}] -> (&{sym})[...]")
