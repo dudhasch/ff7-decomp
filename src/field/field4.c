@@ -428,64 +428,42 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
  * of its vertex normal in the byte the GPU would read as `code`, so each is
  * fed to NormalColorColSingle and the result written back over the same three
  * bytes. The eight groups differ only in the primitive's stride and how many
- * colour words it carries. Bit 1 of the part's data header marks it lit;
- * `redo` forces the pass to run again.
+ * colour words it carries. Bit 1 of the part's data header marks it lit, so a
+ * second call with redo == 0 returns immediately.
  *
- * The first function in the repo to use inline GTE ops -- gte_ldrgb, gte_nccs
- * and gte_strgb were added to include/psxsdk/libgte.h for it, in the style of
- * the ones already there. Three findings are folded in and each has a CLAUDE.md
- * bullet:
- *   - the normal table's base is a `u8*` scaled by hand, not an `SVECTOR*`
- *     indexed with []; as a typed pointer gcc rebuilds its %hi/%lo in all eight
- *     loop preheaders instead of keeping one register for the function;
- *   - `c = poly` snapshots the base the inner loop indexes off, which is what
- *     the target's `move t3,t0` at each inner preheader is;
- *   - the per-polygon bump lives in the `for` increment, so `i++` is emitted
- *     ahead of `poly += stride` as the target has it.
+ * Three things about this one are not guessable and are what the matching
+ * body needed, in the order they were worth instructions:
  *
- * Instruction for instruction identical bar one register-allocation decision:
- * the target puts the loop count in t2 and the snapshot in t3, this build the
- * other way round, which is every one of the 32 remaining rows. The snapshot
- * wins because it is referenced at loop depth 2 and the count at depth 1, and
- * nothing that changes their reference counts moves it -- measured: the count
- * inlined into the loop condition (77 rows), a u8 count (77), eight separate
- * count variables (34, gcc coalesces them), and the snapshot narrowed to the
- * gte_ldrgb address alone or widened to all eight loops (34 each). The other
- * two rows are the prologue: the target fills the delay slot of the part-data
- * load with the normal table's address, this build with a nop and the address
- * after; neither statement order reproduces it. A permuter candidate.
-
+ *   - The inner loops index a *snapshot* of the polygon cursor, not the
+ *     cursor itself: `c = poly;` at the top of the outer body is where the
+ *     target's `move <reg>,<reg>` at each inner-loop preheader comes from,
+ *     and it was worth 44 rows.
+ *   - **The first loop needs its own snapshot variable.** With one `c`
+ *     shared by all four inner loops the `move`s are all there but `c` and
+ *     `count` hold each other's register ($t2/$t3) and every row in the diff
+ *     is that swap. Giving loop 1 a `c1` of its own drops `c`'s reference
+ *     count from four loops to three, `count` wins $t2, and the function
+ *     matches. Removing the snapshot from loop 1 altogether -- which is what
+ *     decomp-permuter found, at 23 rows against 32 -- fixes the same swap and
+ *     loses the `move`, so it is one instruction short; the two facts
+ *     together are the answer. Declaration order of `c1` against `c` is
+ *     inert, as usual.
+ *   - The scratchpad pointer is assigned after `normals` and before the
+ *     early-return guard. The target materialises `lui t1,0x1F80` in that
+ *     branch's delay slot, so it is the last thing the entry block computes;
+ *     first (34/2), between `data` and `normals` (34/2) and after the guard
+ *     (38/2) are all worse than here (32/0).
  *
- * 34 rows / 2 insertions -> 32 / 0, on where the scratchpad pointer is set
- * up. The target materialises `lui t1,0x1F80` in the *delay slot* of the
- * early-return branch, i.e. it is the last thing the entry block computes;
- * assigned first, as the seed had it, it goes ahead of the `lw` of
- * part->data and the dependent `lw v0,0(v1)` then pays a nop. Four
- * placements measured: after `normals` and before the `if` is 32/0, first
- * is 34/2, between `data` and `normals` 34/2, and after the `if` -- which is
- * where the delay slot suggests it belongs -- is 38/2.
- *
- * What is left is one register swap and nothing else: `count` and `c` hold
- * each other's register ($t2/$t3), and every one of the 32 rows is that.
- * Declaration order does not reach it -- all five orderings of the nine
- * locals, including `c` first in the function and `c` either side of
- * `count`, measure byte-identical, so the standing rule holds and the
- * same-mode-live-together exception does not apply here. The length is
- * exact and there are no insertions, which makes this the cleanest
- * perm_ins_block target in the unit: what is needed is a dead conditional
- * that changes one of the two allocnos' rank without emitting anything.
- * Its sibling KawaiSetVertexColorFromLighting above shares the GTE idiom
- * and the polygon strides exactly, so a find here should transfer. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE(
-    "asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
-#else
+ * The sibling KawaiSetVertexColorFromLighting above shares the GTE idiom and
+ * the polygon strides exactly and is still parked; it wants the same two
+ * cursors, and this function is the worked example. */
 void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
     u8* scratch;
     u8* normals;
     u8* data;
     u8* poly;
     u8* c;
+    u8* c1;
     u32 counts;
     u32 count;
     u32 i;
@@ -503,15 +481,15 @@ void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
 
     count = counts & 0xFF;
     for (i = 0; i < count; i++, poly += 0x18) {
-        c = poly;
+        c1 = poly;
         for (k = 0; k < 4; k++) {
-            gte_ldv0(normals + c[k * 4 + 7] * 8);
-            gte_ldrgb(&c[k * 4 + 4]);
+            gte_ldv0(normals + c1[k * 4 + 7] * 8);
+            gte_ldrgb(&c1[k * 4 + 4]);
             gte_nccs();
             gte_strgb(scratch);
-            c[k * 4 + 4] = scratch[0];
-            c[k * 4 + 5] = scratch[1];
-            c[k * 4 + 6] = scratch[2];
+            c1[k * 4 + 4] = scratch[0];
+            c1[k * 4 + 5] = scratch[1];
+            c1[k * 4 + 6] = scratch[2];
         }
     }
 
@@ -605,7 +583,6 @@ void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
 
     *(u32*)part->data |= 2;
 }
-#endif
 
 /* Set the semi-transparency/shade bits of every packet of every part of one
  * model. Walks each part's double-buffered packet area (the two ordering-table
