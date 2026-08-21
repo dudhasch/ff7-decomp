@@ -1715,6 +1715,34 @@ a near-miss, in rough order of frequency:
   nothing. Read the scaled index instead: `sll v0,v1,0x3 / addu v0,v0,v1 /
   sll v0,v0,0x2` is ×36, `addiu <r>,<r>,0x14` on a walked cursor is a 0x14
   stride, and either one types the record outright.
+* **Two levers that each fit one number can lock each other in place, and the
+  only way out is to delete both at once.** `FieldBackgroundInitPackets` spent
+  three sessions on a stack layout with three slots, of which the target had
+  `0x18` / `0x20` / `0x28`. A `u8 unusedLocals[0x10];` bought the target's frame
+  size, and a never-dereferenced `&sprite34Count` moved that counter into the
+  declared-local pool where it landed at `0x28` — the target's offset. Both were
+  real: each was measured against every alternative in its own dimension (seven
+  pad sizes, every subset of counters address-taken, the two grids crossed), and
+  the note concluded that the remaining two slots were "not reachable by taking
+  more addresses". They were not reachable *because of* the two levers. Deleted
+  together, the three slots come out `0x18` / `0x20` / `0x28` in the target's own
+  order, the frame is `0x10` short, and the missing `0x10` turns out to be two
+  more reload slots that appear only once a *third* thing is fixed — so the
+  cluster the note called two independent problems was one cause, invisible from
+  either end. The tell is a park note whose dimension has been swept exhaustively
+  and whose residue did not move: a fully-swept dimension that still misses means
+  the sweep was run with something else held wrong. Delete the levers, take the
+  regression, and read the diff of the *plain* body.
+* **A loop guard that re-reads the array gives `lh` plus a `move`; a guard on
+  the local gives `lhu` into the local's register.** `count = p[2]; if (count
+  != 0)` lets combine see the value used only for a zero test and a decrement,
+  so it narrows the load and puts it straight in the counter's register.
+  `count = p[2]; if (p[2] != 0)` hands the guard its own tree, which promotes
+  the `s16` to `int` and needs the sign extension, so the load is `lh` into a
+  temporary and cse rewrites the assignment as `move <counter>,<temp>`. Same
+  two instructions either way; the target's is one load and one copy, ours was
+  one load. Order is a third knob: the assignment ahead of the neighbouring
+  store measures 66/9, moved inside the arm 44/12, and between the two 40/10.
 * **A park note is not evidence.** Two of this repo's notes recorded diagnoses
   that were simply wrong and cost more than the functions did:
   `FieldModelStructInit`'s said "-0x38 frame, six callee-saved registers,
