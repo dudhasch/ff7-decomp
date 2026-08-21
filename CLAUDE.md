@@ -205,7 +205,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Six ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Seven ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -1634,6 +1634,45 @@ a near-miss, in rough order of frequency:
   residue is scheduling: +8/+0xA are x0,y0, +0xC/+0xD u0,v0, +0x10/+0x12 x1,y1,
   and so on. The same shape — a wall of `/*?*/` externs at a fixed stride —
   marks every remaining m2c seed worth rewriting.
+* **A pointer into one member, spelled as an offset from a *different* member
+  of the same object, is derived for free; through its own symbol it costs a
+  whole `%hi`/`%lo` pair.** The companion to the neighbouring-object idiom
+  above, applied to two members rather than two objects. `FieldMain` keeps a
+  `volatile u8*` on `FieldState.eventCmd` (symbol+1) and also stores through
+  `&FieldState.fadeType` (symbol+0x4C); written as `ev = &D_8009ABF4.eventCmd`
+  the two are unrelated to cse, because the fade block is reached through its
+  own `extern` (`D_8009AC40`) and the pointer through the struct — different
+  `symbol_ref`s, two independent address materialisations. Spell the pre-loop
+  store as `D_8009ABF4.fadeType = 0;` and the pointer as
+  `(volatile u8*)&D_8009ABF4.fadeType - 0x4B;` and both sides name
+  `D_8009ABF4`, `use_related_value` relates them, and the pointer comes out as
+  `addiu <ev>,<fade>,-0x4b` — which is the form the target has. Worth a row
+  and the whole address form; the tell is your build emitting two `lui`/`addiu`
+  pairs where the target emits one plus an `addiu`.
+* **A constant the target materialises into a callee-saved register at a goto
+  walk's entry is a named local, and the walk then needs its own back-edge
+  label.** `ori $s1,$zero,0x80` sitting alone in the block a `goto` falls into,
+  with the walk's own back edge targeting the *next* label, is not cse being
+  clever: it is `white = 0x80;` written between the walk's entry label and its
+  test. Written as literals at the six `r0`/`g0`/`b0` stores gcc
+  rematerialises the constant inside the loop. `FieldBackgroundInitPackets`
+  needs one at the layer-3 entry and another at the layer-4 entry, which is
+  what forces `layer4:` to split into `layer4:` / `layer4run:` — the back edge
+  must skip the assignment. The local's type is inert (u8, s16 and s32 all
+  measure the same). Do not generalise it to every walk: the same hoist in
+  layer 1 costs 51 rows.
+* **`n_refs` in `global_alloc` is weighted by loop depth, and the priority has
+  a `- live_length` term.** The ranking is
+  `(floor_log2(n_refs) * n_refs - live_length) / live_length * size`, and
+  flow's `REG_N_REFS += loop_depth` means a reference inside a `do`/`while`
+  counts twice. Both halves matter when two values are competing for the last
+  callee-saved register: in `FieldBackgroundInitPackets` a counter incremented
+  inside two inner loops beats a pointer bumped four times at depth 0, and
+  moving one of those increments out of its loop — `spriteCount += count;`
+  ahead of the `do`, identical value and identical *static* reference count —
+  flips the whole allocation. Use that as a *probe*, not a fix: read the
+  target for where the increment really is before keeping the change.
+
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -1656,7 +1695,7 @@ once unparked in the same build. Before spending a budget on any member of a
 clone family — the `Opcode*` palette ops, the `FieldEvent*` accessors, the
 `Kawai*` handlers — unpark the whole family and re-measure.
 
-#### Six ways a clean-looking diff lies
+#### Seven ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -1732,6 +1771,22 @@ one small step from done. It is not: `make build` fails the overlay's SHA-1,
 because every later `.rodata` offset in the unit moved. When the only rows left
 are `%lo` of a string, check the `.s`'s `glabel` order before anything else.
 `OpcodeFuncTurnr` cost a full red build to learn this.
+
+**A file-scope constant that is really the parked function's own blob.** A
+function with a local aggregate initialiser emits that aggregate into the
+unit's `.rodata`; while the function is pinned it emits nothing, so the same
+bytes have to exist as a named object for the `.s` to reference. `field.c`
+carries `const u32 D_800A0000[] = {0, 0x01D801E0};` for exactly that reason —
+it is `FieldMain`'s `RECT clip = {0, 0, 480, 472}`. Unpark the function
+without deleting the object and the unit emits the RECT **twice**:
+`jtbl_800A0008` moves from `.rodata+0x8` to `+0x10`, every jump-table entry and
+every branch target after it reads wrong, and `checkfn.py` renders the whole
+thing as ordinary rows — 8 of `FieldMain`'s 84. `make build` fails the
+overlay's SHA-1 and nothing points at the object. Before unparking any
+function with a local aggregate initialiser, grep the unit's file-scope
+`const` objects for the same bytes; `od -A d -t x4` on the initialiser is the
+check. The same applies in reverse: re-parking one means putting the object
+back.
 
 #### Sweeping many variants at once
 

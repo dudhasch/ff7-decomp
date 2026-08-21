@@ -320,25 +320,51 @@ extern s16 D_80071E3C;
  *   - the switch selector goes into a u8 local, not a u32 one -- the u32 form
  *     loses the andi.
  *
- * The residue is five clusters, all scheduling or address-form:
- *   1. D_8009AC40[0] = 0, D_8009AC1A[0] = 2 and the D_8009AC3C read: the
- *      target materialises the whole address into a general register
- *      (lui/addiu/op 0(reg)); every spelling tried here gives the two-
- *      instruction $at macro. Measured and rejected: scalar extern, one-
- *      element array, volatile on each of the three, and a volatile store
- *      through a cast. The one place the register form does appear --
- *      D_8009A000 -- has its address used twice, so cse hoists it; these
- *      three are used once. 6 rows.
- *   2. the fade block stores fadeType before fadeSpeed in the target and
- *      after it here, with the rest of the block identical. 4 rows.
- *   3. `li a0,-1` is hoisted above the rain if/else in the target and lands
+ *   - the pre-loop fadeType store is `D_8009ABF4.fadeType = 0`, not
+ *     `D_8009AC40[0] = 0`. Same address, same halfword, one row apart: the
+ *     member shares a symbol_ref with the fade block inside the loop, so cse
+ *     relates the two and `ev` comes out as `addiu s1,<reg>,-0x4b` off the
+ *     fade base, which is the form the target has. Through its own symbol the
+ *     two are unrelated and `ev` needs its own %hi/%lo pair.
+ *
+ * UNPARKING THIS FUNCTION MUST ALSO DELETE `const u32 D_800A0000[]` AT THE
+ * TOP OF THIS UNIT. It is the same 8-byte blob the local `RECT clip`
+ * initialiser emits -- {0, 0x01D801E0} is {0, 0, 480, 472} -- and it exists
+ * only because the pinned FieldMain.s references it by name. Left in place
+ * alongside the local initialiser the unit emits the RECT twice, jtbl_800A0008
+ * lands at .rodata+0x10 instead of +0x8, and every jump-table entry and every
+ * branch target after it reads wrong: 7 rows that look like ordinary noise
+ * and a red `make build`. This alone was 8 of the 84 rows this note used to
+ * quote. Nothing else in the overlay names D_800A0000.
+ *
+ * The residue is 76 rows / 5 insertions with that object removed, in four
+ * clusters:
+ *   1. the pre-loop block. The target builds &D_8009AC40 into a caller-saved
+ *      register, stores through it, and derives `ev` from the *loop's* copy
+ *      of that address at the preheader (`addiu s1,s3,-0x4b`, 0xb8 bytes
+ *      later); here `ev` is derived at the pre-loop store, one instruction
+ *      early. For gcc to hoist it, `ev` has to be assigned inside the loop --
+ *      and every placement measured is much worse: loop top 114/12, after the
+ *      fade `if` 87/7, before its first use 89/7. 2 rows and 1 insertion.
+ *   2. D_8009AC1A[0] = 2 and the D_8009AC3C read: the target materialises the
+ *      address into a general register (lui/addiu/op 0(reg)), here both give
+ *      the two-instruction $at macro. Spelling them as the struct members they
+ *      are -- movieCommandState (+0x26) and nextFieldMusic (+0x48) -- is
+ *      codegen-identical, so this is not the symbol_ref lever that fixed the
+ *      fadeType store. Also measured and rejected: scalar extern, one-element
+ *      array, volatile on each, and a volatile store through a cast. 4 rows.
+ *   3. the fade block stores fadeType before fadeSpeed in the target and
+ *      after it here. Both are struct stores at distinct constant offsets, so
+ *      sched2 is free to swap them; it is not source order. 4 rows.
+ *   4. the tail reads D_80071A5C with `lh` and eventCmdParam late, extending
+ *      it in place; here eventCmdParam is loaded first into its own register
+ *      and D_80071A5C comes out `lhu` plus a sll/sra pair. Everything on this
+ *      dimension has now been measured against the corrected base and every
+ *      one is worse: s32 temp 76/7, no temp 76/7, temp after the store 76/7,
+ *      dropping the fieldId local 76/6, both 76/6. 10 rows.
+ *   5. `li a0,-1` is hoisted above the rain if/else in the target and lands
  *      after the loop's two inits here. A named local for the fill value was
  *      measured and changes nothing. 3 rows.
- *   4. the tail reads D_80071A5C early and eventCmdParam late; here it is the
- *      other way round. Reading g_CurrentFieldIndex into a local first, and
- *      s32 vs s16 for the D_80071A5C temporary, were both measured and are
- *      worse. 6 rows.
- *   5. one delay slot at the cross-jump into the shared fade-reset tail.
  * The remaining rows are branch-target addresses, which follow from the
  * length difference and cost nothing once the clusters above are closed. */
 #ifndef NON_MATCHINGS
@@ -399,8 +425,8 @@ void FieldMain(void) {
     D_8011409C[0].dtd = 1;
     D_8011409C[1].dtd = 1;
     func_800128B8();
-    ev = &D_8009ABF4.eventCmd;
-    D_8009AC40[0] = 0;
+    D_8009ABF4.fadeType = 0;
+    ev = (volatile u8*)&D_8009ABF4.fadeType - 0x4B;
     if (D_800965EC != 1 && D_800965EC != 2 && D_800965EC != 3 &&
         D_800965EC != 5 && D_800965EC != 0xD) {
         ClearImage(&clip, 0, 0, 0);
@@ -989,36 +1015,61 @@ extern s16 D_801144D0;
  * shifts the whole register allocation; a backward goto is not a loop gcc
  * recognises, so the test stays at the top and is reached by a plain `j`.
  *
- * 176 changed / 25 inserted. Read the two numbers separately, because an
+ * 174 changed / 23 inserted. Read the two numbers separately, because an
  * earlier version of this note quoted only the insertions and made the
- * function look 25 rows from done: the 25 are one register-allocation decision
- * repeated, and the 176 are its consequences. The target keeps `modes` in $s8
- * and spills both sprite counters (0x20 and 0x28); this build keeps
- * spriteCount in $s8 and spills `modes`, so each of the four `modes++` costs
- * an lw/addiu/sw where the target pays one addiu -- that is the 25 -- and
- * every register downstream renames.
+ * function look 25 rows from done: the insertions are one register-allocation
+ * decision repeated, and the rest are its consequences. The target keeps
+ * `modes` in $s8 and spills both sprite counters (0x20(sp) and 0x28(sp));
+ * this build keeps spriteCount in $s8 and spills `modes`, so each of the four
+ * `modes++` costs an lw/addiu/sw where the target pays one addiu, and every
+ * register downstream renames.
  *
- * gcc 2.6.3's global_alloc ranks by `log2(n_refs) * n_refs / live_length` with
- * **no** frequency weighting (that came later), so the inner do-while loops do
- * not help the counters and the four backward-goto walks do not hurt `modes`.
- * What decides it is the live range: `spriteCount` dies at
- * `D_801144C8 = spriteCount;` at the top of layer 3, well before `modes`'
- * last use in layer 4, and the shorter range wins. Nothing tried lengthens it.
+ * `white` is not a tidiness variable. The target materialises 0x80 into a
+ * callee-saved register once at the layer-3 entry and again at the layer-4
+ * entry (`ori $s1,$zero,0x80` at both, the second one alone in its own block),
+ * and reads it for all six r0/g0/b0 stores in those two walks; written as
+ * literals gcc rematerialises it inside the loops. That is why layer 4 needs
+ * the extra `layer4run:` label -- the walk's back edge targets the run test,
+ * not the assignment, so the constant is set once on entry and not per
+ * iteration. Worth 2 rows and 2 insertions, and the type is inert (u8, s16
+ * and s32 all measure 174/23). Layer 1 must keep its literals: hoisting a
+ * `white` there as well costs 51 rows.
  *
- * The frame is now right: `u8 unusedLocals[0x10];` reserves the 0x10 the
- * target carries and this C does not create, and is worth 22 rows on its own
- * (198 -> 176). The size is exact -- 0x8 and 0x18 both revert to 198.
+ * The allocation decision, measured rather than reasoned about. gcc 2.6.3's
+ * global_alloc ranks allocnos by `(log2(n_refs) * n_refs - live_length) /
+ * live_length`, and `n_refs` *is* weighted by loop depth -- an earlier version
+ * of this note asserted the opposite. The evidence is direct: moving layer 2's
+ * `spriteCount++` out of its do-while as `spriteCount += count;` before it
+ * (identical value, identical static reference count, one less loop level)
+ * flips the whole allocation -- `modes` takes $s8, both counters spill, and
+ * the spill slots come out in the target's own order. Three shapes reach that
+ * flip and all three are wrong, because the target increments spriteCount
+ * inside *both* loops (the sh 0x20(sp) triples at .s lines 96 and 186):
+ *   - layer 2's increment hoisted:            152/23
+ *   - layer 1's increment hoisted:            162/20
+ *   - `D_801144C8 = spriteCount` moved to the
+ *     layer-4 exit (lengthens the live range): 164/28, but the store then
+ *     lands in the wrong block -- the target stores it at the layer-3 entry,
+ *     from the stack slot.
+ * So the real lever has to shed about four loop-weighted references from
+ * spriteCount, or add about four to `modes`, without moving either increment
+ * out of its loop. Nothing found yet does that. This is the whole function.
+ *
+ * The frame: `u8 unusedLocals[0x10];` reserves 0x10 the target carries and
+ * this C does not create, and is worth 22 rows on its own. The size is exact
+ * and was re-measured against the flipped shape, where the spill offsets are
+ * visible: none 167, 0x8 174, **0x10 152**, 0x18/0x20/0x28/0x30 all 174.
  *
  * The goto walks are load-bearing and the numbers that used to sit here were
  * insertions, not rows: as `while` loops the body measures 191/43, as
- * `for (;;) { if (...) break; }` 177/36, against 176/25 here, because
- * duplicate_loop_exit_test copies the 0x7FFF test to the bottom of each of the
- * four walks. A backward goto is not a loop gcc recognises, so the test stays
- * at the top and is reached by a plain `j`. Also measured and rejected:
- * `SetDrawMode(modes++, ...)` at all four sites (174/29 -- two fewer changed
- * rows for four more insertions, so worse); `s32`/`s16` counters and an `s32`
- * spriteCount (no change); declaring the counters ahead of the pointers (no
- * change); assigning `run` after tile1/tpages (no change).
+ * `for (;;) { if (...) break; }` 177/36, because duplicate_loop_exit_test
+ * copies the 0x7FFF test to the bottom of each of the four walks. A backward
+ * goto is not a loop gcc recognises, so the test stays at the top and is
+ * reached by a plain `j`. Also measured and rejected:
+ * `SetDrawMode(modes++, ...)` at all four sites (172/27); `s32`/`s16`
+ * counters and `u32` counters (no change or worse); declaring the counters
+ * ahead of the pointers (no change); `s32 count` (216/25); `white` declared
+ * ahead of `count` (no change); a `white` at the layer-2 entry (no change).
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldBackgroundInitPackets);
@@ -1031,6 +1082,7 @@ void FieldBackgroundInitPackets(
     u16* tpages;
     s16* run;
     s16 count;
+    u8 white;
     u16 spriteCount;
     u16 sprite34Count;
     u8 unusedLocals[0x10];
@@ -1121,6 +1173,7 @@ layer2run:
     goto layer2run;
 
 layer3:
+    white = 0x80;
     D_801144C8 = spriteCount;
     data = *D_8009D848;
     D_8007EBD4 = (FieldBgTile3*)((u8*)data + data->layer34Offset);
@@ -1145,9 +1198,9 @@ layer3run:
                 } else {
                     SetSemiTrans(sprt, 0);
                 }
-                sprt->r0 = 0x80;
-                sprt->g0 = 0x80;
-                sprt->b0 = 0x80;
+                sprt->r0 = white;
+                sprt->g0 = white;
+                sprt->b0 = white;
                 sprt->x0 = D_8007EBD4->x;
                 sprt->y0 = D_8007EBD4->y;
                 sprt->u0 = D_8007EBD4->u;
@@ -1168,6 +1221,8 @@ layer3run:
     goto layer3run;
 
 layer4:
+    white = 0x80;
+layer4run:
     if (run[0] == 0x7FFF) {
         return;
     }
@@ -1186,9 +1241,9 @@ layer4:
                 } else {
                     SetSemiTrans(sprt, 0);
                 }
-                sprt->r0 = 0x80;
-                sprt->g0 = 0x80;
-                sprt->b0 = 0x80;
+                sprt->r0 = white;
+                sprt->g0 = white;
+                sprt->b0 = white;
                 sprt->x0 = D_8007EBD4->x;
                 sprt->y0 = D_8007EBD4->y;
                 sprt->u0 = D_8007EBD4->u;
@@ -1206,7 +1261,7 @@ layer4:
         }
     }
     run += 3;
-    goto layer4;
+    goto layer4run;
 }
 #endif
 
