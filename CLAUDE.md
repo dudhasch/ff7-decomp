@@ -1870,6 +1870,27 @@ a near-miss, in rough order of frequency:
   `(reg:SI 13 t5)`) and looking the same insn number up in `.lreg`
   (pre-allocation, prints `(reg:SI 73)`).
 
+  **Caller-saved ties are `local_alloc`, and its formula is a different one.**
+  A pseudo the dump describes as "in block N" never reaches `global_alloc` at
+  all -- it is allocated by `block_alloc`, which ranks *quantities* by
+  `QTY_CMP_PRI = floor_log2(n_refs) * n_refs * size / (death - birth)` and then
+  hands each the lowest-numbered free register. So a rotation among `$v0`,
+  `$v1`, `$a0`..`$a3` is a statement about that ratio and nothing else, and the
+  `.lreg` dump prints both terms. `OpcodeFuncMove`'s three-quantity tie scores
+  0.75 / 0.62 / 0.33 where the target needs the reverse order outright.
+
+  **Neither term is reachable from C without emitting an instruction, so a
+  residue that reduces to a priority inversion is a park, not a search.**
+  `n_refs` is fixed by the arithmetic -- `entryIdx * 36` decomposes into
+  `x*8 + x` then `<< 2`, which is three references whatever you call it -- and
+  cse re-shares a constant however it is spelled, so an extra reference to a
+  value that already exists is folded away. `live_length` can only be stretched
+  by moving a definition earlier, and that either materialises a load that was
+  free (`OpcodeFuncMove`: 37 to 48 rows and 3 to 8 extra instructions for four
+  placements, against 14/0) or is dead code that flow deletes and changes
+  nothing (`HandleKawaiDataInModel`: two placements, exactly 13 rows both
+  times). Between them those two functions cover both terms and both outcomes.
+
   The payoff is knowing when to stop. `AddBackgroundToRender`'s residue is 65
   rows of pure register naming and the three quantities that have to permute
   score -0.56, -0.88 and -0.95; for the second to overtake the first its
@@ -2967,6 +2988,7 @@ better or worse in the build:
 | `FieldBackgroundInitPackets` | 1937 | 1547 | 43/4, i.e. *identical* to the body it started from |
 | `FieldModelCreatePktsForPart` | 6030 | 4660 | 232/22 against 218/29, and one instruction short |
 | `FieldMain` | 1780 | 1285 | semantically wrong (a truncated assignment) |
+| `FieldEventRunInit` | 395 | 150 | 15/0 against 16/0 -- one row |
 
 A fifth to a quarter of the score, for nothing. The two scorers weight
 different things -- the permuter charges 100 per insertion and 5 per register

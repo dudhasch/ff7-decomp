@@ -1608,13 +1608,27 @@ void FieldInitDefaultValues(void) {
  * here: it does not stop the copy, it just costs the outer loop its own base.
  *
  * The length is already exact -- 0 inserted, 0 deleted at 152 instructions --
- * so this is a clean permuter target and score 0 is reachable. */
+ * so this is a clean permuter target and score 0 is reachable.
+ *
+ * 16 rows -> 15, and the step was decomp-permuter's: a `u8* pcBase =
+ * (u8*)g_FieldScriptPC;` assigned as the **first statement of the do-body**,
+ * above the debug block, and used for the *first* `slot` only. Routing `slot2`
+ * through it as well gives the row straight back (16), so the asymmetry is the
+ * find, not tidiable noise -- the same shape as `FieldArrowsAddToRender`'s
+ * five-of-seven index sites.
+ *
+ * That run is also the sharpest instance yet of the warning in CLAUDE.md step
+ * 4 about the permuter's score: it went from a base of 395 to 150 -- a 62%
+ * drop, and the best of three improvements over 51,000 iterations -- for
+ * exactly **one** row in the real build. Do not read a score that size as
+ * progress; re-measure every output with variant_eval. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
 void FieldEventRunInit(void) {
     s16 numExtras;
     s32 scriptBase;
+    u8* pcBase;
     u16 pc;
     u16* slot;
     u16* slot2;
@@ -1628,6 +1642,7 @@ void FieldEventRunInit(void) {
     g_CurrentEntity = 0;
     if (g_FieldScripts->numEntities != 0) {
         do {
+            pcBase = (u8*)g_FieldScriptPC;
             if (g_FieldScriptDebugFlags & 3) {
                 FieldDebugStringCopy(g_DebugText, &D_800E0628);
                 FieldDebugStringConcat(g_DebugText, (u8*)g_FieldScripts + 0x20 +
@@ -1644,7 +1659,7 @@ void FieldEventRunInit(void) {
             numExtras = scripts->numExtras * 4;
             lo = ((u8*)(scriptBase + (scripts->numEntities * 8) + numExtras +
                         (s32)scripts))[0x20];
-            slot = (u16*)((g_CurrentEntity * 2) + (u8*)g_FieldScriptPC);
+            slot = (u16*)((g_CurrentEntity * 2) + pcBase);
             *slot = (u16)lo;
             *slot = lo | (((u8*)(scriptBase + (scripts->numEntities * 8) +
                                  numExtras + (s32)scripts))[0x21]
@@ -5592,9 +5607,29 @@ s32 OpcodeFuncAnimb(void) {
  * just after the 0xFF guard 47/3. Inlining `anims` is 22/2 and repeating the
  * expression inside the lookup alone 18/5.
  *
- * Next pass: read cc1's post-local-alloc RTL (`-dl`, and `-dg` for the
- * global pass) rather than sweeping spellings. Two of the four are landed and
- * the two that remain are one allocator decision apart. */
+ * That RTL has now been read (`-dl` on an unparked field4.c), and it turns the
+ * tie into arithmetic. All three quantities are block-local, so this is
+ * `local_alloc`'s `block_alloc`, not `global_alloc`, and its ranking is
+ * `QTY_CMP_PRI = floor_log2(n_refs) * n_refs * size / (death - birth)`. The
+ * dump gives:
+ *
+ *   reg 196  modelIdx            4 refs / 13 insns   ->  2*4/13 = 0.62
+ *   reg 202  entryIdx            3 refs /  4 insns   ->  1*3/4  = 0.75
+ *   reg 195  g_FieldModelData    2 refs /  6 insns   ->  1*2/6  = 0.33
+ *
+ * so ours allocates entryIdx, then g_FieldModelData, then modelIdx, taking
+ * $v1/$a0/$a1 off the free list in that order. The target's assignment --
+ * g_FieldModelData $v1, modelIdx $a0, entryIdx $a1 -- is the exact **reverse**
+ * order, so the whole three-way ranking has to invert. `n_refs` is fixed by
+ * the arithmetic (entryIdx has three references because `* 36` decomposes into
+ * `x*8 + x` then `<< 2`), which leaves `live_length` as the only term, and
+ * every way of stretching one costs an instruction: entryIdx read above the
+ * two animation stores is 40/4, above the whole animation block 43/4, modelIdx
+ * read above the stores 37/3, and both together 48/8, against 14/0.
+ *
+ * That is the same wall `HandleKawaiDataInModel` is parked behind one pass
+ * down in the allocator, and it is worth stating as a rule: neither term of
+ * the priority is reachable from C without emitting something. Park it. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else

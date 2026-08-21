@@ -3520,7 +3520,30 @@ extern u8 D_801144D8; // blink RNG cursor
  * over the base. Declaring the function non-`void`, which is what closed
  * FieldEntityCheckTalk's last row, is exactly inert here too. That is
  * consistent with the diagnosis above being right: allocno_compare's
- * ranking is not something a source-level randomiser can reach. */
+ * ranking is not something a source-level randomiser can reach.
+ *
+ * Five more, aimed at the two halves the note names as open, and all of them
+ * dead. On the movable-order half: carrying the 1 in `kawaiType` promoted to
+ * function scope -- an s8 pseudo, so neither the HImode mismatch that spoils
+ * `kawaiOp` nor the live range that spoils `blink` -- is **78 rows**, because
+ * hoisting it out of the first two loops' block scope costs those loops. And
+ * `s32 blinkOpen` used in the guard *as well as* the else-arm stores is 13,
+ * i.e. identical to using it in the stores alone: the guard's compare against
+ * an SImode pseudo changes nothing.
+ *
+ * On the priority half, where the note says to attack next: no. Stretching
+ * `blinkClosed`'s live range with a second assignment -- at the top of the
+ * function, or just above the third loop -- is exactly 13 either way, because
+ * the earlier store is dead and flow deletes it, so `live_length` never moves.
+ * Giving `faceSel` two loop-weighted references instead, by writing the first
+ * two loops' `*(s32*)0x1F800000 = 3;` through it (`REG_N_REFS += loop_depth`,
+ * so each counts double), does raise its rank -- and costs 5 instructions,
+ * 27 rows, because those stores then lose their rematerialised `lui`.
+ *
+ * So the three shapes stand at 2 / 3 / 13 and neither term of
+ * allocno_compare is reachable: `n_refs` cannot be raised without emitting
+ * something, and `live_length` cannot be raised at all, since every spelling
+ * that would stretch it is dead code. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
