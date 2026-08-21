@@ -180,14 +180,22 @@ def unpark(text, name):
 
 
 def apply_edits(text, edits):
-    for n, edit in enumerate(edits):
-        if len(edit) != 2:
-            die("edit %d is not a [old, new] pair" % n)
-        old, new = edit
+    """Each edit is [old, new] and must match exactly once, or [old, new, n]
+    and must match exactly n times -- a deliberate repeat, for a lever that
+    applies to several identical arms of a switch. The count is required
+    either way so that a typo cannot silently match nothing and score as
+    "no change"."""
+    for k, edit in enumerate(edits):
+        if len(edit) == 2:
+            (old, new), want = edit, 1
+        elif len(edit) == 3:
+            old, new, want = edit
+        else:
+            die("edit %d is not [old, new] or [old, new, count]" % k)
         count = text.count(old)
-        if count != 1:
-            die("edit %d matched %d times, expected exactly 1:\n---\n%s\n---"
-                % (n, count, old))
+        if count != want:
+            die("edit %d matched %d times, expected exactly %d:\n---\n%s\n---"
+                % (k, count, want, old))
         text = text.replace(old, new)
     return text
 

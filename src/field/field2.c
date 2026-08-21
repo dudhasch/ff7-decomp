@@ -251,50 +251,20 @@ extern s16 D_8009C558;
  * background X/Y toward the entity's clamped screen position (linear or
  * ease-in-out depending on the mode).
  *
- * 26 rows out, from an m2c seed that did not compile (it closed with a
- * `default:` outside the switch). What the rewrite established:
- *   - the jump table has ten entries, not six. `sltiu v0,v1,0xa` on the
- *     selector itself, with no `addiu -1` in front of it, means the case set
- *     spans 0..9; writing only the five live arms gives a six-entry table
- *     indexed off `selector - 1` and 61 rows.
- *   - arms 2, 3 and 5 test `!=` with the increment first, arm 6 tests `==`
- *     with the state store first. The two spellings put the shared block on
- *     opposite sides of the branch, which is what stops all four tails
- *     cross-jumping into one. Written the same way round they merge and it
- *     costs 3 rows.
- *   - there is no dead local: `long screenPos` alone gives the target's 0x40
- *     frame. Reserving 0x24 for the gap between it and the saved ra -- which
- *     is what the frame arithmetic suggests -- costs 17 rows.
+ * The arms that finish a scroll do not each write `D_8009AC13 = 2;` -- the
+ * three `!=` arms `goto` the copy inside arm 6. Written out per arm, all four
+ * tails are the same nine instructions (`lh D_80075CF8` / `sh D_80071E3C` /
+ * `lh D_8009C558` / branch), jump_optimize inverts them to a common polarity
+ * and cross-jumps them into one, and the body comes out ten instructions
+ * short. The target carries two physical copies: one inline in arm 2 that
+ * arms 3 and 5 jump backwards into, and arm 6's.
  *
- * The residue is one cross-jumping choice. The target keeps arm 2's copy of
- * the shared tail inline and has arms 3 and 5 jump backwards into it, at the
- * `jal` and at the tail respectively; ours emits the tail once after arm 6 and
- * has arms 2, 3 and 5 all jump forwards to it. m2c's seed says the original
- * reached both points by `goto` -- one label on the second LinearStep call,
- * shared by arms 2 and 5, and one on the tail, shared by 2, 3 and 5 -- and
- * that is almost certainly right, but transcribing it measures 47 rows however
- * the two carried values are typed or ordered (s16/s32 for the y target, its
- * assignment before or after arm 5's first call, either declaration order).
- * Something about the carried `s16` is wrong; the labels themselves are not
- * the problem.
- *
- * Two more families measured since, both negative. Carrying the y target
- * through the `screenPos` stack slot itself -- `SCREEN_Y = -SCREEN_Y;` in arm
- * 2 and `SCREEN_Y = D_80075E20;` in arm 5, so the shared call reads
- * `SCREEN_Y` and no new local exists -- is 42/8, and an ordinary `s16 yTarget`
- * in the same shape is 42/7. Neither reaches the parked 26/2, so the carrier
- * is not what the goto shape costs; the goto shape itself is.
- *
- * And the source order of the arms is not a lever either, which rules out the
- * obvious reading of the residue. cross-jumping keeps one copy of the shared
- * tail and the target's copy sits inside arm 2 while ours sits after arm 6, so
- * writing arm 2 later ought to move it. It does not: 3,5,2,6 measures 57/6,
- * 5,3,2,6 is 53/3, 3,2,5,6 is 30/2 and 6,2,3,5 is 61/14. The arms' emitted
- * order follows the source and the survivor does not follow the order.
- * Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollUpdate);
-#else
+ * Three earlier corrections, all read off the target rather than guessed:
+ * the jump table has ten entries and not six (`sltiu v0,v1,0xa` on the
+ * selector with no `addiu -1` in front of it); arms 2, 3 and 5 test `!=`
+ * with the increment first while arm 6 tests `==` with the state store
+ * first; and there is no dead local -- `long screenPos` alone gives the
+ * target's 0x40 frame. */
 void FieldBGScrollUpdate(void) {
     long screenPos;
 
@@ -318,7 +288,7 @@ void FieldBGScrollUpdate(void) {
             if (D_8009C558 != D_80075CF8) {
                 D_80075CF8 = D_80075CF8 + 1;
             } else {
-                D_8009AC13 = 2;
+                goto scrollDone;
             }
             break;
         case 3:
@@ -331,7 +301,7 @@ void FieldBGScrollUpdate(void) {
             if (D_8009C558 != D_80075CF8) {
                 D_80075CF8 = D_80075CF8 + 1;
             } else {
-                D_8009AC13 = 2;
+                goto scrollDone;
             }
             break;
         case 5:
@@ -342,7 +312,7 @@ void FieldBGScrollUpdate(void) {
             if (D_8009C558 != D_80075CF8) {
                 D_80075CF8 = D_80075CF8 + 1;
             } else {
-                D_8009AC13 = 2;
+                goto scrollDone;
             }
             break;
         case 6:
@@ -351,6 +321,7 @@ void FieldBGScrollUpdate(void) {
             D_80071E3C = FieldCalcEaseInOut(
                 D_80075E1C, D_80075E20, D_8009C558, D_80075CF8);
             if (D_8009C558 == D_80075CF8) {
+            scrollDone:
                 D_8009AC13 = 2;
             } else {
                 D_80075CF8 = D_80075CF8 + 1;
@@ -367,7 +338,6 @@ void FieldBGScrollUpdate(void) {
 #undef SCREEN_X
 #undef SCREEN_Y
 }
-#endif
 
 extern s32 FieldCalcEaseInOut(s32 from, s32 to, s32 total, s32 step);
 extern s32 FieldCalcLinearStep(s32 start, s32 target, s32 duration, s32 step);
@@ -2843,7 +2813,32 @@ out:
  * 0x0E high and the saved-register list is one short (the target uses s0..s8,
  * this uses s0..s7). Nothing tried moves it: `&lines[i]` for the call, the
  * flags through a separate `u8*`, indexing everything, walking everything.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
+ * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
+ *
+ * 58 rows / -3 instructions -> 40 / -1, and three of the four corrections are
+ * *semantic* -- the parked body was not the same program:
+ *
+ *   - `to[0]` and `to[1]` are `dest->vx >> 12` and `dest->vy >> 12`, not the
+ *     raw members. The target shifts them (`lw`/`sra 12`/`sw` into
+ *     0x1F800010 and 0x1F800014) and so does the near-clone
+ *     FieldEntityGatewayCheck a hundred lines below, which has the identical
+ *     prologue. Mixing raw 20.12 coordinates into a buffer whose other four
+ *     words are already shifted was simply a bug; it is +2 of the -3.
+ *   - The `else { continue; }` on the from/nearest equality test is a
+ *     **fallthrough into the two stores**, not a skip. The target's
+ *     `beq $v1,$v0,.L800AA110` jumps *to* `requestPushScript`/`isOnLine`
+ *     when both components are equal; the parked body skipped them, so an
+ *     entity standing exactly on a line never raised its push request.
+ *   - The proximity test reads `from[k] != nearest[k]`, not the reverse:
+ *     gcc 2.6.3 evaluates a comparison's operands in source order, and the
+ *     target loads `from` first at both halves.
+ *   - `(s32)(entity->SolidRange * entity->SolidRange)` -- two `u16` operands
+ *     promote to *unsigned* int in gcc 2.6.3, so the comparison came out
+ *     `sltu` where the target has `slt`.
+ *
+ * The remaining 40 rows are still the biv elimination described above, now
+ * measured against a body that is the right program and one instruction from
+ * the right length. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineCheck);
 #else
@@ -2865,8 +2860,8 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     from[0] = entity->PosX >> 12;
     from[1] = entity->PosY >> 12;
     from[2] = entity->PosZ >> 12;
-    to[0] = dest->vx;
-    to[1] = dest->vy;
+    to[0] = dest->vx >> 12;
+    to[1] = dest->vy >> 12;
     to[2] = entity->PosZ >> 12;
     hit = 0;
     for (i = 0, line = lines; i < 32; i++, line++) {
@@ -2876,7 +2871,7 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
         lines[i].isOnLine = 0;
         sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
         if (sqrDist != -1 &&
-            sqrDist < entity->SolidRange * entity->SolidRange) {
+            sqrDist < (s32)(entity->SolidRange * entity->SolidRange)) {
             if (lines[i].slipDisabled == 1) {
                 hit = 1;
             }
@@ -2896,15 +2891,13 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
                 (crossTo > 0 && crossFrom <= 0)) {
                 lines[i].across = 1;
             }
-            if (nearest[0] != from[0] || nearest[1] != from[1]) {
+            if (from[0] != nearest[0] || from[1] != nearest[1]) {
                 lines[i].proximityAngle = FieldEntityDirByVec(
                     (VECTOR*)from, (VECTOR*)nearest, &sqrDist);
                 delta = (u8)(lines[i].proximityAngle - entity->MoveDir + 0x40);
                 if (delta >= 0x80) {
                     continue;
                 }
-            } else {
-                continue;
             }
             lines[i].requestPushScript = 1;
             lines[i].isOnLine = 1;
