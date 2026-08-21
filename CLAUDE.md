@@ -1682,6 +1682,8 @@ a near-miss, in rough order of frequency:
   the next is normal), and check this before anything else on a fresh seed:
   `grep -c '\$at'` against the function's instruction count tells you in one
   command whether the original addresses this way at all.
+  `tools/asm_widths.py <target.s>` prints the width per symbol, which is the
+  other half you need and is not in the header.
 * **The index temporaries m2c emits under different names are usually one
   variable, and whether it is computed once is worth tens of instructions in
   either direction.** `temp_t7 = page * 0x17A;` repeated at five block
@@ -3231,6 +3233,7 @@ two names at one vram with `Duplicate symbol detected!`.
 | `tools/worklist.py` | Per-file work list: what is left, blocked, handwritten, cheapest first |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
+| `tools/asm_widths.py` | Per-symbol access width from a target `.s` — what an m2c seed's byte offsets have to be cast to |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/affected_overlays.py` | Changed files → the overlays CI has to rebuild |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
