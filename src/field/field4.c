@@ -20,6 +20,8 @@ typedef struct {
     /* 0x1C */ u8* unk1C;
 } FieldModelPart;
 
+extern SVECTOR D_800DF520[]; // light normals, indexed by a colour's code byte
+
 /* Unit 4 of 5, split out of field.c. .rodata 0x800A0104-0x800A0F10, base 4 mod
  * 8 -> --phase 4. The large middle run: 20 of the overlay's jump tables, all 4
  * mod 8. */
@@ -30,213 +32,213 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetCustomLightToModelPkts);
 
 extern u8 D_800DF114;
 
-/* Apply the GTE lighting to each vertex colour of a model's packets: for each
- * part's polygons run the NormalColorColSingle GTE op and write the result
- * into the packet's RGB. m2c seed; the residual is the GTE intrinsic codegen
- * (lwc2/nccs/swc2) and the per-part stride walking. Pinned pending a permuter
- * pass. */
+/* Apply the GTE lighting to each vertex colour of a model's *packets*: for
+ * every polygon of every kind, run NormalColorColSingle on the vertex normal
+ * the polygon table names and write the result straight into the packet's RGB.
+ * The sibling KawaiLightingApplyToPolyColor below does the same GTE work in
+ * place in the polygon table; this one is the pass that pushes the result out
+ * to the GPU packets, so it walks two cursors at once.
+ *
+ * 202 rows / 12 insertions at 294 instructions against 293, from an m2c seed
+ * that did not compile and could not have been measured: every GTE op came
+ * out as an `M2C_ERROR` holding the raw text `unknown instruction: lwc2`,
+ * `nccs`, `swc2`, which
+ * emits nothing, so the body was 35 instructions short before any codegen
+ * question could be asked. What the rewrite established:
+ *
+ *   - The parameter is a `FieldModelPart*`, and the typedef lives 350 lines
+ *     below in this unit; the seed's `void* arg0` with `->unk1C` is why gcc
+ *     rejected the whole file with the body unparked. Lifted the typedef.
+ *   - The GTE sequence is the sibling's, verbatim:
+ *     `gte_ldv0(normals + c[k * 4 + 7] * 8)`, `gte_ldrgb(&c[k * 4 + 4])`,
+ *     `gte_nccs()`, then `gte_strgb` -- but into `pkt + 4` rather than the
+ *     scratchpad, with no three-byte copy back, because the packet *is* the
+ *     destination.
+ *   - `swc2` writes four bytes, so it clobbers the packet's `code` byte at +7.
+ *     The target saves it (`lbu t5,0(t2)`) before the inner loop and restores
+ *     it (`sb t5,0(t2)`) after -- which is what m2c renders as the inert
+ *     `*var_t2 = *var_t2;`.
+ *   - Eight loops, and both strides differ per kind. The polygon-table
+ *     strides are the sibling's exactly (0x18, 0x14, 0xC, 0xC, 8, 8, 0x10,
+ *     0x14); the packet strides are 0x34, 0x28, 0x28, 0x20, 0x14, 0x18, 0x1C,
+ *     0x24, and the per-vertex colour step is 0xC for the untextured
+ *     primitives and 8 for the textured ones. Read them off the `addiu` in
+ *     each outer loop's branch delay slot.
+ *   - Each iteration is guarded by `if (*(u32*)pkt != 0)` -- the packet's tag
+ *     word, i.e. only linked packets are lit.
+ *   - Two cursors over the polygon table, not one. The target takes a fixed
+ *     snapshot (`move t4,t1`) that the rgb giv is measured from *and* a
+ *     walking one (`move a0,t1`, stepped by 4) that supplies the normal index
+ *     at [7]. One `c = poly;` gives a single base with two givs. Worth 4 rows
+ *     and 2 instructions, but only together with the next item.
+ *   - The snapshot is taken *before* the saved code byte: the target's
+ *     preheader is `t4 = t1 / t5 = *t2 / v1 = 0 / a2 = a3 + 4`. Reordering
+ *     alone is 198/+3, two cursors alone 206/+1, both 202/+1 -- and the
+ *     comparison that matters is within a length class, where 202 beats 206.
+ *
+ * Measured and rejected: copying the parameter into a `FieldModelPart* p` and
+ * reading every field through it, to reproduce the target's `move t8,a0`, is
+ * *exactly* inert -- gcc coalesces the copy away. That one instruction plus
+ * two more elsewhere is the whole of the +1.
+ *
+ * A warning for whoever picks this up: an earlier pass here measured 168 rows
+ * and -3 instructions, and it was a different program. The variant generator's
+ * anchor had been broken by the reordering above, so the walking cursor `n`
+ * was used at four sites and assigned at none. An uninitialised local is legal
+ * C, gcc says nothing, and the number looks like the best result of the
+ * session. Grep the body for an assignment to every local before believing a
+ * sweep.
+ *
+ * What is left is register naming with the length within one, which is
+ * decomp-permuter's job. Codegen pinned via MASPSX_OVERRIDE; the #else is the
+ * verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiSetVertexColorFromLighting);
 #else
-void KawaiSetVertexColorFromLighting(FieldModelPart* arg0) {
-    s32* var_a3;
-    u32 temp_t3;
-    u32 temp_t3_2;
-    u32 temp_t3_3;
-    u32 temp_t3_4;
-    u32 temp_t3_5;
-    u32 temp_t3_6;
-    u32 temp_t3_7;
-    u32 temp_t3_8;
-    u32 temp_t7;
-    u32 temp_t7_2;
-    u32 var_t0;
-    u32 var_t0_2;
-    u32 var_t0_3;
-    u32 var_t0_4;
-    u32 var_t0_5;
-    u32 var_t0_6;
-    u32 var_t0_7;
-    u32 var_t0_8;
-    u32 var_v1;
-    u32 var_v1_2;
-    u32 var_v1_3;
-    u32 var_v1_4;
-    u8* var_a1;
-    u8* var_a1_2;
-    u8* var_a1_3;
-    u8* var_a1_4;
-    u8* var_t2;
-    u8* var_t2_2;
-    u8* var_t2_3;
-    u8* var_t2_4;
+void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
+    u8* normals;
+    u8* poly;
+    u8* pkt;
+    u8* c;
+    u8* n;
+    u8* rgb;
+    u8 code;
+    u32 counts;
+    u32 count;
+    u32 i;
+    u32 k;
 
-    var_a3 = arg0->unk1C;
+    poly = (u8*)(part->polyOffset + (u32)part->data);
+    normals = (u8*)D_800DF520;
+    pkt = part->unk1C;
     if (D_800DF114 != 0) {
-        var_a3 += arg0->unk16;
+        pkt += part->unk16;
     }
-    temp_t7 = arg0->polyCounts0;
-    temp_t3 = temp_t7 & 0xFF;
-    var_t0 = 0;
-    if (temp_t3 != 0) {
-        var_t2 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                var_v1 = 0;
-                do {
-                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: nccs */);
-                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
-                    var_v1 += 1;
-                } while (var_v1 < 4U);
-                *var_t2 = *var_t2;
+    counts = part->polyCounts0;
+
+    count = counts & 0xFF;
+    for (i = 0; i < count; i++, pkt += 0x34, poly += 0x18) {
+        if (*(u32*)pkt != 0) {
+            c = poly;
+            n = poly;
+            code = pkt[7];
+            rgb = pkt + 4;
+            for (k = 0; k < 4; k++) {
+                gte_ldv0(normals + n[7] * 8);
+                gte_ldrgb(&c[k * 4 + 4]);
+                gte_nccs();
+                gte_strgb(rgb);
+                rgb += 0xC;
+                n += 4;
             }
-            var_t0 += 1;
-            var_t2 += 0x34;
-            var_a3 += 0x34;
-        } while (var_t0 < temp_t3);
+            pkt[7] = code;
+        }
     }
-    temp_t3_2 = (u32)(temp_t7 & 0xFF00) >> 8;
-    var_t0_2 = 0;
-    if (temp_t3_2 != 0) {
-        var_t2_2 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                var_v1_2 = 0;
-                do {
-                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: nccs */);
-                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
-                    var_v1_2 += 1;
-                } while (var_v1_2 < 3U);
-                *var_t2_2 = *var_t2_2;
+
+    count = (counts & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, pkt += 0x28, poly += 0x14) {
+        if (*(u32*)pkt != 0) {
+            c = poly;
+            n = poly;
+            code = pkt[7];
+            rgb = pkt + 4;
+            for (k = 0; k < 3; k++) {
+                gte_ldv0(normals + n[7] * 8);
+                gte_ldrgb(&c[k * 4 + 4]);
+                gte_nccs();
+                gte_strgb(rgb);
+                rgb += 0xC;
+                n += 4;
             }
-            var_t0_2 += 1;
-            var_t2_2 += 0x28;
-            var_a3 += 0x28;
-        } while (var_t0_2 < temp_t3_2);
+            pkt[7] = code;
+        }
     }
-    temp_t3_3 = (temp_t7 >> 0x10) & 0xFF;
-    var_t0_3 = 0;
-    if (temp_t3_3 != 0) {
-        var_a1 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
-                M2C_ERROR(/* unknown instruction: nccs */);
-                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
-                *var_a1 = *var_a1;
-            }
-            var_t0_3 += 1;
-            var_a1 += 0x28;
-            var_a3 += 0x28;
-        } while (var_t0_3 < temp_t3_3);
+
+    count = (counts >> 16) & 0xFF;
+    for (i = 0; i < count; i++, pkt += 0x28, poly += 0xC) {
+        if (*(u32*)pkt != 0) {
+            code = pkt[7];
+            gte_ldv0(normals + poly[7] * 8);
+            gte_ldrgb(&poly[4]);
+            gte_nccs();
+            gte_strgb(&pkt[4]);
+            pkt[7] = code;
+        }
     }
-    temp_t3_4 = temp_t7 >> 0x18;
-    var_t0_4 = 0;
-    if (temp_t3_4 != 0) {
-        var_a1_2 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
-                M2C_ERROR(/* unknown instruction: nccs */);
-                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
-                *var_a1_2 = *var_a1_2;
-            }
-            var_t0_4 += 1;
-            var_a1_2 += 0x20;
-            var_a3 += 0x20;
-        } while (var_t0_4 < temp_t3_4);
+
+    count = counts >> 24;
+    for (i = 0; i < count; i++, pkt += 0x20, poly += 0xC) {
+        if (*(u32*)pkt != 0) {
+            code = pkt[7];
+            gte_ldv0(normals + poly[7] * 8);
+            gte_ldrgb(&poly[4]);
+            gte_nccs();
+            gte_strgb(&pkt[4]);
+            pkt[7] = code;
+        }
     }
-    temp_t7_2 = arg0->polyCounts1;
-    temp_t3_5 = temp_t7_2 & 0xFF;
-    var_t0_5 = 0;
-    if (temp_t3_5 != 0) {
-        var_a1_3 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
-                M2C_ERROR(/* unknown instruction: nccs */);
-                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
-                *var_a1_3 = *var_a1_3;
-            }
-            var_t0_5 += 1;
-            var_a1_3 += 0x14;
-            var_a3 += 0x14;
-        } while (var_t0_5 < temp_t3_5);
+
+    counts = part->polyCounts1;
+
+    count = counts & 0xFF;
+    for (i = 0; i < count; i++, pkt += 0x14, poly += 8) {
+        if (*(u32*)pkt != 0) {
+            code = pkt[7];
+            gte_ldv0(normals + poly[7] * 8);
+            gte_ldrgb(&poly[4]);
+            gte_nccs();
+            gte_strgb(&pkt[4]);
+            pkt[7] = code;
+        }
     }
-    temp_t3_6 = (u32)(temp_t7_2 & 0xFF00) >> 8;
-    var_t0_6 = 0;
-    if (temp_t3_6 != 0) {
-        var_a1_4 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                M2C_ERROR(/* unknown instruction: lwc2 $6, ($a2) */);
-                M2C_ERROR(/* unknown instruction: nccs */);
-                M2C_ERROR(/* unknown instruction: swc2 $22, ($a0) */);
-                *var_a1_4 = *var_a1_4;
-            }
-            var_t0_6 += 1;
-            var_a1_4 += 0x18;
-            var_a3 += 0x18;
-        } while (var_t0_6 < temp_t3_6);
+
+    count = (counts & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, pkt += 0x18, poly += 8) {
+        if (*(u32*)pkt != 0) {
+            code = pkt[7];
+            gte_ldv0(normals + poly[7] * 8);
+            gte_ldrgb(&poly[4]);
+            gte_nccs();
+            gte_strgb(&pkt[4]);
+            pkt[7] = code;
+        }
     }
-    temp_t3_7 = (temp_t7_2 >> 0x10) & 0xFF;
-    var_t0_7 = 0;
-    if (temp_t3_7 != 0) {
-        var_t2_3 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                var_v1_3 = 0;
-                do {
-                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: nccs */);
-                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
-                    var_v1_3 += 1;
-                } while (var_v1_3 < 3U);
-                *var_t2_3 = *var_t2_3;
+
+    count = (counts >> 16) & 0xFF;
+    for (i = 0; i < count; i++, pkt += 0x1C, poly += 0x10) {
+        if (*(u32*)pkt != 0) {
+            c = poly;
+            n = poly;
+            code = pkt[7];
+            rgb = pkt + 4;
+            for (k = 0; k < 3; k++) {
+                gte_ldv0(normals + n[7] * 8);
+                gte_ldrgb(&c[k * 4 + 4]);
+                gte_nccs();
+                gte_strgb(rgb);
+                rgb += 8;
             }
-            var_t0_7 += 1;
-            var_t2_3 += 0x1C;
-            var_a3 += 0x1C;
-        } while (var_t0_7 < temp_t3_7);
+            pkt[7] = code;
+        }
     }
-    temp_t3_8 = temp_t7_2 >> 0x18;
-    var_t0_8 = 0;
-    if (temp_t3_8 != 0) {
-        var_t2_4 = var_a3 + 7;
-        do {
-            if (*var_a3 != 0) {
-                var_v1_4 = 0;
-                do {
-                    M2C_ERROR(/* unknown instruction: lwc2 $0, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $1, 0x4($v0) */);
-                    M2C_ERROR(/* unknown instruction: lwc2 $6, ($v0) */);
-                    M2C_ERROR(/* unknown instruction: nccs */);
-                    M2C_ERROR(/* unknown instruction: swc2 $22, ($a2) */);
-                    var_v1_4 += 1;
-                } while (var_v1_4 < 4U);
-                *var_t2_4 = *var_t2_4;
+
+    count = counts >> 24;
+    for (i = 0; i < count; i++, pkt += 0x24, poly += 0x14) {
+        if (*(u32*)pkt != 0) {
+            c = poly;
+            n = poly;
+            code = pkt[7];
+            rgb = pkt + 4;
+            for (k = 0; k < 4; k++) {
+                gte_ldv0(normals + n[7] * 8);
+                gte_ldrgb(&c[k * 4 + 4]);
+                gte_nccs();
+                gte_strgb(rgb);
+                rgb += 8;
             }
-            var_t0_8 += 1;
-            var_t2_4 += 0x24;
-            var_a3 += 0x24;
-        } while (var_t0_8 < temp_t3_8);
+            pkt[7] = code;
+        }
     }
 }
 #endif
@@ -382,8 +384,6 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
 #endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
-
-extern SVECTOR D_800DF520[]; // light normals, indexed by a colour's code byte
 
 /* Light one model part in place. Every polygon colour word carries the index
  * of its vertex normal in the byte the GPU would read as `code`, so each is
