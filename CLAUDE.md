@@ -1864,6 +1864,21 @@ a near-miss, in rough order of frequency:
   instructions long, and three separate times this project has read an
   insertion count as a length and drawn the wrong conclusion from it.
 
+
+  It compares against the **.text-only** count, not the whole `.s`. For a
+  function with a jump table the `.s` also holds the table's `.word` entries
+  -- same `/* offset addr bytes */` prefix, sitting in the file's `.rodata`
+  ahead of the body -- and counting those as instructions makes the function
+  read as short by exactly the number of cases. `OpcodeFuncFadew` reported
+  **-11 instructions** for three sessions on that alone; its body is 73
+  against the target's 73 and the 11 were `jtbl_800A0DF4`. The whole-`.s`
+  count is still what scopes the diff, which does have to cover those rows,
+  so the two numbers are both needed and are not interchangeable. Re-running
+  the field triage after the fix moved four verdicts: `FieldDebugRenderString`
+  from -33 to -1, `DebugUpdateActor` from -5 to +2, `FieldMain` from -6 to
+  +1, and `OpcodeFuncFadew` to exact. A length that reads badly wrong on a
+  function with a `switch` is worth checking against the `.s` before
+  believing it.
 * **`checkfn`'s "inserted" is not a length measurement — read the `+N
   instructions` figure instead.** An instruction that merely *moved* is
   reported as one insertion and one deletion, so the counts scale with how

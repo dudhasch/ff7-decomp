@@ -247,7 +247,7 @@ def compile_variant(src, obj, work, cfg, orig):
         die("no object produced")
 
 
-def score(obj, want, rows_wanted, context, cfg, func, out):
+def score(obj, want, text_want, rows_wanted, context, cfg, func, out):
     proc = subprocess.run(
         [PYTHON, DIFF, "-o", "--format=json", "-f", obj, "-F", cfg["ref_obj"],
          func, "--max-lines", str(want * 2 + 128)],
@@ -290,7 +290,8 @@ def score(obj, want, rows_wanted, context, cfg, func, out):
     # changed row against a `<` marker rather than as a delete/insert pair, so
     # these do not subtract cleanly from the 1205 the .s declares.
     out.append("TOTAL %d  (%d changed, %d inserted, %d deleted; target has %d insns)"
-               % (chg + ins + dele, chg, ins, dele, want))
+               % (chg + ins + dele, chg, ins, dele,
+                  text_want if text_want is not None else want))
 
     # Length is the hard invariant and `inserted` is not it: asm-differ counts
     # a row where one side is blank, and a single moved instruction produces
@@ -299,10 +300,18 @@ def score(obj, want, rows_wanted, context, cfg, func, out):
     # directly and say so whenever it differs -- a body of the wrong length
     # cannot match however few rows differ, and a row count is only comparable
     # between two bodies of the same length.
+    # Compare against the .text-only count, never `want`: `want` is the whole
+    # .s and for a function with a jump table that also counts the table's
+    # `.word` entries, which sit in the file's .rodata and weigh nothing in
+    # .text. OpcodeFuncFadew read as 11 instructions short for three sessions
+    # on exactly that -- its body is 73 against the target's 73, and the 11
+    # were jtbl_800A0DF4. `want` still scopes the diff, which does have to
+    # cover those rows.
     got = compiled_insn_count(obj, func)
-    if got is not None and got != want:
+    ref = text_want if text_want is not None else want
+    if got is not None and got != ref:
         out.append("       length %d against %d  (%+d instructions)"
-                   % (got, want, got - want))
+                   % (got, ref, got - ref))
 
     if not rows_wanted:
         return chg + ins + dele
@@ -359,6 +368,7 @@ def run_one(spec_path, rows_wanted, keep, context):
     cfg = resolve_build(source)
     text = unpark(apply_edits(read_base(source), spec.get("edits", [])), func)
     want = checkfn.target_insn_count(os.path.join(REPO, source), func)
+    text_want = checkfn.target_text_insn_count(os.path.join(REPO, source), func)
 
     work = tempfile.mkdtemp(prefix="variant-%s-" % re.sub(r"\W", "_", tag))
     try:
@@ -368,7 +378,7 @@ def run_one(spec_path, rows_wanted, keep, context):
         obj = os.path.join(work, "variant.o")
         compile_variant(src, obj, work, cfg, source)
         out.append("VARIANT %s  [%s %s]" % (tag, source, func))
-        total = score(obj, want, rows_wanted, context, cfg, func, out)
+        total = score(obj, want, text_want, rows_wanted, context, cfg, func, out)
     finally:
         if keep:
             out.append("kept %s" % work)
