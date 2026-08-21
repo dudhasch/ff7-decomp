@@ -3146,6 +3146,19 @@ this file recommends elsewhere (`perm_temp_for_expr` naming a subexpression,
 an extra local), applied to exactly the residue a reading of the diff
 identifies -- so being plausible is not evidence either.
 
+**Re-import the scratch after every hand improvement — a stale base is why a
+search runs forever.** The permuter hill-climbs from `base.c`, which `import.py`
+froze at the moment the scratch was built, so every row you close by hand
+afterwards is a row the search is still paying for. `FieldBattleCheck`'s search
+from a 13-row body ran **192,000** candidates over hours and never got below a
+score of 30; re-imported from the 6-row body it hit zero in **3,150** and
+`--stop-on-zero` fired. The cost of re-importing is one `permuter_scratch.sh`
+run, so do it whenever the body has moved, and treat a long search with no
+improvement as a signal to check the base rather than to wait longer. Both
+finds there were the assign-to-an-existing-local idiom -- `total = roll;` and
+`D_8009ABF6 = (total = slot) & 0x3FF;`, two dead assignments to the same local
+that emit nothing and only raise its reference count -- which is the pass to
+weight (`perm_temp_for_expr`) when the residue is caller-saved naming.
 **Read the finding, do not paste it — and re-measure it.** The permuter reaches
 for two tricks that are noise rather than insight: rewriting every `a * b` as a
 call to an `inline int inline_fn(a, b) { return a * b; }`, and introducing a
