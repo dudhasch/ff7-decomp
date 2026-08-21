@@ -1546,6 +1546,14 @@ extern FieldBgOtSlot D_8009ACA2;
  *      added. Same class as lever 1, and also a decomp-permuter find; the two
  *      together are what took this function from 193 to 83.
  *
+ *   4. a `do { } while (0);` wrapped around the layer-3 walk's 0x7FFE addPrim,
+ *      nine more rows and again no insertion. The placement is the whole of
+ *      it: the same wrapper on the layer-1 0x7FFE addPrim is 136, on the
+ *      layer-1 sprite addPrim 80/1, on BgDrenv3E 208/12, on BgDrenv3S 112/1,
+ *      on BgDrenv4E 208/3, and on the layer-3 sprite addPrim exactly inert.
+ *      193 -> 83 -> 74 on three inserted blocks, none of which survives to the
+ *      object.
+ *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
  *
@@ -1662,8 +1670,10 @@ layer3:
             goto layer4;
         }
         if (run[0] == 0x7FFE) {
-            addPrim(
-                &buf->ot[D_8009ACA2.layer3], &buf->BgDm[run[1] + D_801144D0]);
+            do {
+                addPrim(&buf->ot[D_8009ACA2.layer3],
+                        &buf->BgDm[run[1] + D_801144D0]);
+            } while (0);
         } else {
             sprite = run[1];
             count = run[2];
