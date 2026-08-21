@@ -1576,6 +1576,20 @@ extern FieldBgOtSlot D_8009ACA2;
  *      72 for both). Nothing else of that kind pays -- `run[0] >
  *      D_80071A48[0].y - 0x100` for either wrap test or both, and the same
  *      rewrite of the layer-1 x tests, are all exactly inert.
+ *   6. the layer-3 sprite addPrim written out as its two `setaddr`s, with the
+ *      *second* one reaching the ordering-table slot through a pointer local:
+ *
+ *          layer3Slot = &D_8009ACA2.layer3;   -- immediately above layer3:
+ *          ...
+ *          setaddr(&buf->Bg2[sprite], getaddr(&buf->ot[D_8009ACA2.layer3]));
+ *          setaddr(&buf->ot[*layer3Slot], &buf->Bg2[sprite]);
+ *
+ *      Seven rows. The macro uses its `ot` argument twice and only the second
+ *      use goes through the pointer, which is why the expansion has to be
+ *      written by hand; expanding it without the pointer is exactly inert, and
+ *      where the pointer is assigned decides everything -- at the top of the
+ *      function it is 124/3 against 65 for the assignment sitting immediately
+ *      above the `layer3:` label.
  *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
@@ -1622,6 +1636,7 @@ void AddBackgroundToRender(struct FieldRenderData* buf) {
     s16 sprite;
     s32 otSlot;
     u8 entity;
+    u16* layer3Slot;
 
     data = *D_8009D848;
     run = data->runs;
@@ -1684,6 +1699,7 @@ layer2:
         run += 3;
     }
 
+    layer3Slot = &D_8009ACA2.layer3;
 layer3:
     addPrim(&buf->ot[D_8009ACA2.layer3], &buf->BgDrenv3E);
     for (;;) {
@@ -1730,7 +1746,9 @@ layer3:
                     if (entity == 0 ||
                         (g_FieldEntityBgTrigger[entity] &
                          (otSlot = buf->BgAnim[sprite + D_801144C8].mask))) {
-                        addPrim(&buf->ot[D_8009ACA2.layer3], &buf->Bg2[sprite]);
+                        setaddr(&buf->Bg2[sprite],
+                                getaddr(&buf->ot[D_8009ACA2.layer3]));
+                        setaddr(&buf->ot[*layer3Slot], &buf->Bg2[sprite]);
                     }
                     sprite++;
                 } while (--count != 0);
