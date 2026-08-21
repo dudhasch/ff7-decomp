@@ -329,6 +329,22 @@ extern s16 D_80071E3C;
  * `s32` or `u32` (54/5 with the casts, 69/4 without), `preloadId` as `s32` or
  * `u32` (60/6).
  *
+ * The qualifier is wanted at every site, which is the part that does not
+ * follow from the reasoning: dropping it from the `ev + 1` reads alone is
+ * 58/5, from the `ev + 0x4B`/`0x4D` stores 44/6, from both 61/5, from the
+ * `ev + 0x63` stores 62/3, and from `0x63` plus `0x4B` 62/3. That matters
+ * because one row in the tail argues the other way -- the target's
+ * `lhu v0,1(s1)` feeds both the `g_CurrentFieldIndex` store and the compare
+ * with no mask between them, and a *volatile* HImode MEM cannot be folded
+ * into a `zero_extend`, so `expand_expr` reads it into an HImode pseudo and
+ * widens it with an `andi 0xffff`. That reads as proof the target's `ev + 1`
+ * is not volatile, and every combination of the plain read with a wider local
+ * has been measured and is worse: plain + `s32 fieldId` 62/5, + `u32` 62/5,
+ * + `s32 fieldId` and `s32 preloadId` 59/5, + `s32 preloadId` alone 60/6, and
+ * `s32` on both with the volatile kept 53/5. So the `andi` is real and buying
+ * it back costs more than it saves; whatever the original wrote is not
+ * reachable by moving the qualifier or the two local types.
+ *
  * The live clusters, against the 40/6 base:
  *   1. the pre-loop block. The target's preheader hoists five invariants into
  *      callee-saved registers -- `ori s2,zero,1`, `ori s5,zero,3`,
@@ -408,7 +424,13 @@ extern s16 D_80071E3C;
  *      argument inert, reusing `fillVal` for the `D_80095DD4 = 1` store in the
  *      0x40-range arm inert, and reusing it again as the `ev + 1` offset
  *      inert. The `otSlot` trick that was worth 34 rows in
- *      AddBackgroundToRender does not transfer to this function.
+ *      AddBackgroundToRender does not transfer to this function. Its finds on
+ *      the repaired-and-aligned scratch (1455, 1475, 1490 against a base of
+ *      1780) are all `preloadId` and `fieldId` retypings plus two dead
+ *      assignments; measured here, `int preloadId` is 60/6, `newVar = 3;`
+ *      before `func_800129D0()` for the fadeType store is inert, an extra
+ *      `u16 pad;` local is inert, and reusing `i` for the
+ *      `g_FieldModelsP = (s32*)0x80114FFC` store is 65/6.
  *      Nor does the inserted-block class, swept a second time across the
  *      whole function rather than around the addPrim: after the pre-loop
  *      `fadeType = 0` store 88/2, after the `ev` assignment 87/1, after the
