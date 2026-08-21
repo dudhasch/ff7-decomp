@@ -1804,6 +1804,27 @@ a near-miss, in rough order of frequency:
   target's branch polarity and block order *literally* is also 731 -- so read
   the length, not the CFG.
 
+* **On a function hundreds of rows out, count instructions before reading
+  any.** `tools/insn_histogram.py <src> <func>` prints the compiled length and
+  two tables: opcodes (objdump's aliases folded back to the `.s` spelling, or
+  `move` against `addu ..,$zero` drowns the comparison) and `%hi`
+  materialisations per symbol. Both are alignment-free, so unlike a row count
+  they stay meaningful at any distance, and they compress a wall of diff into
+  one sentence. `FieldDebugRenderPage` at +1 instruction reads
+  `nop +14, lui +8` against `addu -12, sll -7, sra -3` — the target re-expands
+  an index and gets its load-delay slots filled for it. `FieldBGUpdateDrawenv`
+  reads `lui +30 / addiu -44`, which is the single fact that it rebuilds
+  addresses where the target keeps them, and the per-symbol table then names
+  the two globals responsible (27 materialisations against 9).
+
+  The per-symbol table is also the honest check on a length fix. Reading one
+  of those two globals through a pointer local takes that function to exactly
+  the target's 1266 instructions — and collapses the symbol to **1**
+  materialisation against 9, hitting the length only because a +18 error
+  cancels a -8 one. A length that is right for the wrong reason is the
+  `FieldBackgroundInitPackets` trap in advance; check the table before landing
+  one.
+
 * **`variant_eval.py` prints the compiled length too, and that is the number
   to read.** It reports `length <ours> against <target> (+N instructions)`
   whenever the two differ, taken from the function's ELF symbol size rather
@@ -3558,6 +3579,7 @@ line N`, so keep the prose colon-free and put `// size:0xN` on its own.
 | `tools/worklist.py` | Per-file work list: what is left, blocked, handwritten, cheapest first |
 | `tools/checkfn.py` | Per-function match verdict; use instead of eyeballing `diff.py` |
 | `tools/parked_queue.py` | Every parked near-miss in a file, measured and ordered closest-first |
+| `tools/insn_histogram.py` | A function against its target by opcode and by symbol — what is wrong, not how many rows |
 | `tools/rodata_owner.py` | Whether a function can be decompiled without shifting `.rodata` |
 | `tools/asm_widths.py` | Per-symbol access width from a target `.s` — what an m2c seed's byte offsets have to be cast to |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |

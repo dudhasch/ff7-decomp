@@ -464,13 +464,53 @@ typedef struct {
  * our -0x58, with the same saved-register set), and one entity-offset
  * variable computed once rather than m2c's two.
  *
- * What is left is a control-flow difference, not scheduling: the target has
- * a `slti v0,v1,2` / `bnez` range test and an `addiu a0,sp,0x10` that this
- * body does not emit at all, and four `lhu`/`ori` read-modify-writes that it
- * does and the target does not. Read the dispatch against the target's
- * branch structure before touching anything else -- CLAUDE.md's rule about a
- * folded range test in front of a `switch` deleting the switch's own bounds
- * check is the first thing to check here.
+ * What is left is a control-flow difference, not scheduling, and
+ * `tools/insn_histogram.py` now says so in numbers rather than by inference.
+ * At 811 rows and +27 instructions the whole residue is addressing:
+ *
+ *     addiu  90/134  -44      lui   253/223  +30
+ *     lh      21/35  -14      lhu   149/137  +12
+ *
+ * That pair is one fact: `lui rN,%hi(sym)` plus a `%lo` embedded in the load
+ * is the form gcc emits for a single reference, and `lui`+`addiu` into a
+ * register that several accesses then share is the form it emits when the
+ * address survives. The target holds addresses; this body rebuilds them. Per
+ * symbol, `%hi` counts: `g_FieldScreenCenterX` 27 against 9,
+ * `g_FieldScreenCenterY` 27 against 9, and every one of the ten `D_801139..`
+ * / `D_80114...` objects 4 or 7 against 2 or 4.
+ *
+ * **The obvious lever hits the length and is a trap.** Reading
+ * `g_FieldScreenCenterY` through a named `s16*` local -- CLAUDE.md's
+ * `DebugUpdateActor` idiom -- takes the function to **exactly 1266
+ * instructions**, the target's length, at 818 rows. It is still wrong: the
+ * pointer collapses that symbol to **1** materialisation where the target has
+ * 9, and the length only comes out right because a +18 error on X cancels a
+ * -8 error on Y. Doing both symbols is -24 instructions, X alone -4. This is
+ * the `FieldBackgroundInitPackets` shape exactly -- two wrong things that add
+ * to a right number and then lock each other in place -- so it was measured
+ * and deliberately not landed.
+ *
+ * What that leaves is a single question, and it is the one the note already
+ * had: the target materialises *both* screen-centre symbols nine times, and
+ * neither reading them directly (27) nor holding a pointer (1) produces nine.
+ * Nine is a count of live ranges, which is a count of basic blocks, so the
+ * addressing follows the control flow rather than the other way round. Two
+ * concrete traces of that flow to reconstruct first:
+ *   - the target has a `slti v0,v1,2` / `bnez` range test and an
+ *     `addiu a0,sp,0x10` this body never emits (`slti` 0 against 1 in the
+ *     histogram), and CLAUDE.md's rule about a folded range test in front of a
+ *     `switch` deleting the switch's own bounds check is what to check.
+ *   - `D_80071E38` and `D_80071E3C` are each read **once signed and seven
+ *     times unsigned** in the target, against eight unsigned here. One use of
+ *     each wants an `lh`, and finding which is a free extra data point about
+ *     where the blocks divide.
+ *
+ * Two theories checked and dead, so nobody re-checks them: the ten
+ * `D_801139..`/`D_80114...` objects are 0x5C apart with no gaps, which reads
+ * like one array of ten -- but the target materialises each of their symbols
+ * separately, so they are ten objects and indexing them would be wrong. And
+ * the `lh`/`lhu` gap is not a declaration error: the two symbols above are
+ * read both ways *within the target itself*.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGUpdateDrawenv);
