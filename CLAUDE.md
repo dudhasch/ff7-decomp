@@ -665,6 +665,47 @@ a near-miss, in rough order of frequency:
   companion to the `FieldBackgroundInitPackets` bullet above, not a replacement
   — there the bodies were small and the rotation was the whole cost, so a
   backward goto won.
+  The choice also decides register allocation, not just hoisting, and that is
+  the larger half. `REG_N_REFS += loop_depth` in flow, so every reference in a
+  walk that gcc recognises as a loop counts double — and `allocno_compare`
+  ranks by `floor_log2(n_refs) * n_refs / live_length`, whose `floor_log2` step
+  makes crossing a power of two worth about 30% of an allocno's priority. So a
+  value referenced only in the *outer* walks (a cursor advanced once per run, a
+  pointer passed to a call there) gains nothing while the walks are backward
+  gotos, loses to any counter incremented inside an inner `do`/`while`, and is
+  the one that spills. Turn the outer walks into `for (;;)` loops and it wins
+  the register instead. `FieldBackgroundInitPackets` in `src/field/field.c` is
+  the case: with four backward-goto walks the target's `modes` pointer spills
+  and each of its four `modes++` costs an `lw`/`addiu`/`sw`, and every register
+  downstream renames — 48 rows. All four walks have to change together (layers
+  1+2 alone measure 181, layers 3+4 alone 171, all four 118), because it is the
+  *total* weighted count that has to cross 16. The park note there had measured
+  `while` and `for (;;) { … break; }`, found both worse, and concluded the goto
+  walks were load-bearing; it never tried the third spelling. When a diff is
+  dozens of rows of renaming plus a spilled pointer the target keeps in a
+  callee-saved register, count the loop-weighted references before touching the
+  expression.
+* **`combine_givs` bases a loop body's address giv on the *last* offset
+  referenced in insn order, so the field a struct-filling loop writes last
+  decides every displacement in it.** A packet loop writing r0…v0, then `clut`,
+  `w`, `h` bases on `sprt+0x12`; writing `w`, `h`, then `clut` bases on
+  `sprt+0xe`, and every `sb`/`sh` in the body moves by 4. The two are the same
+  program and the *emitted* order is `w`, `h`, `clut` either way — sched2 sinks
+  the clut store regardless — so the diff reads as pure scheduling noise with a
+  constant offset, which is the tell. Read the base off the target
+  (`addiu s0,s6,0xe` against your `addiu s0,s6,0x12`), subtract, and move the
+  field at that offset to the end of the source block. Worth 22 rows across two
+  loops in `FieldBackgroundInitPackets`, where layers 1 and 2 already ended
+  with `clut` and had matched all along, which is what made layers 3 and 4 look
+  like an allocation problem.
+* **`f(…, *p++, …)` and `f(…, p[0], …); p++;` are not the same schedule when
+  `p` is spilled.** As an argument, the load and the spilled pointer's
+  read-modify-write form one dependency chain sched2 keeps together, so the
+  load-delay slot after the `lw` of `p` gets a `nop`; split into two statements
+  the chain breaks and an unrelated invariant increment fills the slot. Thirteen
+  rows across four call sites in `FieldBackgroundInitPackets`, and it only pays
+  once the *other* pointer in the call is written out separately too —
+  `f(q++, …, p[0], …)` measures back where it started.
 * **Read a loop-invariant global directly; do not hoist it into a local
   yourself.** Both spellings load it once outside the loop, but a local is a
   source statement and lands among the surrounding code, while letting gcc hoist
@@ -1536,7 +1577,14 @@ a near-miss, in rough order of frequency:
   expansion, a scheduler/expansion coupling", when the record struct was the
   wrong size. Re-derive a note's claim from the `.s` before spending a budget
   on top of it; the rejected-spellings list in a note is worth keeping, the
-  diagnosis is worth re-checking.
+  diagnosis is worth re-checking. And a rejected-spellings list is only as
+  good as the set of spellings it enumerates: `FieldBackgroundInitPackets`'
+  note recorded `while` (191/43) and `for (;;) { … break; }` (177/36) for its
+  four run walks and concluded from those two numbers that "the goto walks are
+  load-bearing". The third spelling, which this file documents two bullets
+  above, is the one that works, and it was worth 48 rows plus the register
+  allocation the same note called "the whole function" and had found no lever
+  for. When a note rejects a lever, check it rejected *every* spelling of it.
 * **Correct the program first, then hand it to the permuter.** These two are
   not alternatives and the order matters. `FieldModelBsxTdbModify` sat at
   44 changed / 7 inserted; a permuter run on that body is hill-climbing a
