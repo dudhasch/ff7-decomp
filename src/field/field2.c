@@ -1632,7 +1632,28 @@ extern u8 D_801144D8; // blink RNG cursor
  * first and takes the lower register. Nothing available moves it -- all four
  * declaration positions and `s16`/`s32`/`u8` were measured (13, 13, 13, 2),
  * and assigning `faceSel` just before the fourth loop to shorten its range
- * costs 48. Next pass: attack the priority, not the movable order. */
+ * costs 48. Next pass: attack the priority, not the movable order.
+ *
+ * The priority has now been attacked, from both sides, and it does not move.
+ * `n_refs` is not reachable from the source, because cse re-shares the two
+ * constants however they are spelled: writing one of `blinkClosed`'s two
+ * stores as the literal 2 (either one), giving the 1 an extra pair of refs by
+ * letting `blinkOpen` carry the else-arm stores, and both changes together all
+ * measure the same 13 rows and the same s5/s6 swap. So does every declaration
+ * position for `blinkOpen`, including first in the function.
+ *
+ * The other side -- carrying the 1 in a pseudo that already exists, so no
+ * allocno is added at all -- is the more interesting negative. `kawaiOp`, the
+ * s16 the third loop uses and which is dead by the fourth, gives a *third*
+ * residue: 3 rows, with `li s4,0x1` in exactly the target's slot and the
+ * faceSel/blinkClosed registers correct, but the guard rematerialising its own
+ * `li v0,0x1` instead of comparing against s4 -- an HImode pseudo cannot serve
+ * a QImode compare, so cse hands it a fresh constant and the movable is used
+ * only by the else-arm stores. `blink`, the s32 the loop assigns later, gives
+ * 68: extending its live range to the loop top makes it a movable of its own.
+ * So the three shapes available are 2 rows with the order wrong, 3 rows with
+ * the compare rematerialised, and 13 rows with two registers swapped, and the
+ * function wants a fourth that C does not appear to spell. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
@@ -2254,7 +2275,24 @@ extern u16 D_8011446C;
  * and the sprite -- which is what the target's callee-saved `$s3` looks like
  * -- costs 43 rows; a named `SPRT_16* spr` for the addPrim value costs 47;
  * and parenthesising the addPrim value as `(s32)buf + (i * 0x10 + 0x40C0)` is
- * inert, so fold's reassociation is not reachable from the source either. */
+ * inert, so fold's reassociation is not reachable from the source either.
+ *
+ * A second budget added five more measurements, all negative, and together
+ * they say the two remaining levers do not exist in C. Wrapping the offset
+ * sum in a cast to block fold -- `(s32)(i * 0x10 + 0x40C0) + (s32)buf` and
+ * the same with `(u32)` -- is inert to the instruction, because a conversion
+ * to a type the operand already has is not a NOP_EXPR at all: the C front
+ * end's `convert` returns the operand unchanged, so fold never sees a barrier.
+ * Writing the multiply first in the trigger address, for the two `0x230`
+ * accesses alone and for all five accesses in the loop, is also inert: fold
+ * canonicalises a PLUS's operands before expand ever runs, so the emitted
+ * `addu` order is not a function of source order. And giving the addPrim
+ * value a plain byte-offset local -- `s32 off = i * 0x10 + 0x40C0;` at the
+ * top of the loop body, then `(SPRT_16*)((s32)buf + off)`, which is the one
+ * shape that would hand expand the target's two insns directly -- costs
+ * 45 rows and 5 insertions, the same cliff the `SPRT_16* spr` local fell off:
+ * the local is live across `RotTransPers`, `GetClut` and `addPrim`, takes a
+ * callee-saved register, and the whole loop reallocates around it. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldArrowsAddToRender);
 #else

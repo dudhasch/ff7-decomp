@@ -1558,6 +1558,24 @@ a near-miss, in rough order of frequency:
   of the local before concluding the local itself is wrong. That note had
   rejected the one alternative it tried and concluded "the local is right" —
   it was right, and in the wrong place.
+* **A rotation of two or three registers inside one basic block is caused by a
+  value that is not in the block.** When the whole residue is `$v0`/`$a0`
+  trading places across a lookup — same opcodes, same order, same count — the
+  extra pressure comes from something *computed above* the block and *used
+  below* it, which is live across it and competes in local-alloc's quantity
+  ordering. It is invisible in the block's source, which is precisely why every
+  spelling of the block measures identically. `OpcodeFuncCanim` and
+  `OpcodeFuncCanmEx` in `src/field/field4.c` were 10 rows out for exactly this:
+  `lastFrame = GET_PARAM_U8(3) / divisor;` sat with the function's other two
+  divisions, above `&g_FieldModelData->modelEntries[loader[i].modelEntryIndex]`,
+  and was consumed by the clamp below it. Moving that one line down to the
+  clamp matched both functions outright — after a named `entryIdx` local, every
+  modelIdx type, repeating `g_EntityToModel[g_CurrentEntity]`, declaration
+  order, `- 1` against `+ 0xFFFF` and `u8 unusedLocals[N]` had all been
+  measured on the lookup itself and were all inert. Look for the crossing value
+  before touching the expression; when there is no such value the rotation does
+  not move at all, which is where `OpcodeFuncMove` and `FieldMoveToEntityUpdate`
+  are still parked.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

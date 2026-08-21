@@ -4628,23 +4628,28 @@ s32 OpcodeFuncAnimEx(void) {
  *     constant gets $v0, which is the documented idiom and is worth 26 rows
  *     here (36 -> 10).
  *
- * The residue is two register-naming ties, both inside the last basic block
- * and both immune to everything measured. The model-entry address puts the
- * loader's entryIdx in $v0 and g_FieldModelData in $a0; we allocate them the
- * other way round. The two clamp copies want $a0/$v1 where we get $v1/$a3.
- * Measured, all still 10: declaration order of every pair of same-type
- * locals, a named `entryIdx` local, `s16`/`s32` modelIdx, repeating
- * `g_EntityToModel[g_CurrentEntity]` instead of the modelIdx local, a `u16`
- * local for the raw frame count, and `- 1` against `+ 0xFFFF` (identical
- * code -- gcc materialises the HImode constant either way). Inlining `anims`
- * costs 11 rows and `u8 unusedLocals[8]` 4. Splitting the lookup into an
- * `s32 entryIdx` statement -- which is what unparked FieldUpdateAnimationState
- * off an identical-looking rotation -- is inert here too; see the longer note
- * on OpcodeFuncMove. A permuter target: the instruction sequence is already
- * exact. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanim);
-#else
+ *   - and the last ten rows: **the third division is computed after the model
+ *     lookup, not before it.** `lastFrame = GET_PARAM_U8(3) / divisor;`
+ *     written where the other two divisions are -- which is where it reads
+ *     naturally, and where m2c put it -- leaves `lastFrame` live across the
+ *     whole `&g_FieldModelData->modelEntries[loader[modelIdx].modelEntryIndex]`
+ *     lookup. That is one extra quantity competing in that block, and it
+ *     flips the order local-alloc processes the two quantities the lookup
+ *     itself creates: the loader's entryIdx and the g_FieldModelData pointer
+ *     swap $v0 and $a0, and the two clamp copies downstream of them swap
+ *     $a0/$v1 for $v1/$a3. Moving the division down to sit immediately above
+ *     the clamp that consumes it takes it out of the block and all ten rows
+ *     go at once.
+ *
+ * That last one is worth stating as a rule, because four functions in this
+ * file were parked on the same-looking rotation and the earlier notes all
+ * blamed the lookup expression: when a diff is nothing but two or three
+ * registers rotating inside one basic block, look for a value that is
+ * *computed* before the block and *used* after it. It is not in the block's
+ * source at all, which is exactly why every spelling of the block measures
+ * the same. Everything tried on the expression was inert here and is recorded
+ * for the two that are still parked -- see the longer note on OpcodeFuncMove,
+ * where no such value exists and the rotation survives. */
 s32 OpcodeFuncCanim(void) {
     u8 modelIdx;
     u8* anims;
@@ -4673,12 +4678,12 @@ s32 OpcodeFuncCanim(void) {
             D_8009D828[g_EntityToModel[g_CurrentEntity]] / divisor;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
             (GET_PARAM_U8(2) / divisor) * 16;
-        lastFrame = GET_PARAM_U8(3) / divisor;
         modelIdx = g_EntityToModel[g_CurrentEntity];
         model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
                                                     .modelEntryIndex];
         anims = model->modelData + model->animationOffset;
         maxFrame = *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+        lastFrame = GET_PARAM_U8(3) / divisor;
         if (maxFrame < lastFrame) {
             g_FieldModels[modelIdx].animLastFrame = maxFrame;
         } else {
@@ -4698,7 +4703,6 @@ s32 OpcodeFuncCanim(void) {
     }
     return 1;
 }
-#endif
 
 /* CANM!1/CANM!2 (change animation, hold the last frame): OpcodeFuncCanim with
  * three constants changed -- opcode 0xB1 instead of 0xB0, the asynchronous
@@ -4708,12 +4712,10 @@ s32 OpcodeFuncCanim(void) {
  * 16. Everything else, including the `s16` divisor and frame bound and the
  * `break` at the end of the arm, is CANIM's; read that note for why.
  *
- * 10 rows out, and the residue is the same two register-naming ties, row for
- * row -- so whatever moves one of these two moves both. Was an m2c seed that
- * did not compile. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncCanmEx);
-#else
+ * Was an m2c seed that did not compile, then 10 rows out with the same two
+ * register-naming ties as CANIM, row for row -- and it fell to the same one
+ * line, the third division moved below the model lookup. Whatever moves one
+ * of these two moves both. */
 s32 OpcodeFuncCanmEx(void) {
     u8 modelIdx;
     u8* anims;
@@ -4742,12 +4744,12 @@ s32 OpcodeFuncCanmEx(void) {
             D_8009D828[g_EntityToModel[g_CurrentEntity]] / divisor;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
             GET_PARAM_U8(2) * 16;
-        lastFrame = GET_PARAM_U8(3) / divisor;
         modelIdx = g_EntityToModel[g_CurrentEntity];
         model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
                                                     .modelEntryIndex];
         anims = model->modelData + model->animationOffset;
         maxFrame = *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+        lastFrame = GET_PARAM_U8(3) / divisor;
         if (maxFrame < lastFrame) {
             g_FieldModels[modelIdx].animLastFrame = maxFrame;
         } else {
@@ -4767,7 +4769,6 @@ s32 OpcodeFuncCanmEx(void) {
     }
     return 1;
 }
-#endif
 
 s32 OpcodeFuncAnimw(void) {
     u8 modelIdx;
@@ -4852,7 +4853,36 @@ s32 OpcodeFuncAnimb(void) {
  * an `s32 lastFrame` local for the `- 1`, replacing modelIdx with the repeated
  * `g_EntityToModel[g_CurrentEntity]`, and every combination of the four. So
  * this is *not* that tie; it only looks like it. Whatever breaks it is
- * outside the lookup. Solve it once and four functions land. */
+ * outside the lookup.
+ *
+ * CANIM and CANM! then landed, and they confirm that diagnosis exactly: their
+ * rotation was caused by `lastFrame = GET_PARAM_U8(3) / divisor;` being
+ * computed above the lookup and consumed below it, so one extra quantity was
+ * live across the block; moving that one line down to the clamp matched both
+ * functions outright. MOVE and MOVA have no such value -- nothing they compute
+ * before the lookup survives past it -- which is why the same rotation is
+ * still here, and it means the remaining lever is not another spelling of the
+ * lookup either.
+ *
+ * The rotation is now `modelIdx / entryIdx / g_FieldModelData` as
+ * $a0 / $a1 / $v1 in the target against $a1 / $v1 / $a0 in ours, with the two
+ * halves of `anims` following as $a1/$a0 against $a0/$a1. Every quantity here
+ * reuses a register that has just died -- $a0 from g_CurrentEntity, $a1 from
+ * the last FieldEventReadMemoryS16 argument, $v1 from g_FieldModelLoaderData
+ * -- so both allocations are locally sensible and only the processing order
+ * differs. Measured on top of everything above, all still 14: `anims` with
+ * its two operands swapped; `model` inlined into `anims`; the modelIdx local
+ * repeated as the full expression in the lookup only, in the animLastFrame
+ * store only, or in both; and modelIdx declared first. Moving statements the
+ * way CANIM's fix does is much worse, because here they are stores and not a
+ * dead value -- the animSpeed store below the lookup costs 36 rows and 11
+ * insertions, animCurrentFrame 34/10, both 59/7, and hoisting modelIdx to
+ * just after the 0xFF guard 47/3. Inlining `anims` is 22/2 and repeating the
+ * expression inside the lookup alone 18/5.
+ *
+ * Next pass: read cc1's post-local-alloc RTL (`-dl`, and `-dg` for the
+ * global pass) rather than sweeping spellings. Two of the four are landed and
+ * the two that remain are one allocator decision apart. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else
@@ -5205,12 +5235,14 @@ s32 OpcodeFuncMova(void) {
  *     (Contrast the turn opcodes, where the tail has to be the function's
  *     fall-through end -- read the target for which one it wants.)
  *
- * The 14 rows are the model-entry allocation tie that OpcodeFuncCanim's note
- * describes, unchanged: modelIdx / entryIdx / g_FieldModelData come out as a
- * three-cycle away from the target. Also measured here and inert:
- * `g_FieldModelData->modelEntries + idx` instead of `&...[idx]`, and a local
- * for `g_FieldModelData`; a local for `modelEntries` costs 6. Four functions
- * are now parked on this one tie. */
+ * The 14 rows are the model-entry allocation tie, row for row the same one
+ * OpcodeFuncMove is parked on -- read that note, which now carries the whole
+ * measurement history. CANIM and CANM! shared it and landed once the value
+ * that was live across their lookup was moved out of the block; MOVE and MOVA
+ * have no such value, so two of the original four remain. Also measured here
+ * and inert: `g_FieldModelData->modelEntries + idx` instead of `&...[idx]`,
+ * and a local for `g_FieldModelData`; a local for `modelEntries` costs 6 more
+ * rows. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldMoveToEntityUpdate);
 #else
@@ -9164,29 +9196,47 @@ s32 OpcodeFuncNfade(void) {
  *     where a signed compare needs them, so the `!= 0` arm keeps its bare
  *     `beqz`.
  *
- * The four rows left are one register -- the first two arms load fadeAdjust
- * into $v1 where the target uses $v0 -- and that register is not reachable,
- * because it is what stops gcc cross-jumping. Both arms end
- * `beqz <reg>,<PC_INC> / li v0,1 / j <epilogue>`; the moment the compare
- * register agrees, those three insns are identical hard-register patterns and
- * the post-reload jump_optimize merges arm 1 into arm 2, deleting them and
- * leaving a bare `j` into the middle of arm 2. So every spelling that fixes
- * the register costs 3 insns and measures 9 rows, and the parked body's
- * "wrong" register is the only thing holding the two blocks apart.
+ * 4 rows -> 2, and the correction is that the two waiting arms are not
+ * spelled alike. The `>= 0xFF` arm reads the member straight into its
+ * comparison with no local at all, which is what puts its `lhu` in $v0; the
+ * `!= 0` arm keeps `adjust`, the same local the NFADE arm uses for its first
+ * read. Sharing one local across those two arms is what pins it to $v1, and
+ * the NFADE arm needs $v1 there because its base register is still live for
+ * the `fadeSpeed` load two insns later -- so the shared local is right for
+ * one arm and wrong for the other, and only the arm that does not use it can
+ * be fixed.
+ *
+ * The two rows left are that: the `!= 0` arm loads fadeAdjust into $v1 where
+ * the target uses $v0. The register is not reachable, because it is what
+ * stops gcc cross-jumping. Both waiting arms end `beqz <reg>,<PC_INC> /
+ * li v0,1 / j <epilogue>`; the moment the compare register agrees, those three
+ * insns are identical hard-register patterns and the post-reload jump_optimize
+ * merges the `!= 0` arm into the other, deleting them and leaving a bare `j`
+ * into the middle of it. The target has both copies, so the original was held
+ * apart by something that is not visible in the arms themselves.
  *
  * Measured and rejected, all 9 rows: both arms read inline with no local;
- * arms 1-2 inline with arm 3 keeping locals; a second local for arm 3;
- * block-scoped locals inside arm 3; all three arms inline. Distinct `goto`
- * labels for the two arms' exits do not help either (one, the other, or both,
- * with the labels placed immediately before the PC_INC) -- jump_optimize
- * collapses labels that resolve to the same address before cross-jumping ever
- * looks at the blocks. Also rejected earlier, at 22 rows: switching on a plain
- * (s16) cast of the member, on an s32 temp, and on an s16 temp, all three of
- * which fold the lhu/sll/sra into a single lh. And two that do not touch the
- * arms at all: declaring `adjust` ahead of `type` is byte-identical (4 rows --
- * the two do not compete, so declaration order is inert here as usual), and an
- * `s32 adjust` is 11, because the widening node disappears and the `< 0xFF`
- * compare loses its sll/sra pair.
+ * arms 1-2 inline with arm 3 keeping locals; a second local for arm 3 with
+ * arms 1-2 sharing `adjust`; three distinct locals; block-scoped locals inside
+ * arm 3; all three arms inline; and the `!= 0` arm reusing `type`, the switch
+ * selector, which is the one pseudo already in $v0 at that point. Retyping the
+ * shared local is 9 in every width -- s32, u32, u16 -- because arm 3's
+ * `!= speed` compare loses or gains a widening pair. Distinct `goto` labels
+ * for the two arms' exits do not help either (one, the other, or both, with
+ * the labels placed immediately before the PC_INC) -- jump_optimize collapses
+ * labels that resolve to the same address before cross-jumping ever looks at
+ * the blocks.
+ *
+ * Case order is not a lever either, and it is expensive to get wrong: the
+ * blocks are laid out in the order the `case` labels are written, so moving
+ * the NFADE/default arm between the two waiting arms costs 20 rows and an
+ * insertion, doing that with the `!= 0` arm inline costs 24, and simply
+ * swapping the two waiting arms costs 15. Also rejected earlier, at 22 rows:
+ * switching on a plain (s16) cast of the member, on an s32 temp, and on an s16
+ * temp, all three of which fold the lhu/sll/sra into a single lh. And one that
+ * does not touch the arms at all: declaring `adjust` ahead of `type` is
+ * byte-identical, the two not competing, so declaration order is inert here as
+ * usual.
  *
  * Permuter food: what is needed is a shape that keeps the two arms apart for
  * some reason other than the register, not another spelling of the same two
@@ -9220,8 +9270,7 @@ s32 OpcodeFuncFadew(void) {
     case FFT_FIELD_TO_STANDARD_ADD:
     case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
     case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
-        adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
-        if (adjust < 0xFF) {
+        if (((volatile FieldState*)g_FieldState)->fadeAdjust < 0xFF) {
             return 1;
         }
         break;
