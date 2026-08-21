@@ -2674,6 +2674,32 @@ pipe. Either way the durable signal is on disk: every improvement lands in
 `ls -d nonmatchings/*/output-* | sed 's/.*output-//' | sort -n | head` is the
 score board, and `diff nonmatchings/<fn>/base.c <that>/source.c` is the finding.
 
+**On this project the permuter's score does not track `checkfn`'s row count,
+so harvest only a score of zero.** Three functions, three clean scratches --
+relocations verified identical, `base.c` compiling to exactly the target's
+instruction count, `compile.sh` identical to the ninja command but for
+`-g`/`-gcoff` -- and in all three the best candidate of a long run measured no
+better or worse in the build:
+
+| function | base | best | `checkfn` on the winner |
+| --- | --- | --- | --- |
+| `FieldBackgroundInitPackets` | 1937 | 1547 | 43/4, i.e. *identical* to the body it started from |
+| `FieldModelCreatePktsForPart` | 6030 | 4660 | 232/22 against 218/29, and one instruction short |
+| `FieldMain` | 1780 | 1285 | semantically wrong (a truncated assignment) |
+
+A fifth to a quarter of the score, for nothing. The two scorers weight
+different things -- the permuter charges 100 per insertion and 5 per register
+where `checkfn` counts rows and discounts symbol aliases outright -- and the
+gap is wide enough that hill-climbing one says nothing about the other. What
+still works is the terminating condition: score 0 is a real match, and
+`--stop-on-zero` fires on it. So run the permuter as a *search for zero*, not
+as a source of partial improvements; do not spend a session's attention on
+`output-<score>/` directories, and re-measure with `checkfn.py` before
+believing any of them. Both of the finds in the table above are the passes
+this file recommends elsewhere (`perm_temp_for_expr` naming a subexpression,
+an extra local), applied to exactly the residue a reading of the diff
+identifies -- so being plausible is not evidence either.
+
 **Read the finding, do not paste it — and re-measure it.** The permuter reaches
 for two tricks that are noise rather than insight: rewriting every `a * b` as a
 call to an `inline int inline_fn(a, b) { return a * b; }`, and introducing a
