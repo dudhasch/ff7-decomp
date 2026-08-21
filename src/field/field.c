@@ -309,7 +309,7 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
- * The residue is 65 rows / 4 insertions with that object removed, in four
+ * The residue is 64 rows / 3 insertions with that object removed, in four
  * live clusters:
  *   1. the pre-loop block. The target builds &D_8009AC40 into a caller-saved
  *      register, stores through it, and derives `ev` from the *loop's* copy
@@ -334,12 +334,22 @@ extern s16 D_80071E3C;
  *   3. the fade block stores fadeType before fadeSpeed in the target and
  *      after it here. Both are struct stores at distinct constant offsets, so
  *      sched2 is free to swap them; it is not source order. 4 rows.
- *   4. the tail reads D_80071A5C with `lh` and eventCmdParam late, extending
- *      it in place; here eventCmdParam is loaded first into its own register
- *      and D_80071A5C comes out `lhu` plus a sll/sra pair. Everything on this
- *      dimension has now been measured against the corrected base and every
- *      one is worse: s32 temp 76/7, no temp 76/7, temp after the store 76/7,
- *      dropping the fieldId local 76/6, both 76/6. 10 rows.
+ *   4. the tail. Half of this closed: the `(s16)` cast on `fieldId` in
+ *      `if ((s16)fieldId != preloadId)` was producing a sll/sra pair on a
+ *      value that `lhu` had already zero-extended. Dropping it -- the two
+ *      operands are `u16` and `s16`, and for an equality test the signedness
+ *      of the promotion cannot matter -- is worth a row and an insertion.
+ *      What is left is that the target compares the raw `lhu` result against
+ *      an `lh` of D_80071A5C, where this build still masks with
+ *      `andi v1,a0,0xffff` because the `u16` local is live across the
+ *      g_CurrentFieldIndex store as well. Measured against this base and all
+ *      worse: `fieldId` as s32 or u32 (68/4), as s16 (65/4), dropping the
+ *      `preloadId` local and reading D_80071A5C inline (66/4), the compare
+ *      re-reading `*(u16*)(ev + 1)` (66/5), both (66/3), `preloadId !=
+ *      fieldId` (68/4). Dropping the `fieldId` local from the 0xC arm alone
+ *      measures 63/4 against 64/3 -- the same total, so it is left out.
+ *      Earlier, against the pre-volatile base: s32 temp 76/7, no temp 76/7,
+ *      temp after the store 76/7, dropping the fieldId local 76/6. 9 rows.
  *   5. the fill loop's two constants. `fillVal = -1;` written *above* the rain
  *      if/else is what puts `li a0,-1` in the guard's delay slot, the way the
  *      target has it -- the same lever as the `white` local in
@@ -530,7 +540,7 @@ void FieldMain(void) {
             *(u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
             fieldId = *(u16*)(ev + 1);
             g_CurrentFieldIndex = fieldId;
-            if ((s16)fieldId != preloadId) {
+            if (fieldId != preloadId) {
                 StopFieldMapPreload();
             }
             if ((u32)((u16)g_CurrentFieldIndex - 1) < 0x40) {
