@@ -325,6 +325,158 @@ that a later expression reads.
 """,
     ),
     Recipe(
+        "arm-swap",
+        "a length that is wrong by one instruction per copy of an if/else, or "
+        "a subexpression common to both arms rematerialised once too often",
+        "2 ** len(sites), so keep it to three or four ifs",
+        """
+/* Which arm is the fall-through is not a style choice: the blocks come out
+ * in source order, so it decides what reorg can steal into the two branch
+ * delay slots and what combine can fold in the block that is now laid out
+ * second. No decomp-permuter pass mutates this -- the CFG is identical, so
+ * every AST-level pass sees an equivalent program. */
+PERM_GENERAL(
+if (GetGraphType() == 1 || GetGraphType() == 2) {
+    tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+    tpBit = (t >> 7) & 0x20;
+} else {
+    tp = ((t & 0xC0) * 2) | (f & 0x60);
+    tpBit = ((t >> 4) & 0x100) >> 4;
+}
+,
+if (GetGraphType() != 1 && GetGraphType() != 2) {
+    tp = ((t & 0xC0) * 2) | (f & 0x60);
+    tpBit = ((t >> 4) & 0x100) >> 4;
+} else {
+    tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
+    tpBit = (t >> 7) & 0x20;
+}
+)
+""",
+        """
+Measured on FieldModelCreatePktsForPart in src/field/field2.c: the inverted
+form is exactly 727 instructions, the plain one 731 -- one per copy of the
+loop. Both differences are invisible in the arm you are looking at. `t & 0xC0`
+is computed twice in the inverted form (once into each branch delay slot,
+serving both arms) and three times in the plain one; and
+`((t >> 4) & 0x100) >> 4` survives as three instructions in the inverted form
+where combine folds it to `srl 8` / `andi 0x10` in the plain one.
+
+Do not try to reach either effect directly. Every spelling of that shift
+measures identically -- `(u16)` and `(s32)` casts, `/ 16`, `& 0x1000 >> 8`, a
+named intermediate, two `>> 2` -- and hoisting the mask into a local costs
+eight instructions, because it is then live across both calls and spills.
+
+A `goto` chain that reproduces the target's branch polarity and block order
+literally also measures 731, so read the length rather than the CFG. Use
+PERM_VAR to link the arms when the same if/else appears in several loops:
+they may or may not want to agree, and the macro can express both.
+""",
+    ),
+    Recipe(
+        "for-guard",
+        "the body is a couple of instructions long per counted loop, and m2c "
+        "printed `if (c != 0) { do { ... } while (i < c); }`",
+        "2 ** len(loops)",
+        """
+/* gcc expands `for (i = 0; i < c; i++)` as an init, a zero-trip test and a
+ * do-while -- which is exactly what m2c reconstructs from the CFG. Writing
+ * the guard as well does not fold: the bound is a struct field whose load
+ * gcc will not prove redundant, so the test is emitted twice. */
+    count = part->gt4Count;
+    PERM_GENERAL(, if (count != 0))
+    for (i = 0; i < count; i++, out += sizeof(POLY_GT4), poly += 6) {
+""",
+        """
+Worth 16 instructions across the eight loops of FieldModelCreatePktsForPart --
+two thirds of everything that function was over length, from a transcription
+that looked entirely faithful.
+
+The macro is worth having rather than just deleting every guard, because the
+opposite case is real too: a target that reaches its loop through its own
+guard, spelled against a register it has just proved to be zero, wants the
+hand-written `if`. Read whether the bound is reloaded inside the loop (write
+the member) or hoisted into the preheader (write a local), then let the macro
+settle the guard.
+""",
+    ),
+    Recipe(
+        "fold-order",
+        "an `addu` whose two operands are the other way round from the target, "
+        "at a base-plus-offset address",
+        "2 ** len(sites)",
+        """
+/* fold canonicalises a pointer PLUS so the pointer is op0, and no spelling of
+ * the pointer form moves it. Casting the base to s32 makes it an ordinary
+ * integer PLUS, which keeps source order -- so the cast is the knob, and the
+ * two orders are then both reachable. */
+PERM_VAR(UV, PERM_GENERAL(uv + (v & 0xFF) * 2, (v & 0xFF) * 2 + (s32)uv))
+    *(u16*)&p->u0 = *(u16*)(PERM_VAR(UV));
+""",
+        """
+Four sites in FieldModelCreatePktsForPart, and it also decides which of the
+two loads feeding the address is emitted first. Same lever as CLAUDE.md's
+`(u_long*)(param * 32 + (s32)p)` bullet, applied to a whole function at once.
+
+Link the sites with PERM_VAR when they are the same expression shape: they
+usually agree, and 2**4 collapses to 2.
+""",
+    ),
+    Recipe(
+        "spill-slot-order",
+        "spilled locals sit at the wrong `N(sp)` offsets, all of them, with the "
+        "frame size already right",
+        "permutations of the declaration block -- keep it to five or six lines",
+        """
+/* Reload hands out spill slots in pseudo order, and expand_decl creates one
+ * pseudo per local at the top of the function in *declaration* order. So the
+ * slot order is the declaration order, and PERM_LINESWAP enumerates it. */
+PERM_LINESWAP(
+u32 pass;
+s32 uOff0;
+s32 vOff0;
+s32 uOff1;
+s32 vOff1;
+u32* texInfo;
+)
+""",
+        """
+Six spilled locals in FieldModelCreatePktsForPart land at 0x28...0x50 in the
+target's own order the moment the declarations are in that order.
+
+This does not contradict CLAUDE.md's standing rule that declaration order is
+inert -- that rule is about hard registers, which are handed out by priority.
+In the same function, moving those declarations for any other reason (a `u8`
+to the end, four pointers to the front) is exactly inert. Only locals that
+actually get a stack slot are affected, so use this recipe when the diff is
+`N(sp)` rows and nothing else, and expect it to be inert otherwise.
+""",
+    ),
+    Recipe(
+        "flag-local",
+        "a branch around an addition where the target computes it with "
+        "`sltu` / `negu` / `and`",
+        "2 ** len(sites)",
+        """
+/* A comparison used as a value reaches expand_expr underneath the `+`, and
+ * gcc 2.6.3 emits a conditional jump around the arithmetic. Assign it to a
+ * local first and it is a statement of its own, do_store_flag runs, and the
+ * branchless sequence appears. `x & -(c != K)` is NOT a way to force it --
+ * fold turns it straight back into the same COND_EXPR. */
+PERM_GENERAL(
+clut = (((t * 2) >> 23) + (((t & 0x3F) != 2) ? texY : 0)) << 6;
+,
+shift = (t & 0x3F) != 2;
+clut = (((t * 2) >> 23) + (texY & -shift)) << 6;
+)
+""",
+        """
+Five instructions per site, four sites in FieldModelCreatePktsForPart. m2c
+renders the target's sequence as `(v & -((x & M) != K))`, which reads like a
+clever mask and is really just a named boolean one statement earlier.
+""",
+    ),
+    Recipe(
         "conserved-pair",
         "a residue of pure reorderings where every single-site fix is exactly "
         "neutral and everything else is catastrophic -- no gradient",
