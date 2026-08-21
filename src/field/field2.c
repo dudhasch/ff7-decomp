@@ -276,7 +276,22 @@ extern s16 D_8009C558;
  * the two carried values are typed or ordered (s16/s32 for the y target, its
  * assignment before or after arm 5's first call, either declaration order).
  * Something about the carried `s16` is wrong; the labels themselves are not
- * the problem. Codegen pinned via MASPSX_OVERRIDE. */
+ * the problem.
+ *
+ * Two more families measured since, both negative. Carrying the y target
+ * through the `screenPos` stack slot itself -- `SCREEN_Y = -SCREEN_Y;` in arm
+ * 2 and `SCREEN_Y = D_80075E20;` in arm 5, so the shared call reads
+ * `SCREEN_Y` and no new local exists -- is 42/8, and an ordinary `s16 yTarget`
+ * in the same shape is 42/7. Neither reaches the parked 26/2, so the carrier
+ * is not what the goto shape costs; the goto shape itself is.
+ *
+ * And the source order of the arms is not a lever either, which rules out the
+ * obvious reading of the residue. cross-jumping keeps one copy of the shared
+ * tail and the target's copy sits inside arm 2 while ours sits after arm 6, so
+ * writing arm 2 later ought to move it. It does not: 3,5,2,6 measures 57/6,
+ * 5,3,2,6 is 53/3, 3,2,5,6 is 30/2 and 6,2,3,5 is 61/14. The arms' emitted
+ * order follows the source and the survivor does not follow the order.
+ * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGScrollUpdate);
 #else
