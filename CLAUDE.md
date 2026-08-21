@@ -1804,6 +1804,19 @@ a near-miss, in rough order of frequency:
   target's branch polarity and block order *literally* is also 731 -- so read
   the length, not the CFG.
 
+* **A `%hi` table only means anything once addends and aliases are resolved,
+  and getting that wrong invents faults.** MIPS uses REL relocations, so
+  objdump prints the symbol name and nothing else -- the addend is split across
+  the `lui`/`lo` immediate pair. Read naively, every `g_FieldEntity[i].member`
+  looks like a reference to the base symbol rather than to
+  `g_FieldEntity + 0x32`, which is the same byte the target calls
+  `D_80074ED6`. `tools/insn_histogram.py` reassembles the addend and folds
+  names that share an address (and folds objdump's `c2` back to the GTE
+  mnemonics), because `checkfn.py` discounts exactly those differences. Before
+  it did, it reported `243 against 4` on a function whose addressing was
+  already correct, and a whole conversion was written and landed on that
+  reading before the length and row counts contradicted it.
+
 * **On a function hundreds of rows out, count instructions before reading
   any.** `tools/insn_histogram.py <src> <func>` prints the compiled length and
   two tables: opcodes (objdump's aliases folded back to the `.s` spelling, or

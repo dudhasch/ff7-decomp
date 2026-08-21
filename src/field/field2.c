@@ -1278,59 +1278,37 @@ extern FieldLine D_8007E7AC;
  *     shifts out of $v1; ours coalesces the two and shifts in place, leaving
  *     the branch delay slot empty. One row per pass.
 
- * **+21 instructions -> -9, and the addressing is now the target's.** Read the
- * row count with care: it goes 500 -> 781, and that is not a regression. The
- * old body used the wrong address form *consistently*, which aligned neatly
- * against the target and kept the row count low; 236 accesses changing shape
- * at once inflates rows until the last few faults are out. Length and the
- * `%hi` distribution are the evidence here, not rows.
+ * **Do not convert the entity reads to the byte-offset form here.** It was
+ * tried and reverted, and the reason it looked right is worth more than the
+ * attempt: `insn_histogram.py` reported `%hi(g_FieldEntity)` 243 times against
+ * the target's 4, which reads as the interior-label fault the debug functions
+ * and `FieldEntityMove` really do have. It was a tool bug. MIPS uses REL
+ * relocations, so objdump prints only the symbol and the addend lives split
+ * across the `lui`/`lo` immediate pair; without reassembling it, every
+ * `g_FieldEntity[i].member` looked like a reference to the base symbol rather
+ * than to `g_FieldEntity + 0x32`, which is the same byte as `D_80074ED6`.
  *
- * `tools/insn_histogram.py` reported `%hi(g_FieldEntity)` **243** times
- * against the target's **4**. The target barely names the array -- it names
- * **44 interior labels**, one per member, and every count matched a member
- * access in this body: MoveStep 22, animCurrentFrame 18, MoveSteps 16,
- * ActionState 15, MoveDir 10, MoveStartZ 9 ... 39 of the 44 exact on the
- * first comparison. So every entity read is the byte-offset form
- * `*(s16*)((u8*)&D_80074ED6 + off)`, the same one `FieldEntityMove` needed.
- * That count is now 13 against 4.
+ * With the addend recovered, this body's addressing was already right: three
+ * small count differences against the target, at 500 rows and +21
+ * instructions. The conversion -- `*(s16*)((u8*)&D_80074ED6 + off)` with an
+ * `s16 off` assigned at the top of each of the eight loops -- reaches -9
+ * instructions, and that is the only thing it improves: rows go 500 to 781 and
+ * the `%hi` differences go from three to six. Two of the three measures got
+ * worse, so it is out.
  *
- * Two things about `off` that are not guessable and cost 43 instructions
- * between them:
- *   - It is **one local per loop iteration**, assigned at the top of each of
- *     the eight loop bodies. Written inline as `i * 0x84` at all 236 sites the
- *     body comes out **175 instructions short**, because cse folds the
- *     multiply down to almost nothing.
- *   - It is **`s16`, not `s32`**. An `s32 off` is 52 instructions short; the
- *     narrow type makes every use re-extend, which is exactly the `sll`/`sra`
- *     traffic the target has, and takes the gap to 9.
- *
- * The five accesses indexed by `g_PlayerModelId` rather than `i` keep the
- * array subscript -- the target's four bare `g_FieldEntity` references are
- * those.
- *
- * What is left is now a short list rather than a wall, and every item is a
- * count:
- *   - `sra` +19: the `s16 off` over-extends somewhere; some accesses may want
- *     the wide offset.
- *   - `animCurrentFrame` 14 against 18 and `animLastFrame` 4 against 8: this
- *     body caches a value the original re-reads, four times each.
- *   - `TurnStep` 7 against 4, `OffsetStep` 11 against 9, `MoveSpeed` 4 against
- *     1: the same fault in the other direction.
- *   - `slti` 0 against 2: two comparisons this body does not emit at all.
- *   - `g_FieldEntity` 13 against 4: nine subscripts that are not member reads
- *     (address-taken) and that the original spells some other way.
- *
- * Measured and inert: the loop bound written as `D_8009AC1C` rather than
- * `g_FieldStateData.modelCount`. The histogram shows 16 against 15 there and
- * it looks like a fault, but the two are the same address, so `checkfn`
- * discounts it as an alias and the spelling costs two instructions.
+ * What survives is the list of count differences, which is where the real
+ * faults are and which the corrected tool now states cleanly:
+ *   - `D_80074ED6` (+0x32, `MoveStep`) 20 against 22, and `D_80074EDE`
+ *     (+0x3A, `TurnStep`) 5 against 4.
+ *   - `g_FieldEntity` itself 3 against 4.
+ * Those are single-figure differences in how often a member is re-read, not an
+ * addressing form, and they are what to chase next.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
 #else
 void FieldEntityMovementUpdate(s32 arg0) {
     s16 i;
-    s16 off;
     s16 actionEnd;
     FieldEntity* ents;
     s32 next;
@@ -1407,11 +1385,10 @@ void FieldEntityMovementUpdate(s32 arg0) {
     u8* temp_s3_3;
 
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         temp_v0_2 = g_FieldModelLoaderData[i].modelEntryIndex;
         if (temp_v0_2 != 0xFF) {
             temp_v1 = &g_FieldModelData->modelEntries[temp_v0_2];
-            if (*(u8*)((u8*)&D_80074F00 + off) == 1) {
+            if (g_FieldEntity[i].visible == 1) {
                 temp_v1->flags = 1;
             } else {
                 temp_v1->flags = 0;
@@ -1419,88 +1396,68 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
-        switch (*(u8*)((u8*)&D_80074EDF + off)) {
+        switch (g_FieldEntity[i].TurnType) {
         case 1:
-            *(u8*)((u8*)&D_80074EDC + off) = FieldCalcLinearStep(
-                *(s16*)((u8*)&D_80074EE0 + off),
-                *(s16*)((u8*)&D_80074EE2 + off), *(u8*)((u8*)&D_80074EDD + off),
-                *(u8*)((u8*)&D_80074EDE + off));
-            next = *(u8*)((u8*)&D_80074EDE + off) + 1;
-            if (*(u8*)((u8*)&D_80074EDE + off) ==
-                *(u8*)((u8*)&D_80074EDD + off)) {
+            g_FieldEntity[i].Dir = FieldCalcLinearStep(
+                g_FieldEntity[i].TurnStart, g_FieldEntity[i].TurnEnd,
+                g_FieldEntity[i].TurnSteps, g_FieldEntity[i].TurnStep);
+            next = g_FieldEntity[i].TurnStep + 1;
+            if (g_FieldEntity[i].TurnStep == g_FieldEntity[i].TurnSteps) {
                 goto turnDone;
             }
             goto turnStep;
         case 2:
-            *(u8*)((u8*)&D_80074EDC + off) = FieldCalcEaseInOut(
-                *(s16*)((u8*)&D_80074EE0 + off),
-                *(s16*)((u8*)&D_80074EE2 + off), *(u8*)((u8*)&D_80074EDD + off),
-                *(u8*)((u8*)&D_80074EDE + off));
-            next = *(u8*)((u8*)&D_80074EDE + off) + 1;
-            if (*(u8*)((u8*)&D_80074EDE + off) !=
-                *(u8*)((u8*)&D_80074EDD + off)) {
+            g_FieldEntity[i].Dir = FieldCalcEaseInOut(
+                g_FieldEntity[i].TurnStart, g_FieldEntity[i].TurnEnd,
+                g_FieldEntity[i].TurnSteps, g_FieldEntity[i].TurnStep);
+            next = g_FieldEntity[i].TurnStep + 1;
+            if (g_FieldEntity[i].TurnStep != g_FieldEntity[i].TurnSteps) {
                 goto turnStep;
             }
         turnDone:
-            *(u8*)((u8*)&D_80074EDF + off) = 3;
+            g_FieldEntity[i].TurnType = 3;
             break;
         turnStep:
-            *(u8*)((u8*)&D_80074EDE + off) = next;
+            g_FieldEntity[i].TurnStep = next;
             break;
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
-        switch (*(u8*)((u8*)&D_80074EFA + off)) {
+        switch (g_FieldEntity[i].OfsType) {
         case 1:
-            *(s16*)((u8*)&D_80074EE4 + off) = FieldCalcLinearStep(
-                *(s16*)((u8*)&D_80074EE6 + off),
-                *(s16*)((u8*)&D_80074EE8 + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            *(s16*)((u8*)&D_80074EEA + off) = FieldCalcLinearStep(
-                *(s16*)((u8*)&D_80074EEC + off),
-                *(s16*)((u8*)&D_80074EEE + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            next = *(u16*)((u8*)&D_80074EF8 + off) + 1;
-            *(s16*)((u8*)&D_80074EF0 + off) = FieldCalcLinearStep(
-                *(s16*)((u8*)&D_80074EF2 + off),
-                *(s16*)((u8*)&D_80074EF4 + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            if (*(u16*)((u8*)&D_80074EF8 + off) ==
-                *(u16*)((u8*)&D_80074EF6 + off)) {
+            g_FieldEntity[i].OffsetX = FieldCalcLinearStep(
+                g_FieldEntity[i].OffsetStartX, g_FieldEntity[i].OffsetEndX,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            g_FieldEntity[i].OffsetY = FieldCalcLinearStep(
+                g_FieldEntity[i].OffsetStartY, g_FieldEntity[i].OffsetEndY,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            next = g_FieldEntity[i].OffsetStep + 1;
+            g_FieldEntity[i].OffsetZ = FieldCalcLinearStep(
+                g_FieldEntity[i].OffsetStartZ, g_FieldEntity[i].OffsetEndZ,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            if (g_FieldEntity[i].OffsetStep == g_FieldEntity[i].OffsetSteps) {
                 goto ofsDone;
             }
             goto ofsStep;
         case 2:
-            *(s16*)((u8*)&D_80074EE4 + off) = FieldCalcEaseInOut(
-                *(s16*)((u8*)&D_80074EE6 + off),
-                *(s16*)((u8*)&D_80074EE8 + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            *(s16*)((u8*)&D_80074EEA + off) = FieldCalcEaseInOut(
-                *(s16*)((u8*)&D_80074EEC + off),
-                *(s16*)((u8*)&D_80074EEE + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            next = *(u16*)((u8*)&D_80074EF8 + off) + 1;
-            *(s16*)((u8*)&D_80074EF0 + off) = FieldCalcEaseInOut(
-                *(s16*)((u8*)&D_80074EF2 + off),
-                *(s16*)((u8*)&D_80074EF4 + off),
-                *(u16*)((u8*)&D_80074EF6 + off),
-                *(u16*)((u8*)&D_80074EF8 + off));
-            if (*(u16*)((u8*)&D_80074EF8 + off) !=
-                *(u16*)((u8*)&D_80074EF6 + off)) {
+            g_FieldEntity[i].OffsetX = FieldCalcEaseInOut(
+                g_FieldEntity[i].OffsetStartX, g_FieldEntity[i].OffsetEndX,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            g_FieldEntity[i].OffsetY = FieldCalcEaseInOut(
+                g_FieldEntity[i].OffsetStartY, g_FieldEntity[i].OffsetEndY,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            next = g_FieldEntity[i].OffsetStep + 1;
+            g_FieldEntity[i].OffsetZ = FieldCalcEaseInOut(
+                g_FieldEntity[i].OffsetStartZ, g_FieldEntity[i].OffsetEndZ,
+                g_FieldEntity[i].OffsetSteps, g_FieldEntity[i].OffsetStep);
+            if (g_FieldEntity[i].OffsetStep != g_FieldEntity[i].OffsetSteps) {
                 goto ofsStep;
             }
         ofsDone:
-            *(u8*)((u8*)&D_80074EFA + off) = 3;
+            g_FieldEntity[i].OfsType = 3;
             goto ofsEnd;
         ofsStep:
-            *(u16*)((u8*)&D_80074EF8 + off) = next;
+            g_FieldEntity[i].OffsetStep = next;
         ofsEnd:
             if (i == g_PlayerModelId) {
                 FieldEntityLineClear(&D_8007E7AC);
@@ -1509,9 +1466,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         temp_s3 = arg0 & 0x8000;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 0) {
+        if (g_FieldEntity[i].scriptedMoveMode == 0) {
             if (i == g_PlayerModelId) {
                 i = i;
                 if (g_FieldStateData.characterLock != 1) {
@@ -1536,9 +1492,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     if (arg0 & 0xF000) {
                         if (arg0 & 0x1000) {
                             var_v1_3 = i * 0x84;
-                            *(u8*)((u8*)&D_80074EDA + off) = 0;
+                            g_FieldEntity[i].MoveDir = 0;
                             if (temp_s3 != 0) {
-                                *(u8*)((u8*)&D_80074EDA + off) = 0x20;
+                                g_FieldEntity[i].MoveDir = 0x20;
                             }
                             if (arg0 & 0x2000) {
                                 var_v0_11 = 0xE0;
@@ -1546,9 +1502,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             }
                         } else if (arg0 & 0x4000) {
                             var_v1_3 = i * 0x84;
-                            *(u8*)((u8*)&D_80074EDA + off) = 0x80;
+                            g_FieldEntity[i].MoveDir = 0x80;
                             if (temp_s3 != 0) {
-                                *(u8*)((u8*)&D_80074EDA + off) = 0x60;
+                                g_FieldEntity[i].MoveDir = 0x60;
                             }
                             if (arg0 & 0x2000) {
                                 var_v0_11 = 0xA0;
@@ -1556,24 +1512,23 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             }
                         } else {
                             if (arg0 & 0x2000) {
-                                *(u8*)((u8*)&D_80074EDA + off) = 0xC0;
+                                g_FieldEntity[i].MoveDir = 0xC0;
                             }
                             if (temp_s3 != 0) {
                                 var_v1_3 = i * 0x84;
                                 var_v0_11 = 0x40;
                             block_61:
-                                *(u8*)((u8*)&D_80074EDA + off) = var_v0_11;
+                                g_FieldEntity[i].MoveDir = var_v0_11;
                             }
                         }
                         temp_s0_3 = i * 0x84;
-                        temp_a1_2 = *(u8*)((u8*)&D_80074ED9 + off);
-                        *(u8*)((u8*)&D_80074EDA + off) =
-                            *(u8*)((u8*)&D_80074EDA + off) +
+                        temp_a1_2 = g_FieldEntity[i].MoveDirAdd;
+                        g_FieldEntity[i].MoveDir =
+                            g_FieldEntity[i].MoveDir +
                             (*(u8*)(g_FieldTriggers + 0x9) + temp_a1_2);
                         temp_a0_6 = FieldEntityMove(i);
-                        if (*(u8*)((u8*)&D_80074EDB + off) == 0) {
-                            *(u8*)((u8*)&D_80074EDC + off) =
-                                *(u8*)((u8*)&D_80074EDA + off);
+                        if (g_FieldEntity[i].DirLock == 0) {
+                            g_FieldEntity[i].Dir = g_FieldEntity[i].MoveDir;
                         }
                         if (g_FieldStateData.eventCmd != 1) {
                             if (temp_a0_6 == 1) {
@@ -1595,20 +1550,18 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         temp_s0_4 = i * 0x84;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 1) {
+        if (g_FieldEntity[i].scriptedMoveMode == 1) {
             if (g_FieldAnimFreeze != 1) {
-                *(u8*)((u8*)&D_80074ED9 + off) = 0;
-                if (FieldEntityAutoMove(&g_FieldEntity[i],
-                                        *(s16*)((u8*)&D_80074F0C + off)) == 0) {
-                    *(s16*)((u8*)&D_80074F0E + off) = 2;
+                g_FieldEntity[i].MoveDirAdd = 0;
+                if (FieldEntityAutoMove(
+                        &g_FieldEntity[i], g_FieldEntity[i].ActionArg) == 0) {
+                    g_FieldEntity[i].ActionState = 2;
                 } else {
-                    *(s16*)((u8*)&D_80074F0E + off) = 1;
+                    g_FieldEntity[i].ActionState = 1;
                     FieldEntityMove(i);
-                    if (*(u8*)((u8*)&D_80074EDB + off) == 0) {
-                        *(u8*)((u8*)&D_80074EDC + off) =
-                            *(u8*)((u8*)&D_80074EDA + off);
+                    if (g_FieldEntity[i].DirLock == 0) {
+                        g_FieldEntity[i].Dir = g_FieldEntity[i].MoveDir;
                     }
                 }
                 FieldEntityAnimationUpdate(i);
@@ -1619,29 +1572,25 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         temp_s0_6 = i * 0x84;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 3) {
-            if (*(s16*)((u8*)&D_80074F0E + off) == 0) {
-                *(u8*)((u8*)&D_80074ED9 + off) = 0;
-                temp_a2 = (u16) * (s16*)((u8*)&D_80074F18 + off) * 0x18;
-                *(s32*)((u8*)&D_80074EBC + off) =
-                    *(s32*)((u8*)&D_80074EB0 + off);
-                *(s32*)((u8*)&D_80074EC0 + off) =
-                    *(s32*)((u8*)&D_80074EB4 + off);
-                *(s32*)((u8*)&D_80074EC4 + off) =
-                    *(s32*)((u8*)&D_80074EB8 + off);
+        if (g_FieldEntity[i].scriptedMoveMode == 3) {
+            if (g_FieldEntity[i].ActionState == 0) {
+                g_FieldEntity[i].MoveDirAdd = 0;
+                temp_a2 = (u16)g_FieldEntity[i].MoveEndI * 0x18;
+                g_FieldEntity[i].MoveStartX = g_FieldEntity[i].PosX;
+                g_FieldEntity[i].MoveStartY = g_FieldEntity[i].PosY;
+                g_FieldEntity[i].MoveStartZ = g_FieldEntity[i].PosZ;
                 FieldEntityVectorSub(
                     &sp10, temp_a2 + 8 + D_800E4274, temp_a2 + D_800E4274);
-                temp_a2_2 = (u16) * (s16*)((u8*)&D_80074F18 + off) * 0x18;
+                temp_a2_2 = (u16)g_FieldEntity[i].MoveEndI * 0x18;
                 FieldEntityVectorSub(&sp20, temp_a2_2 + 0x10 + D_800E4274,
                                      temp_a2_2 + 8 + D_800E4274);
-                var_v0_15 = *(s32*)((u8*)&D_80074F1C + off);
+                var_v0_15 = g_FieldEntity[i].MoveEndX;
                 if (var_v0_15 < 0) {
                     var_v0_15 += 0xFFF;
                 }
                 sp30.vx = var_v0_15 >> 0xC;
-                var_v0_16 = *(s32*)((u8*)&D_80074F20 + off);
+                var_v0_16 = g_FieldEntity[i].MoveEndY;
                 if (var_v0_16 < 0) {
                     var_v0_16 += 0xFFF;
                 }
@@ -1649,40 +1598,34 @@ void FieldEntityMovementUpdate(s32 arg0) {
                 temp_v0_4 =
                     FieldEntityCalculateZ(
                         &sp10, &sp20, &sp30,
-                        ((u16) * (s16*)((u8*)&D_80074F18 + off) * 0x18) +
-                            D_800E4274)
+                        ((u16)g_FieldEntity[i].MoveEndI * 0x18) + D_800E4274)
                     << 0xC;
-                temp_a1_3 = *(s16*)((u8*)&D_80074ED4 + off);
-                *(s32*)((u8*)&D_80074F24 + off) = temp_v0_4;
-                *(s16*)((u8*)&D_80074ED6 + off) = 0;
-                *(s16*)((u8*)&D_80074F0E + off) = 1;
-                *(s32*)((u8*)&D_80074ED0 + off) =
-                    ((s32)(temp_v0_4 - *(s32*)((u8*)&D_80074EC4 + off)) /
+                temp_a1_3 = g_FieldEntity[i].MoveSteps;
+                g_FieldEntity[i].MoveEndZ = temp_v0_4;
+                g_FieldEntity[i].MoveStep = 0;
+                g_FieldEntity[i].ActionState = 1;
+                g_FieldEntity[i].MoveB =
+                    ((s32)(temp_v0_4 - g_FieldEntity[i].MoveStartZ) /
                      temp_a1_3) -
                     ((s32) - (temp_a1_3 * 0x3E80) / 2);
             } else {
-                temp_v1_4 = *(s16*)((u8*)&D_80074ED6 + off);
-                if (*(s16*)((u8*)&D_80074ED4 + off) == temp_v1_4) {
-                    *(s16*)((u8*)&D_80074F0E + off) = 2;
-                    *(u16*)((u8*)&D_80074F16 + off) =
-                        (u16) * (s16*)((u8*)&D_80074F18 + off);
+                temp_v1_4 = g_FieldEntity[i].MoveStep;
+                if (g_FieldEntity[i].MoveSteps == temp_v1_4) {
+                    g_FieldEntity[i].ActionState = 2;
+                    g_FieldEntity[i].PosI = (u16)g_FieldEntity[i].MoveEndI;
                 } else {
-                    *(s16*)((u8*)&D_80074ED6 + off) = temp_v1_4 + 1;
-                    *(s32*)((u8*)&D_80074EB0 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EBC + off),
-                        *(s32*)((u8*)&D_80074F1C + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    temp_a0_7 = *(s16*)((u8*)&D_80074ED6 + off);
-                    *(s32*)((u8*)&D_80074EB4 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EC0 + off),
-                        *(s32*)((u8*)&D_80074F20 + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    *(s32*)((u8*)&D_80074EB8 + off) =
-                        (temp_a0_7 * *(s32*)((u8*)&D_80074ED0 + off)) +
+                    g_FieldEntity[i].MoveStep = temp_v1_4 + 1;
+                    g_FieldEntity[i].PosX = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartX, g_FieldEntity[i].MoveEndX,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    temp_a0_7 = g_FieldEntity[i].MoveStep;
+                    g_FieldEntity[i].PosY = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartY, g_FieldEntity[i].MoveEndY,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    g_FieldEntity[i].PosZ =
+                        (temp_a0_7 * g_FieldEntity[i].MoveB) +
                         ((s32)(temp_a0_7 * -(temp_a0_7 * 0x3E80)) / 2) +
-                        *(s32*)((u8*)&D_80074EC4 + off);
+                        g_FieldEntity[i].MoveStartZ;
                 }
             }
             FieldEntityAnimationUpdate(i);
@@ -1692,39 +1635,35 @@ void FieldEntityMovementUpdate(s32 arg0) {
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         actionEnd = 2;
         ents = g_FieldEntity;
         temp_s0_8 = i * 0x84;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 4) {
+        if (g_FieldEntity[i].scriptedMoveMode == 4) {
             temp_a0_8 = g_FieldModelLoaderData[i].modelEntryIndex;
             if (temp_a0_8 != 0xFF) {
                 temp_v0_5 = &g_FieldModelData->modelEntries[temp_a0_8];
                 temp_s3_2 = &temp_v0_5->modelData[temp_v0_5->animationOffset];
-                if (*(s16*)((u8*)&D_80074F0E + off) == 0) {
-                    *(s32*)((u8*)&D_80074EBC + off) =
-                        *(s32*)((u8*)&D_80074EB0 + off);
-                    *(u8*)((u8*)&D_80074ED9 + off) = 0;
-                    *(s32*)((u8*)&D_80074EC0 + off) =
-                        *(s32*)((u8*)&D_80074EB4 + off);
-                    *(s32*)((u8*)&D_80074EC4 + off) =
-                        *(s32*)((u8*)&D_80074EB8 + off);
-                    var_a1 = *(s32*)((u8*)&D_80074F1C + off) -
-                             *(s32*)((u8*)&D_80074EBC + off);
+                if (g_FieldEntity[i].ActionState == 0) {
+                    g_FieldEntity[i].MoveStartX = g_FieldEntity[i].PosX;
+                    g_FieldEntity[i].MoveDirAdd = 0;
+                    g_FieldEntity[i].MoveStartY = g_FieldEntity[i].PosY;
+                    g_FieldEntity[i].MoveStartZ = g_FieldEntity[i].PosZ;
+                    var_a1 =
+                        g_FieldEntity[i].MoveEndX - g_FieldEntity[i].MoveStartX;
                     if (var_a1 < 0) {
                         var_a1 += 0xFFF;
                     }
                     temp_a1_4 = var_a1 >> 0xC;
                     sp10.vx = temp_a1_4;
-                    temp_v1_5 = *(s32*)((u8*)&D_80074F20 + off) -
-                                *(s32*)((u8*)&D_80074EC0 + off);
+                    temp_v1_5 =
+                        g_FieldEntity[i].MoveEndY - g_FieldEntity[i].MoveStartY;
                     var_a0_3 = temp_v1_5 >> 0xC;
                     if (temp_v1_5 < 0) {
                         var_a0_3 = (s32)(temp_v1_5 + 0xFFF) >> 0xC;
                     }
                     sp10.vy = var_a0_3;
-                    var_v0_19 = *(s32*)((u8*)&D_80074F24 + off) -
-                                *(s32*)((u8*)&D_80074EC4 + off);
+                    var_v0_19 =
+                        g_FieldEntity[i].MoveEndZ - g_FieldEntity[i].MoveStartZ;
                     if (var_v0_19 < 0) {
                         var_v0_19 += 0xFFF;
                     }
@@ -1737,36 +1676,35 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     if (temp_v0_7 < 0) {
                         var_v1_4 = temp_v0_7 + 3;
                     }
-                    *(s16*)((u8*)&D_80074ED4 + off) = (s16)(var_v1_4 >> 2);
-                    *(s16*)((u8*)&D_80074ED6 + off) = 0;
-                    *(s16*)((u8*)&D_80074F0E + off) = 1;
+                    g_FieldEntity[i].MoveSteps = (s16)(var_v1_4 >> 2);
+                    g_FieldEntity[i].MoveStep = 0;
+                    g_FieldEntity[i].ActionState = 1;
                     lastFrame =
-                        *(u16*)&temp_s3_2[*(u8*)((u8*)&D_80074F02 + off) * 16] -
+                        *(u16*)&temp_s3_2[g_FieldEntity[i].activeAnimId * 16] -
                         1;
-                    *(s16*)((u8*)&D_80074F08 + off) = lastFrame;
+                    g_FieldEntity[i].animLastFrame = lastFrame;
                     if (i == g_PlayerModelId) {
                         FieldEntityLineClear(&D_8007E7AC);
                     }
                 } else {
                     if (i == g_PlayerModelId) {
                         if (g_FieldAnimLock == 0) {
-                            if (*(s16*)((u8*)&D_80074F0C + off) == 0) {
+                            if (g_FieldEntity[i].ActionArg == 0) {
                                 if (arg0 & 0x1000) {
-                                    temp_v0_8 = *(s16*)((u8*)&D_80074ED6 + off);
+                                    temp_v0_8 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_8 == 0) {
-                                        *(s16*)((u8*)&D_80074F0E + off) =
+                                        g_FieldEntity[i].ActionState =
                                             actionEnd;
                                     } else {
                                         ents[i].MoveStep = temp_v0_8 - 1;
                                         temp_v0_9 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
-                                            (u16) *
-                                                (s16*)((u8*)&D_80074F04 + off);
-                                        *(s16*)((u8*)&D_80074F06 + off) =
+                                            (u16)g_FieldEntity[i].animSpeed;
+                                        g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_9;
                                         if (temp_v0_9 < 0) {
-                                            *(s16*)((u8*)&D_80074F06 + off) =
+                                            g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
@@ -1776,22 +1714,20 @@ void FieldEntityMovementUpdate(s32 arg0) {
                                 var_v0_20 = arg0 & 0x4000;
                             } else {
                                 if (arg0 & 0x4000) {
-                                    temp_v0_10 =
-                                        *(s16*)((u8*)&D_80074ED6 + off);
+                                    temp_v0_10 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_10 == 0) {
-                                        *(s16*)((u8*)&D_80074F0E + off) =
+                                        g_FieldEntity[i].ActionState =
                                             actionEnd;
                                     } else {
                                         ents[i].MoveStep = temp_v0_10 - 1;
                                         temp_v0_11 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
-                                            (u16) *
-                                                (s16*)((u8*)&D_80074F04 + off);
-                                        *(s16*)((u8*)&D_80074F06 + off) =
+                                            (u16)g_FieldEntity[i].animSpeed;
+                                        g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_11;
                                         if (temp_v0_11 < 0) {
-                                            *(s16*)((u8*)&D_80074F06 + off) =
+                                            g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
@@ -1802,9 +1738,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             }
                             if (var_v0_20 != 0) {
                                 var_a0_4 = i * 0x84;
-                                temp_v1_6 = *(s16*)((u8*)&D_80074ED6 + off);
-                                if (temp_v1_6 !=
-                                    *(s16*)((u8*)&D_80074ED4 + off)) {
+                                temp_v1_6 = g_FieldEntity[i].MoveStep;
+                                if (temp_v1_6 != g_FieldEntity[i].MoveSteps) {
                                     var_v1_5 = temp_v1_6 + 1;
                                     goto block_134;
                                 }
@@ -1816,79 +1751,68 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     }
                 block_131:
                     var_a0_4 = i * 0x84;
-                    temp_v1_7 = *(s16*)((u8*)&D_80074ED6 + off);
-                    if (temp_v1_7 == *(s16*)((u8*)&D_80074ED4 + off)) {
+                    temp_v1_7 = g_FieldEntity[i].MoveStep;
+                    if (temp_v1_7 == g_FieldEntity[i].MoveSteps) {
                     block_132:
-                        *(s16*)((u8*)&D_80074F0E + off) = actionEnd;
-                        *(u16*)((u8*)&D_80074F16 + off) =
-                            (u16) * (s16*)((u8*)&D_80074F18 + off);
+                        g_FieldEntity[i].ActionState = actionEnd;
+                        g_FieldEntity[i].PosI = (u16)g_FieldEntity[i].MoveEndI;
                     } else {
                         var_v1_5 = temp_v1_7 + 1;
                     block_134:
                         ents[i].MoveStep = var_v1_5;
-                        temp_v0_12 = (u16) * (s16*)((u8*)&D_80074F06 + off) +
-                                     (u16) * (s16*)((u8*)&D_80074F04 + off);
-                        *(s16*)((u8*)&D_80074F06 + off) = temp_v0_12;
-                        if ((*(s16*)((u8*)&D_80074F08 + off) * 0x10) <
+                        temp_v0_12 = (u16)g_FieldEntity[i].animCurrentFrame +
+                                     (u16)g_FieldEntity[i].animSpeed;
+                        g_FieldEntity[i].animCurrentFrame = temp_v0_12;
+                        if ((g_FieldEntity[i].animLastFrame * 0x10) <
                             temp_v0_12) {
-                            *(s16*)((u8*)&D_80074F06 + off) = 0;
+                            g_FieldEntity[i].animCurrentFrame = 0;
                         block_136:
                         }
                     }
                     temp_s0_9 = (i) * 0x84;
-                    *(s32*)((u8*)&D_80074EB0 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EBC + off),
-                        *(s32*)((u8*)&D_80074F1C + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    *(s32*)((u8*)&D_80074EB4 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EC0 + off),
-                        *(s32*)((u8*)&D_80074F20 + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    *(s32*)((u8*)&D_80074EB8 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EC4 + off),
-                        *(s32*)((u8*)&D_80074F24 + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
+                    g_FieldEntity[i].PosX = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartX, g_FieldEntity[i].MoveEndX,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    g_FieldEntity[i].PosY = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartY, g_FieldEntity[i].MoveEndY,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    g_FieldEntity[i].PosZ = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartZ, g_FieldEntity[i].MoveEndZ,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
                 }
             }
         }
     }
     for (i = 0; i < g_FieldStateData.modelCount; i++) {
-        off = i * 0x84;
         actionEnd = 2;
         ents = g_FieldEntity;
         temp_s0_10 = i * 0x84;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 5) {
+        if (g_FieldEntity[i].scriptedMoveMode == 5) {
             temp_a0_9 = g_FieldModelLoaderData[i].modelEntryIndex;
             if (temp_a0_9 != 0xFF) {
                 temp_v0_13 = &g_FieldModelData->modelEntries[temp_a0_9];
                 temp_s3_3 = &temp_v0_13->modelData[temp_v0_13->animationOffset];
-                if (*(s16*)((u8*)&D_80074F0E + off) == 0) {
-                    *(s32*)((u8*)&D_80074EBC + off) =
-                        *(s32*)((u8*)&D_80074EB0 + off);
-                    *(u8*)((u8*)&D_80074ED9 + off) = 0;
-                    *(s32*)((u8*)&D_80074EC0 + off) =
-                        *(s32*)((u8*)&D_80074EB4 + off);
-                    *(s32*)((u8*)&D_80074EC4 + off) =
-                        *(s32*)((u8*)&D_80074EB8 + off);
-                    var_a1_2 = *(s32*)((u8*)&D_80074F1C + off) -
-                               *(s32*)((u8*)&D_80074EBC + off);
+                if (g_FieldEntity[i].ActionState == 0) {
+                    g_FieldEntity[i].MoveStartX = g_FieldEntity[i].PosX;
+                    g_FieldEntity[i].MoveDirAdd = 0;
+                    g_FieldEntity[i].MoveStartY = g_FieldEntity[i].PosY;
+                    g_FieldEntity[i].MoveStartZ = g_FieldEntity[i].PosZ;
+                    var_a1_2 =
+                        g_FieldEntity[i].MoveEndX - g_FieldEntity[i].MoveStartX;
                     if (var_a1_2 < 0) {
                         var_a1_2 += 0xFFF;
                     }
                     temp_a1_5 = var_a1_2 >> 0xC;
                     sp10.vx = temp_a1_5;
-                    temp_v1_8 = *(s32*)((u8*)&D_80074F20 + off) -
-                                *(s32*)((u8*)&D_80074EC0 + off);
+                    temp_v1_8 =
+                        g_FieldEntity[i].MoveEndY - g_FieldEntity[i].MoveStartY;
                     var_a0_5 = temp_v1_8 >> 0xC;
                     if (temp_v1_8 < 0) {
                         var_a0_5 = (s32)(temp_v1_8 + 0xFFF) >> 0xC;
                     }
                     sp10.vy = var_a0_5;
-                    var_v0_24 = *(s32*)((u8*)&D_80074F24 + off) -
-                                *(s32*)((u8*)&D_80074EC4 + off);
+                    var_v0_24 =
+                        g_FieldEntity[i].MoveEndZ - g_FieldEntity[i].MoveStartZ;
                     if (var_v0_24 < 0) {
                         var_v0_24 += 0xFFF;
                     }
@@ -1900,37 +1824,35 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     if (var_v0_25 < 0) {
                         var_v0_25 += 3;
                     }
-                    *(s16*)((u8*)&D_80074ED4 + off) = (s16)(var_v0_25 >> 2);
-                    *(s16*)((u8*)&D_80074ED6 + off) = 0;
-                    *(s16*)((u8*)&D_80074F0E + off) = 1;
+                    g_FieldEntity[i].MoveSteps = (s16)(var_v0_25 >> 2);
+                    g_FieldEntity[i].MoveStep = 0;
+                    g_FieldEntity[i].ActionState = 1;
                     lastFrame =
-                        *(u16*)&temp_s3_3[*(u8*)((u8*)&D_80074F02 + off) * 16] -
+                        *(u16*)&temp_s3_3[g_FieldEntity[i].activeAnimId * 16] -
                         1;
-                    *(s16*)((u8*)&D_80074F08 + off) = lastFrame;
+                    g_FieldEntity[i].animLastFrame = lastFrame;
                     if (i == g_PlayerModelId) {
                         FieldEntityLineClear(&D_8007E7AC);
                     }
                 } else {
                     if (i == g_PlayerModelId) {
                         if (g_FieldAnimLock == 0) {
-                            if (*(s16*)((u8*)&D_80074F0C + off) == 0) {
+                            if (g_FieldEntity[i].ActionArg == 0) {
                                 if (arg0 & 0x8000) {
-                                    temp_v0_15 =
-                                        *(s16*)((u8*)&D_80074ED6 + off);
+                                    temp_v0_15 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_15 == 0) {
-                                        *(s16*)((u8*)&D_80074F0E + off) =
+                                        g_FieldEntity[i].ActionState =
                                             actionEnd;
                                     } else {
                                         ents[i].MoveStep = temp_v0_15 - 1;
                                         temp_v0_16 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
-                                            (u16) *
-                                                (s16*)((u8*)&D_80074F04 + off);
-                                        *(s16*)((u8*)&D_80074F06 + off) =
+                                            (u16)g_FieldEntity[i].animSpeed;
+                                        g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_16;
                                         if (temp_v0_16 < 0) {
-                                            *(s16*)((u8*)&D_80074F06 + off) =
+                                            g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
@@ -1940,22 +1862,20 @@ void FieldEntityMovementUpdate(s32 arg0) {
                                 var_v0_26 = arg0 & 0x2000;
                             } else {
                                 if (arg0 & 0x2000) {
-                                    temp_v0_17 =
-                                        *(s16*)((u8*)&D_80074ED6 + off);
+                                    temp_v0_17 = g_FieldEntity[i].MoveStep;
                                     if (temp_v0_17 == 0) {
-                                        *(s16*)((u8*)&D_80074F0E + off) =
+                                        g_FieldEntity[i].ActionState =
                                             actionEnd;
                                     } else {
                                         ents[i].MoveStep = temp_v0_17 - 1;
                                         temp_v0_18 =
                                             (u16)g_FieldEntity[i]
                                                 .animCurrentFrame -
-                                            (u16) *
-                                                (s16*)((u8*)&D_80074F04 + off);
-                                        *(s16*)((u8*)&D_80074F06 + off) =
+                                            (u16)g_FieldEntity[i].animSpeed;
+                                        g_FieldEntity[i].animCurrentFrame =
                                             temp_v0_18;
                                         if (temp_v0_18 < 0) {
-                                            *(s16*)((u8*)&D_80074F06 + off) =
+                                            g_FieldEntity[i].animCurrentFrame =
                                                 (u16)g_FieldEntity[i]
                                                     .animLastFrame *
                                                 0x10;
@@ -1966,9 +1886,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             }
                             if (var_v0_26 != 0) {
                                 var_a0_6 = i * 0x84;
-                                temp_v1_9 = *(s16*)((u8*)&D_80074ED6 + off);
-                                if (temp_v1_9 !=
-                                    *(s16*)((u8*)&D_80074ED4 + off)) {
+                                temp_v1_9 = g_FieldEntity[i].MoveStep;
+                                if (temp_v1_9 != g_FieldEntity[i].MoveSteps) {
                                     var_v1_6 = temp_v1_9 + 1;
                                     goto block_175;
                                 }
@@ -1980,41 +1899,34 @@ void FieldEntityMovementUpdate(s32 arg0) {
                     }
                 block_172:
                     var_a0_6 = i * 0x84;
-                    temp_v1_10 = *(s16*)((u8*)&D_80074ED6 + off);
-                    if (temp_v1_10 == *(s16*)((u8*)&D_80074ED4 + off)) {
+                    temp_v1_10 = g_FieldEntity[i].MoveStep;
+                    if (temp_v1_10 == g_FieldEntity[i].MoveSteps) {
                     block_173:
-                        *(s16*)((u8*)&D_80074F0E + off) = actionEnd;
-                        *(u16*)((u8*)&D_80074F16 + off) =
-                            (u16) * (s16*)((u8*)&D_80074F18 + off);
+                        g_FieldEntity[i].ActionState = actionEnd;
+                        g_FieldEntity[i].PosI = (u16)g_FieldEntity[i].MoveEndI;
                     } else {
                         var_v1_6 = temp_v1_10 + 1;
                     block_175:
                         ents[i].MoveStep = var_v1_6;
-                        temp_v0_19 = (u16) * (s16*)((u8*)&D_80074F06 + off) +
-                                     (u16) * (s16*)((u8*)&D_80074F04 + off);
-                        *(s16*)((u8*)&D_80074F06 + off) = temp_v0_19;
-                        if ((*(s16*)((u8*)&D_80074F08 + off) * 0x10) <
+                        temp_v0_19 = (u16)g_FieldEntity[i].animCurrentFrame +
+                                     (u16)g_FieldEntity[i].animSpeed;
+                        g_FieldEntity[i].animCurrentFrame = temp_v0_19;
+                        if ((g_FieldEntity[i].animLastFrame * 0x10) <
                             temp_v0_19) {
-                            *(s16*)((u8*)&D_80074F06 + off) = 0;
+                            g_FieldEntity[i].animCurrentFrame = 0;
                         block_177:
                         }
                     }
                     temp_s0_11 = (i) * 0x84;
-                    *(s32*)((u8*)&D_80074EB0 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EBC + off),
-                        *(s32*)((u8*)&D_80074F1C + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    *(s32*)((u8*)&D_80074EB4 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EC0 + off),
-                        *(s32*)((u8*)&D_80074F20 + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
-                    *(s32*)((u8*)&D_80074EB8 + off) = FieldCalcLinearStep(
-                        *(s32*)((u8*)&D_80074EC4 + off),
-                        *(s32*)((u8*)&D_80074F24 + off),
-                        *(s16*)((u8*)&D_80074ED4 + off),
-                        *(s16*)((u8*)&D_80074ED6 + off));
+                    g_FieldEntity[i].PosX = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartX, g_FieldEntity[i].MoveEndX,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    g_FieldEntity[i].PosY = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartY, g_FieldEntity[i].MoveEndY,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
+                    g_FieldEntity[i].PosZ = FieldCalcLinearStep(
+                        g_FieldEntity[i].MoveStartZ, g_FieldEntity[i].MoveEndZ,
+                        g_FieldEntity[i].MoveSteps, g_FieldEntity[i].MoveStep);
                 }
             }
         }
