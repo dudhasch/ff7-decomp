@@ -215,13 +215,13 @@ extern u8 g_FieldCameraMatrixSel;
 extern u8 g_FieldAnimLock;
 extern u8 g_FieldAnimFreeze;
 extern u8 D_80081DC4;
-extern s16 D_80114464;
-extern s16 D_80114468;
-extern u8 D_80114490;
+extern s16 g_FieldExitArrowX;
+extern s16 g_FieldExitArrowY;
+extern u8 g_FieldExitArrowPktIdx;
 // Two POLY_FT4 at 0x800E48F4, filling the gap between g_EntityForSplitJoin
 // (0x800E48F0) and g_WindowString (0x800E4944) exactly. Confirmed by the
 // 0x28 stride, len 9 / code 0x2C at +3 / +7, clut at +0x0E and tpage at +0x16.
-extern POLY_FT4 D_800E48F4[2];
+extern POLY_FT4 g_FieldExitArrowPkts[2];
 s32 GetGraphType(void);
 extern MATRIX** D_80083578;
 extern MATRIX* D_80083270;

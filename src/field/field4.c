@@ -727,13 +727,13 @@ typedef struct {
     /* 0x14 */ u8 unused[0x28];
 } KawaiColorFadeSlot;
 
-extern u8 D_800DFE1C[]; /* scratch RGB quad, 0x20 before the table */
+extern u8 g_KawaiFadeScratch[]; /* scratch RGB quad, 0x20 before the table */
 extern KawaiColorFadeSlot D_800DFE3C[16];
 
 /* The slot table starts 0x20 past the scratch quad. Reaching it that way,
  * rather than through its own D_800DFE3C symbol, is what lets cse hand the
  * scratch's own address back as `-0x20($a2)` off the table base register. */
-#define KawaiFadeSlots ((KawaiColorFadeSlot*)(D_800DFE1C + 0x20))
+#define KawaiFadeSlots ((KawaiColorFadeSlot*)(g_KawaiFadeScratch + 0x20))
 
 /* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
  * the slot from the descriptor and returns 1; data[0]==1 exports the current
@@ -752,8 +752,8 @@ extern KawaiColorFadeSlot D_800DFE3C[16];
  *     data[0] once.
  *   - the return values are 1 / 0 / 1, not 1 / 1 / 0. The default's `1` is the
  *     `li v0,0x1` the switch already materialised as its compare constant.
- *   - the slot table is reached as `D_800DFE1C + 0x20`, not through its own
- *     D_800DFE3C symbol. cse links two constants only when they share a
+ *   - the slot table is reached as `g_KawaiFadeScratch + 0x20`, not through its
+ * own D_800DFE3C symbol. cse links two constants only when they share a
  *     symbol_ref base, so spelling it this way is what lets it hand the
  *     scratch quad's own address back as `-0x20($a2)` off the table base
  *     register -- both for the first scratch store and for the call argument.
@@ -798,14 +798,14 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
         return 1;
     case 1:
         done = 0;
-        D_800DFE1C[0] = slot->curR;
-        D_800DFE1C[1] = slot->curR >> 8;
-        D_800DFE1C[2] = slot->curG;
-        D_800DFE1C[3] = slot->curG >> 8;
-        D_800DFE1C[4] = slot->curB;
-        D_800DFE1C[5] = slot->curB >> 8;
-        D_800DFE1C[6] = slot->unk12;
-        KawaiSetColorToModelPkts(model, D_800DFE1C);
+        g_KawaiFadeScratch[0] = slot->curR;
+        g_KawaiFadeScratch[1] = slot->curR >> 8;
+        g_KawaiFadeScratch[2] = slot->curG;
+        g_KawaiFadeScratch[3] = slot->curG >> 8;
+        g_KawaiFadeScratch[4] = slot->curB;
+        g_KawaiFadeScratch[5] = slot->curB >> 8;
+        g_KawaiFadeScratch[6] = slot->unk12;
+        KawaiSetColorToModelPkts(model, g_KawaiFadeScratch);
         if (slot->done != 0) {
             return 1;
         }
@@ -855,16 +855,16 @@ s32 KawaiFadeModelColor(FieldModelEntry* model, u8* data) {
 /* Store/apply a custom GTE lighting setup (KAWAI sub-command). data[0]==0
  * copies the 0x1E-byte descriptor into the slot -- twelve loose bytes, then
  * nine LE u16 words -- and returns 1; data[0]==1 expands the slot into the
- * D_800DFE1C scratch buffer and calls the handwritten GTE driver, returning 0;
- * any other sub-command returns 0. The slot reuses the KawaiFadeModelColor
- * table's 0x3C stride with a flat lighting-blob layout.
+ * g_KawaiFadeScratch scratch buffer and calls the handwritten GTE driver,
+ * returning 0; any other sub-command returns 0. The slot reuses the
+ * KawaiFadeModelColor table's 0x3C stride with a flat lighting-blob layout.
  *
  * Same recipe as KawaiFadeModelColor: a switch rather than two ifs, the table
- * reached as `D_800DFE1C + 0x20` so cse can hand the scratch quad's address
- * back as `-0x20($a3)`, and 0x38 of stack reserved for locals the original
- * allocates and never uses. The seed also had the byte/word boundary one byte
- * short in both arms, and read each pair through a `u16 pair` local: the
- * target reads the low half as a byte (`lbu`) and the high half through its
+ * reached as `g_KawaiFadeScratch + 0x20` so cse can hand the scratch quad's
+ * address back as `-0x20($a3)`, and 0x38 of stack reserved for locals the
+ * original allocates and never uses. The seed also had the byte/word boundary
+ * one byte short in both arms, and read each pair through a `u16 pair` local:
+ * the target reads the low half as a byte (`lbu`) and the high half through its
  * own `lhu` plus `srl`, which is what two separate reads of the same u16
  * field give -- assigning a u16 into a u8 narrows the load. */
 s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
@@ -897,37 +897,37 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
         *(u16*)(slot + 0x1C) = data[0x1E] | (data[0x1F] << 8);
         return 1;
     case 1:
-        D_800DFE1C[0x00] = slot[0x00];
-        D_800DFE1C[0x01] = slot[0x01];
-        D_800DFE1C[0x02] = slot[0x02];
-        D_800DFE1C[0x03] = slot[0x03];
-        D_800DFE1C[0x04] = slot[0x04];
-        D_800DFE1C[0x05] = slot[0x05];
-        D_800DFE1C[0x06] = slot[0x06];
-        D_800DFE1C[0x07] = slot[0x07];
-        D_800DFE1C[0x08] = slot[0x08];
-        D_800DFE1C[0x09] = slot[0x09];
-        D_800DFE1C[0x0A] = slot[0x0A];
-        D_800DFE1C[0x0B] = slot[0x0B];
-        D_800DFE1C[0x0C] = *(u16*)(slot + 0x0C);
-        D_800DFE1C[0x0D] = *(u16*)(slot + 0x0C) >> 8;
-        D_800DFE1C[0x0E] = *(u16*)(slot + 0x0E);
-        D_800DFE1C[0x0F] = *(u16*)(slot + 0x0E) >> 8;
-        D_800DFE1C[0x10] = *(u16*)(slot + 0x10);
-        D_800DFE1C[0x11] = *(u16*)(slot + 0x10) >> 8;
-        D_800DFE1C[0x12] = *(u16*)(slot + 0x12);
-        D_800DFE1C[0x13] = *(u16*)(slot + 0x12) >> 8;
-        D_800DFE1C[0x14] = *(u16*)(slot + 0x14);
-        D_800DFE1C[0x15] = *(u16*)(slot + 0x14) >> 8;
-        D_800DFE1C[0x16] = *(u16*)(slot + 0x16);
-        D_800DFE1C[0x17] = *(u16*)(slot + 0x16) >> 8;
-        D_800DFE1C[0x18] = *(u16*)(slot + 0x18);
-        D_800DFE1C[0x19] = *(u16*)(slot + 0x18) >> 8;
-        D_800DFE1C[0x1A] = *(u16*)(slot + 0x1A);
-        D_800DFE1C[0x1B] = *(u16*)(slot + 0x1A) >> 8;
-        D_800DFE1C[0x1C] = *(u16*)(slot + 0x1C);
-        D_800DFE1C[0x1D] = *(u16*)(slot + 0x1C) >> 8;
-        KawaiSetCustomLightToModelPkts(model, D_800DFE1C);
+        g_KawaiFadeScratch[0x00] = slot[0x00];
+        g_KawaiFadeScratch[0x01] = slot[0x01];
+        g_KawaiFadeScratch[0x02] = slot[0x02];
+        g_KawaiFadeScratch[0x03] = slot[0x03];
+        g_KawaiFadeScratch[0x04] = slot[0x04];
+        g_KawaiFadeScratch[0x05] = slot[0x05];
+        g_KawaiFadeScratch[0x06] = slot[0x06];
+        g_KawaiFadeScratch[0x07] = slot[0x07];
+        g_KawaiFadeScratch[0x08] = slot[0x08];
+        g_KawaiFadeScratch[0x09] = slot[0x09];
+        g_KawaiFadeScratch[0x0A] = slot[0x0A];
+        g_KawaiFadeScratch[0x0B] = slot[0x0B];
+        g_KawaiFadeScratch[0x0C] = *(u16*)(slot + 0x0C);
+        g_KawaiFadeScratch[0x0D] = *(u16*)(slot + 0x0C) >> 8;
+        g_KawaiFadeScratch[0x0E] = *(u16*)(slot + 0x0E);
+        g_KawaiFadeScratch[0x0F] = *(u16*)(slot + 0x0E) >> 8;
+        g_KawaiFadeScratch[0x10] = *(u16*)(slot + 0x10);
+        g_KawaiFadeScratch[0x11] = *(u16*)(slot + 0x10) >> 8;
+        g_KawaiFadeScratch[0x12] = *(u16*)(slot + 0x12);
+        g_KawaiFadeScratch[0x13] = *(u16*)(slot + 0x12) >> 8;
+        g_KawaiFadeScratch[0x14] = *(u16*)(slot + 0x14);
+        g_KawaiFadeScratch[0x15] = *(u16*)(slot + 0x14) >> 8;
+        g_KawaiFadeScratch[0x16] = *(u16*)(slot + 0x16);
+        g_KawaiFadeScratch[0x17] = *(u16*)(slot + 0x16) >> 8;
+        g_KawaiFadeScratch[0x18] = *(u16*)(slot + 0x18);
+        g_KawaiFadeScratch[0x19] = *(u16*)(slot + 0x18) >> 8;
+        g_KawaiFadeScratch[0x1A] = *(u16*)(slot + 0x1A);
+        g_KawaiFadeScratch[0x1B] = *(u16*)(slot + 0x1A) >> 8;
+        g_KawaiFadeScratch[0x1C] = *(u16*)(slot + 0x1C);
+        g_KawaiFadeScratch[0x1D] = *(u16*)(slot + 0x1C) >> 8;
+        KawaiSetCustomLightToModelPkts(model, g_KawaiFadeScratch);
         return 0;
     }
     return 0;
@@ -937,17 +937,17 @@ s32 KawaiSetCustomLighting(FieldModelEntry* model, u8* data) {
  * sub-command). Four channels (cur@0/2/4/6, target@8/A/C/E, delta@10/12/14/16,
  * unk18@0x18, done@0x19 in the 0x3C-stride slot table). data[0]==0 inits the
  * slot from twelve LE u16 descriptor words and returns 1; data[0]==1 exports
- * the four cur channels + unk18 to the D_800DFE1C scratch buffer, pushes them
- * to the below-level packets, advances each channel toward its target with the
- * sign-aware clamp, bumps done once all four reach 0xF, and returns 0; any
- * other sub-command returns 1.
+ * the four cur channels + unk18 to the g_KawaiFadeScratch scratch buffer,
+ * pushes them to the below-level packets, advances each channel toward its
+ * target with the sign-aware clamp, bumps done once all four reach 0xF, and
+ * returns 0; any other sub-command returns 1.
  *
  * The four-channel twin of KawaiFadeModelColor and it needs every one of that
- * function's spellings: the switch, the table reached as `D_800DFE1C + 0x20`,
- * `done = 0` at the top of the arm so it lives across the packet push, one
- * shared clamp block per channel reached by two gotos, and the last channel's
- * positive arm written out as an explicit `goto cur3clamp` / `goto cur3done`
- * pair. 0x50 of dead locals here rather than 0x38.
+ * function's spellings: the switch, the table reached as `g_KawaiFadeScratch +
+ * 0x20`, `done = 0` at the top of the arm so it lives across the packet push,
+ * one shared clamp block per channel reached by two gotos, and the last
+ * channel's positive arm written out as an explicit `goto cur3clamp` / `goto
+ * cur3done` pair. 0x50 of dead locals here rather than 0x38.
  *
  * One extra: the init arm writes `slot->unk18` before `slot->done`, even
  * though the target stores 0x19 before 0x18. Two stores through the same
@@ -998,16 +998,16 @@ s32 KawaiColorFadeBelowLvl(FieldModelEntry* model, u8* data) {
         return 1;
     case 1:
         done = 0;
-        D_800DFE1C[0] = slot->cur0;
-        D_800DFE1C[1] = slot->cur0 >> 8;
-        D_800DFE1C[2] = slot->cur1;
-        D_800DFE1C[3] = slot->cur1 >> 8;
-        D_800DFE1C[4] = slot->cur2;
-        D_800DFE1C[5] = slot->cur2 >> 8;
-        D_800DFE1C[6] = slot->cur3;
-        D_800DFE1C[7] = slot->cur3 >> 8;
-        D_800DFE1C[8] = slot->unk18;
-        KawaiSetColorToPktsBelowLvl(model, D_800DFE1C);
+        g_KawaiFadeScratch[0] = slot->cur0;
+        g_KawaiFadeScratch[1] = slot->cur0 >> 8;
+        g_KawaiFadeScratch[2] = slot->cur1;
+        g_KawaiFadeScratch[3] = slot->cur1 >> 8;
+        g_KawaiFadeScratch[4] = slot->cur2;
+        g_KawaiFadeScratch[5] = slot->cur2 >> 8;
+        g_KawaiFadeScratch[6] = slot->cur3;
+        g_KawaiFadeScratch[7] = slot->cur3 >> 8;
+        g_KawaiFadeScratch[8] = slot->unk18;
+        KawaiSetColorToPktsBelowLvl(model, g_KawaiFadeScratch);
         if (slot->done != 0) {
             return 1;
         }
@@ -2033,30 +2033,30 @@ u8 FieldEventRequestRun(s16 entityId, s16 priority, s16 scriptId) {
 void ResetFieldRenderState(void) {
     s16 tpage;
 
-    D_80114490 = 0;
-    D_80114464 = 0x7FFF;
-    D_80114468 = 0x7FFF;
-    setPolyFT4(&D_800E48F4[0]);
-    setPolyFT4(&D_800E48F4[1]);
-    setSemiTrans(&D_800E48F4[0], 0);
-    setSemiTrans(&D_800E48F4[1], 0);
-    setShadeTex(&D_800E48F4[0], 1);
-    setShadeTex(&D_800E48F4[1], 1);
+    g_FieldExitArrowPktIdx = 0;
+    g_FieldExitArrowX = 0x7FFF;
+    g_FieldExitArrowY = 0x7FFF;
+    setPolyFT4(&g_FieldExitArrowPkts[0]);
+    setPolyFT4(&g_FieldExitArrowPkts[1]);
+    setSemiTrans(&g_FieldExitArrowPkts[0], 0);
+    setSemiTrans(&g_FieldExitArrowPkts[1], 0);
+    setShadeTex(&g_FieldExitArrowPkts[0], 1);
+    setShadeTex(&g_FieldExitArrowPkts[1], 1);
     if (GetGraphType() == 1 || GetGraphType() == 2) {
         tpage = 0x2F;
     } else {
         tpage = 0x1F;
     }
-    D_800E48F4[1].tpage = tpage;
-    D_800E48F4[0].tpage = tpage;
-    D_800E48F4[1].clut = 0x7850;
-    D_800E48F4[0].clut = 0x7850;
-    D_800E48F4[0].r0 = 0;
-    D_800E48F4[1].r0 = 0;
-    D_800E48F4[0].g0 = 0;
-    D_800E48F4[1].g0 = 0;
-    D_800E48F4[0].b0 = 0;
-    D_800E48F4[1].b0 = 0;
+    g_FieldExitArrowPkts[1].tpage = tpage;
+    g_FieldExitArrowPkts[0].tpage = tpage;
+    g_FieldExitArrowPkts[1].clut = 0x7850;
+    g_FieldExitArrowPkts[0].clut = 0x7850;
+    g_FieldExitArrowPkts[0].r0 = 0;
+    g_FieldExitArrowPkts[1].r0 = 0;
+    g_FieldExitArrowPkts[0].g0 = 0;
+    g_FieldExitArrowPkts[1].g0 = 0;
+    g_FieldExitArrowPkts[0].b0 = 0;
+    g_FieldExitArrowPkts[1].b0 = 0;
 }
 
 /* Unprototyped on purpose: the original passes nothing, but arg0 has to stay
@@ -2077,97 +2077,99 @@ void UpdateFieldExitArrows(s32 arg0) {
 }
 
 /* Draw the field-exit arrow: a single textured quad at the exit's projected
- * screen position, double-buffered through D_80114490 so the packet being
- * added is never the one the GPU is reading. The clamp keeps it on screen, and
- * the two `if`s pick which corner of the 16x16 texture cell maps to which
- * vertex -- the arrow flips horizontally past x = 0x123 and vertically above
- * y = 0x11, so it always points inward from the edge it sits on.
+ * screen position, double-buffered through g_FieldExitArrowPktIdx so the packet
+ * being added is never the one the GPU is reading. The clamp keeps it on
+ * screen, and the two `if`s pick which corner of the 16x16 texture cell maps to
+ * which vertex -- the arrow flips horizontally past x = 0x123 and vertically
+ * above y = 0x11, so it always points inward from the edge it sits on.
  *
  * 255 rows and 5 insertions -> MATCH, from an m2c seed that addressed every
  * packet field as `*(&D_800E4900 + slot * 0x28)`. Three things did it:
  *   - the sixteen `D_800E49xx` placeholders are POLY_FT4 members of
- *     `D_800E48F4[]`: +8/+0xA x0,y0, +0xC/+0xD u0,v0, +0x10/+0x12 x1,y1,
- *     +0x14/+0x15 u1,v1, and so on. The externs are gone.
- *   - every access is the full `D_800E48F4[D_80114490].<field>` expression.
- *     Taking the obvious `POLY_FT4* arrow = &D_800E48F4[D_80114490];` once and
- *     writing through it measures **300** rows -- worse than the m2c seed --
- *     because the packet base then lives in one register across the whole
+ *     `g_FieldExitArrowPkts[]`: +8/+0xA x0,y0, +0xC/+0xD u0,v0, +0x10/+0x12
+ * x1,y1, +0x14/+0x15 u1,v1, and so on. The externs are gone.
+ *   - every access is the full
+ * `g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].<field>` expression. Taking the
+ * obvious `POLY_FT4* arrow = &g_FieldExitArrowPkts[g_FieldExitArrowPktIdx];`
+ * once and writing through it measures **300** rows -- worse than the m2c seed
+ * -- because the packet base then lives in one register across the whole
  *     function where the target rebuilds it at every store. Same house rule as
  *     the opcode handlers' `g_EntityToModel[g_CurrentEntity]`, and it is worth
  *     286 rows here. The `addPrim` argument is the one place the index appears
  *     without a member, and it is written inline, not through a local: a local
  *     costs 4 rows because it makes gcc evaluate the index before the array
  *     base.
- *   - the y clamp is an `if`/`else`, the x clamp is not. `y = D_80114468; if
- *     (D_80114468 >= 0xE1) y = 0xE0;` loads the global twice -- an `lhu` for
- *     the s16 local and an `lh` for the comparison -- while
- *     `if (D_80114468 >= 0xE1) { y = 0xE0; } else { y = D_80114468; }` assigns
- *     the local *after* the comparison has already loaded it, so cse rewrites
- *     the second load as `move a3,v1` and reorg puts the copy in a delay slot.
- *     That is the documented three-spellings rule for an s16 local, and the
- *     asymmetry is real: the x clamp wants the plain form and measures worse
- *     as an if/else. */
+ *   - the y clamp is an `if`/`else`, the x clamp is not. `y =
+ * g_FieldExitArrowY; if (g_FieldExitArrowY >= 0xE1) y = 0xE0;` loads the global
+ * twice -- an `lhu` for the s16 local and an `lh` for the comparison -- while
+ *     `if (g_FieldExitArrowY >= 0xE1) { y = 0xE0; } else { y =
+ * g_FieldExitArrowY; }` assigns the local *after* the comparison has already
+ * loaded it, so cse rewrites the second load as `move a3,v1` and reorg puts the
+ * copy in a delay slot. That is the documented three-spellings rule for an s16
+ * local, and the asymmetry is real: the x clamp wants the plain form and
+ * measures worse as an if/else. */
 void DrawFieldExitArrow(s32* ot) {
     s16 x;
     s16 y;
 
     if (g_FieldMovieOpcodeActive == 0 &&
-        (D_80114464 != 0x7FFF || D_80114468 != D_80114464)) {
-        x = D_80114464;
-        if (D_80114464 >= 0x141) {
+        (g_FieldExitArrowX != 0x7FFF ||
+         g_FieldExitArrowY != g_FieldExitArrowX)) {
+        x = g_FieldExitArrowX;
+        if (g_FieldExitArrowX >= 0x141) {
             x = 0x140;
         }
-        if (D_80114464 < 0) {
+        if (g_FieldExitArrowX < 0) {
             x = 0;
         }
-        if (D_80114468 >= 0xE1) {
+        if (g_FieldExitArrowY >= 0xE1) {
             y = 0xE0;
         } else {
-            y = D_80114468;
+            y = g_FieldExitArrowY;
         }
-        if (D_80114468 < 0) {
+        if (g_FieldExitArrowY < 0) {
             y = 0;
         }
-        D_80114490 ^= 1;
+        g_FieldExitArrowPktIdx ^= 1;
         if (x >= 0x123) {
-            D_800E48F4[D_80114490].u0 = 0x8F;
-            D_800E48F4[D_80114490].u1 = 0x7F;
-            D_800E48F4[D_80114490].u2 = 0x8F;
-            D_800E48F4[D_80114490].u3 = 0x7F;
-            D_800E48F4[D_80114490].x0 = x - 0x10;
-            D_800E48F4[D_80114490].x1 = x;
-            D_800E48F4[D_80114490].x2 = x - 0x10;
-            D_800E48F4[D_80114490].x3 = x;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u0 = 0x8F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u1 = 0x7F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u2 = 0x8F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u3 = 0x7F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x0 = x - 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x1 = x;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x2 = x - 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x3 = x;
         } else {
-            D_800E48F4[D_80114490].u0 = 0x80;
-            D_800E48F4[D_80114490].u1 = 0x90;
-            D_800E48F4[D_80114490].u2 = 0x80;
-            D_800E48F4[D_80114490].u3 = 0x90;
-            D_800E48F4[D_80114490].x0 = x;
-            D_800E48F4[D_80114490].x1 = x + 0x10;
-            D_800E48F4[D_80114490].x2 = x;
-            D_800E48F4[D_80114490].x3 = x + 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u0 = 0x80;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u1 = 0x90;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u2 = 0x80;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].u3 = 0x90;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x0 = x;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x1 = x + 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x2 = x;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].x3 = x + 0x10;
         }
         if (y < 0x11) {
-            D_800E48F4[D_80114490].v0 = 0x6F;
-            D_800E48F4[D_80114490].v1 = 0x6F;
-            D_800E48F4[D_80114490].v2 = 0x5F;
-            D_800E48F4[D_80114490].v3 = 0x5F;
-            D_800E48F4[D_80114490].y0 = y;
-            D_800E48F4[D_80114490].y1 = y;
-            D_800E48F4[D_80114490].y2 = y + 0x10;
-            D_800E48F4[D_80114490].y3 = y + 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v0 = 0x6F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v1 = 0x6F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v2 = 0x5F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v3 = 0x5F;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y0 = y;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y1 = y;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y2 = y + 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y3 = y + 0x10;
         } else {
-            D_800E48F4[D_80114490].v0 = 0x60;
-            D_800E48F4[D_80114490].v1 = 0x60;
-            D_800E48F4[D_80114490].v2 = 0x70;
-            D_800E48F4[D_80114490].v3 = 0x70;
-            D_800E48F4[D_80114490].y0 = y - 0x10;
-            D_800E48F4[D_80114490].y1 = y - 0x10;
-            D_800E48F4[D_80114490].y2 = y;
-            D_800E48F4[D_80114490].y3 = y;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v0 = 0x60;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v1 = 0x60;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v2 = 0x70;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].v3 = 0x70;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y0 = y - 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y1 = y - 0x10;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y2 = y;
+            g_FieldExitArrowPkts[g_FieldExitArrowPktIdx].y3 = y;
         }
-        addPrim(ot, &D_800E48F4[D_80114490]);
+        addPrim(ot, &g_FieldExitArrowPkts[g_FieldExitArrowPktIdx]);
     }
 }
 

@@ -2269,7 +2269,7 @@ void FieldArrowsInit(SPRT_16* sprt, DR_MODE* dm) {
     SetDrawMode(dm, 0, 1, GetTPage(0, 0, 0x3C0, 0x100), NULL);
 }
 
-extern u16 D_8011446C;
+extern u16 g_FieldArrowAnimTick;
 
 /* Queue the field exit arrows: up to 12 gateway markers, then up to 12
  * "point" arrows the script can place, each projected through the current
@@ -2341,7 +2341,7 @@ void FieldArrowsAddToRender(
                     RotTransPers(&pos, (s32*)&pos, &sz, &flag);
                     ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
                         ->Arrows[0]
-                        .u0 = (D_8011446C * 4 & 0x30) + 0x30;
+                        .u0 = (g_FieldArrowAnimTick * 4 & 0x30) + 0x30;
                     ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
                         ->Arrows[0]
                         .v0 = 0xD0;
@@ -2361,7 +2361,7 @@ void FieldArrowsAddToRender(
                 pos.vz = *(u16*)((u8*)g_FieldTriggers + off + 0x22C);
                 RotTransPers(&pos, (s32*)&pos, &sz, &flag);
                 ((struct FieldRenderData*)(off + (s32)buf))->Arrows[0xC].u0 =
-                    (D_8011446C * 4 & 0x30) + 0x30;
+                    (g_FieldArrowAnimTick * 4 & 0x30) + 0x30;
                 ((struct FieldRenderData*)(i * 0x10 + (s32)buf))
                     ->Arrows[0xC]
                     .v0 = 0xD0;
@@ -2378,7 +2378,7 @@ void FieldArrowsAddToRender(
         } while (i < 0xC);
         PopMatrix();
         addPrim(buf->ot, &buf->ArrowsDm);
-        D_8011446C++;
+        g_FieldArrowAnimTick++;
     }
 }
 
