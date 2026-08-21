@@ -3141,23 +3141,34 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  *     return is zero-extended into it) and a second `s32` local for the
  *     masked difference (so the comparison is `slti`, not `sltiu`).
  *
+ * 12 rows -> 7, and the step was decomp-permuter's, not a reading of the
+ * target: `perm_temp_for_expr` names `&entity->PosZ` in an `s32*` local and
+ * reads the third store through it, which took the scratch from base score
+ * 580 to 185 and the real diff from 12 rows to 7. Both positions are
+ * load-bearing in the usual way -- the declaration between `cross` and `dir`,
+ * the assignment between the PosX and PosY stores -- and it is exactly the
+ * knot the note below describes, which is why it worked: naming the pointer
+ * splits the PosZ load off its `sra`/`sw` chain so sched2 can spread the two
+ * `addiu`s into the load-delay slots the way the target does.
+ *
+ * The 7 left are one displacement and nothing else: the target materialises
+ * 0x1F800020 into $s3 as the *first* body insn, which drags `sw s3,0x2c(sp)`
+ * to the front of the register saves ahead of `sw ra`; ours schedules the
+ * `lui/ori` after all five saves. Statement order does not reach it -- with
+ * the permuter's local in place, all five arrangements of {from, nearest,
+ * posZ} ahead of the stores measure exactly 7, as do the two orders measured
+ * before it (and moving the pointer assignments after the stores is still
+ * 32). A `do { } while (0);` probe on the older body was *not* inert (17-21
+ * against 12), so sched2 is the pass and perm_ins_block is the weight to
+ * raise; none of the four placements a human can think of is the right one.
+ *
  * The residue is one scheduling knot in the entry block: the target spreads
  * `addiu s2,sp,0x10` and `addiu s0,s1,0xf` into the load-delay slots of the
  * PosY and PosZ loads, where ours emits them together ahead of the stores and
- * hoists the PosZ load into a second register instead. The instructions are
- * the same ones. Neither the order of the two pointer assignments, nor moving
- * them after the stores (32 rows), nor between them, nor the declaration order
- * of the locals, nor writing the first store through `from` moves it.
- *
- * A `do { } while (0);` probe settles which pass to blame, and the answer is
- * sched2: the barrier is *not* inert -- after the three stores 21 rows,
- * between the first and second 20, between the second and third 17, between
- * the pointer setup and the stores 20, against 12 for none. So source
- * position is a live lever here and register allocation is not the wall;
- * what is missing is a placement that pulls `addiu s0,s1,0xf` *after* the
- * PosZ load rather than before it, and none of the four block boundaries
- * available does that. Good permuter target -- perm_ins_block is the pass,
- * and the four placements a human can think of are all measured above.
+ * hoists the PosZ load into a second register instead. Neither the order of
+ * the two pointer assignments, nor moving them after the stores (32 rows),
+ * nor between them, nor the declaration order of the locals, nor writing the
+ * first store through `from` moves it.
  * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
@@ -3169,6 +3180,7 @@ void FieldEntityTriggerCheck(
     s32* nearest;
     s32 sqrDist;
     s32 cross;
+    s32* posZ;
     s32 dir;
     s32 rel;
     s32 i;
@@ -3176,8 +3188,9 @@ void FieldEntityTriggerCheck(
     from = (s32*)0x1F800000;
     nearest = (s32*)0x1F800020;
     *(s32*)0x1F800000 = entity->PosX >> 12;
+    posZ = &entity->PosZ;
     *(s32*)0x1F800004 = entity->PosY >> 12;
-    *(s32*)0x1F800008 = entity->PosZ >> 12;
+    *(s32*)0x1F800008 = *posZ >> 12;
     for (i = 0; i < 12; i++, trigger++) {
         if (trigger->entityId == 0xFF) {
             continue;
