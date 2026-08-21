@@ -923,6 +923,40 @@ a near-miss, in rough order of frequency:
   byte offset is referenced most (here `+7`, from `setcode` plus
   `setShadeTex`'s read-modify-write), which turns `3(v1)`/`7(v1)` into
   `-4(a0)`/`0(a0)` and is invisible in the loop body.
+* **Taking a local's address is the only way to move its stack slot from one
+  pool to the other.** A function's frame holds two kinds of slot and they are
+  filled at different times: declared locals get theirs from `assign_stack_local`
+  during expand, reload's spills get theirs afterwards, so every declared local
+  sits below every spill and a `u8 unusedLocals[0xNN]` can only push the spill
+  slots *up*. When a target keeps a counter at a lower offset than your build
+  does and no pad size reaches it, the counter is *addressable* in the original:
+  `TREE_ADDRESSABLE` sends it through `put_var_into_stack` and it is allocated
+  with the declared locals instead. One never-dereferenced pointer is enough —
+
+  ```c
+  u16 sprite34Count;
+  u16* addrOfSprite34Count;
+  ...
+  addrOfSprite34Count = &sprite34Count;   /* first statement; never read */
+  ```
+
+  — and it costs no instruction, because the store to the pointer is dead.
+  `FieldBackgroundInitPackets` in `src/field/field.c` needs it for exactly one
+  of its two run counters, which lands at `0x28(sp)` where the target has it;
+  applied to the other counter, to the loop count, to `white`, to `tpages` or
+  to `run` it measures 74 to 165 rows against 55. Two spellings that look
+  equivalent and are not: dereferencing the pointer at the use site as well is
+  worse the moment there are two such sites (82/12 against 55/10, the second
+  read going through a pointer that may alias), and declaring the counter as a
+  one-element array indexed at every use is completely inert — gcc keeps a
+  one-element local array in a register, so an array is not a way to spell
+  "put this on the stack". Neither the counters' declaration order nor the
+  pad's position among them changes anything.
+
+  The tell is precise, and it is worth reading before reaching for the pad: a
+  run of `N(sp)` rows all off by the *same* constant means the pools are the
+  right sizes and one value is in the wrong pool, where a diff that also moves
+  the frame and the saved-register offsets means the pad itself is wrong.
 * **A frame that is larger than your code needs, with the extra between the
   outgoing-argument area and the register saves, is a local you cannot see.**
   gcc's `expand_decl` gives every aggregate local a stack slot whether or not

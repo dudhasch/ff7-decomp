@@ -1109,20 +1109,41 @@ extern s16 D_801144D0;
  * iteration. Layer 1 must keep its literals: hoisting a `white` there as well
  * costs 51 rows.
  *
- * The frame is right and the spill offsets are not, and the two cannot both be
- * satisfied by padding, and lever 7 did not change that -- the three pointers
- * took registers, not slots. `u8 unusedLocals[0x10];` gives the target's 0x78
- * frame but puts the three spill slots at 0x28/0x30/0x38 against the target's
- * 0x18/0x20/0x28; deleting it puts the slots exactly right and the frame at
- * 0x68. Declared locals are allocated during expand and reload's spill slots
- * after them, so a declared local always sits *below* the spills and can only
- * push them up -- measured: none 132 (slots right, frame 0x10 short), 0x8 140,
- * 0x10 118, 0x18 140, 0x20 140 (frame 0x88, slots at 0x40/0x48); and again
- * against the seven-lever base: none 64, 0x8 77, 0x10 55, 0x18 77. The target's
- * extra 0x20 sits *above* its three spill slots, which a declared local cannot
- * produce; it has to be two more spilled pseudos whose references reload later
- * satisfied from registers. Until one of those is identified, 0x10 is the best
- * of a bad set, and about 20 of the remaining rows are that offset difference.
+ * The frame is right and the spill offsets were not, and half of that is now
+ * closed -- by taking `sprite34Count`'s address. `u8 unusedLocals[0x10];`
+ * gives the target's 0x78 frame but leaves three *reload* spill slots at
+ * 0x28/0x30/0x38 against the target's 0x18/0x20/0x28; deleting it puts them
+ * exactly right and the frame at 0x68, and no size in between helps
+ * (measured against the seven-lever base: none 64, 0x8 77, 0x10 55, 0x18 77,
+ * 0x20 77, 0x28 77, 0x30 77; and earlier against the pre-lever base: none 132,
+ * 0x8 140, 0x10 118, 0x18 140, 0x20 140). Declared locals are allocated during
+ * expand and reload's spill slots after them, so a declared local always sits
+ * *below* the spills and can only push them up.
+ *
+ * What does move a value between those two pools is taking its address:
+ * `addrOfSprite34Count = &sprite34Count;` sets TREE_ADDRESSABLE, so
+ * `put_var_into_stack` gives the counter an expand-time slot rather than a
+ * reload one, and it lands at 0x28 -- exactly where the target keeps it. The
+ * pointer is never dereferenced and costs nothing; assigning it as the first
+ * statement and reading the counter normally everywhere measures the same
+ * 55/10 as decomp-permuter's own find (a pointer assigned at the first
+ * `run[1] = sprite34Count;` and dereferenced *there only* -- dereferencing it
+ * at both sites is 82/12, because the second read then goes through a pointer
+ * that may alias). What the original wrote to make this counter addressable is
+ * not recoverable; the address-taking is, and it is worth four insertions.
+ *
+ * It does not generalise, which is the useful half of the finding: the same
+ * never-dereferenced pointer applied to `spriteCount` measures 107/12 on top
+ * of this and 82/16 on its own, to `count` 165/21, to `white` 74/25, to
+ * `tpages` 116/18 and to `run` 160/27. Declaring `sprite34Count` as a
+ * one-element array indexed at every use is inert (55/14) -- gcc keeps a
+ * one-element local array in a register, so that is not a way to spell it.
+ * Swapping the two counters' declaration order and moving `unusedLocals` to
+ * the front or next to the counters are all inert (55/10).
+ *
+ * That leaves `spriteCount` at 0x38 against 0x20 and a four-byte slot at 0x30
+ * against 0x18 -- the same shape one pool down, and about ten of the remaining
+ * rows.
  *
  * Also measured and rejected, all against the current base:
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
@@ -1168,8 +1189,10 @@ void FieldBackgroundInitPackets(
     u8 white;
     u16 spriteCount;
     u16 sprite34Count;
+    u16* addrOfSprite34Count;
     u8 unusedLocals[0x10];
 
+    addrOfSprite34Count = &sprite34Count;
     spriteCount = 0;
     sprite34Count = 0;
     D_8011448C = 0;
