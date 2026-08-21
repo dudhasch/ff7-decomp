@@ -1363,6 +1363,14 @@ extern s16 D_801144D0;
  * lever 10 chose still wins, and the 28/10 spelling is the only near miss
  * (one fewer insertion, two more rows).
  *
+ * Four more barrier placements and four loop-test spellings, all against
+ * 26/11: a barrier after the SetSemiTrans if/else, or as the body's first
+ * statement, is exactly inert; bracketing `sprite34Count++` with two is
+ * 36/19, one after it 36/13, one before the clut store 36/15. `while
+ * (--count)` and `while (0 != --count)` are byte-identical to
+ * `while (--count != 0)`; `while (count-- != 1)` is 52/17 and
+ * `while (count-- > 1)` 61/16.
+ *
  * Deleted from this note along with the levers they described: the pad-size
  * grid (none 64, 0x8 77, 0x10 55, 0x18 through 0x30 all 77), the grid of which
  * counters are address-taken, the eight-row `do { } while (0);` after layer
