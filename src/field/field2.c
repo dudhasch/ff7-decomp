@@ -2462,13 +2462,42 @@ extern u8 g_FieldLineCheckResult;
  * three locals restored, rather than the subscripts used here. The gap tool
  * puts the largest missing runs at want[211] (an index computation and a
  * store) and want[128] (`mflo lui lw sll mult`, a multiply the slope
- * calculation does not have here). */
+ * calculation does not have here).*
+ * 381 rows / +27 instructions -> **357 / +6**, and the lever was found by
+ * counting rather than reading: `tools/insn_histogram.py` reports
+ * `%hi(g_FieldEntity)` **36** times here against the target's **zero**. The
+ * target never names the array. It names ten *interior* labels instead, and
+ * the counts line up one-for-one with this body's member accesses:
+ *
+ *     D_80074EDA +0x36 MoveDir          15    D_80074F04 +0x60 animSpeed 1
+ *     D_80074F10 +0x6C SolidRange        6    D_80074F01 +0x5D scriptedMoveMode
+ * 1 D_80074F16 +0x72 PosI              4    D_80074F02 +0x5E activeAnimId 1
+ *     D_80074F14 +0x70 MoveSpeed         2    D_80074EB0 +0x0C PosX 2
+ *     D_80074EB4 +0x10 PosY              2    D_80074EB8 +0x14 PosZ 2
+ *
+ * Ten labels, 36 references, exactly the 36 `g_FieldEntity[id].member`
+ * accesses below. So every entity read in the original is the byte-offset
+ * form CLAUDE.md records for the debug functions -- `*(u16*)((u8*)&D_80074F16
+ * + off)` -- and the subscript spelling is what was costing 27 instructions
+ * and most of the register naming.
+ *
+ * The offset has to be a **named local computed once**: written inline as
+ * `id * 0x84` at all 36 sites the body comes out at **-10 instructions**
+ * (472 rows), because cse folds the multiply and the addresses collapse;
+ * `off = id * 0x84;` as the first statement is +6.
+ *
+ * `FieldEntityMovementUpdate` has the same fault and it is larger there --
+ * 243 materialisations of `g_FieldEntity` against 4, with `D_80074ED6`
+ * (+0x32, `MoveStep`) 22 times and `D_80074F06` (+0x62, `animCurrentFrame`)
+ * 18 -- so the same transformation is the next thing to do to it.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMove);
 #else
 s32 FieldEntityMove(s16 entityId) {
     VECTOR* spad = (VECTOR*)0x1F800040;
     s32 id = entityId;
+    s32 off;
     u16 sp10;
     s16 sp18;
     s32 sp20;
@@ -2517,7 +2546,9 @@ s32 FieldEntityMove(s16 entityId) {
     u32 var_s7;
     u8 var_a0_3;
     SVECTOR* tri;
-    sp10 = g_FieldEntity[id].PosI;
+
+    off = id * 0x84;
+    sp10 = *(u16*)((u8*)&D_80074F16 + off);
     tri = (SVECTOR*)((u8*)D_800E4274 + sp10 * 0x18);
     spad[0].vx = (s32)(tri[1].vx - tri[0].vx);
     spad[0].vy = tri[1].vy - tri[0].vy;
@@ -2618,36 +2649,38 @@ loop_31:
         if (var_v0_4 != 0) {
         block_37:
             var_v0_5 =
-                FieldEntityGetDirVectorX(g_FieldEntity[id].MoveDir) * sp38;
+                FieldEntityGetDirVectorX(*(u8*)((u8*)&D_80074EDA + off)) * sp38;
             if (var_v0_5 < 0) {
                 var_v0_5 += 0xFFF;
             }
             spad[3].vx = (s32)(var_v0_5 >> 0xC);
             var_v0_6 =
-                -(FieldEntityGetDirVectorY(g_FieldEntity[id].MoveDir) * sp40);
+                -(FieldEntityGetDirVectorY(*(u8*)((u8*)&D_80074EDA + off)) *
+                  sp40);
             if (var_v0_6 < 0) {
                 var_v0_6 += 0xFFF;
             }
             spad[3].vy = (s32)(var_v0_6 >> 0xC);
-            var_v0_7 = g_FieldEntity[id].MoveSpeed * spad[3].vx;
+            var_v0_7 = *(u16*)((u8*)&D_80074F14 + off) * spad[3].vx;
             if (var_v0_7 < 0) {
                 var_v0_7 += 0xFF;
             }
             spad[3].vx = (s32)(var_v0_7 >> 8);
-            var_v0_8 = g_FieldEntity[id].MoveSpeed * spad[3].vy;
+            var_v0_8 = *(u16*)((u8*)&D_80074F14 + off) * spad[3].vy;
             if (var_v0_8 < 0) {
                 var_v0_8 += 0xFF;
             }
             spad[3].vy = (s32)(var_v0_8 >> 8);
-            spad[3].vx = (s32)(g_FieldEntity[id].PosX + spad[3].vx);
-            spad[3].vy = (s32)(g_FieldEntity[id].PosY + spad[3].vy);
-            spad[3].vz = (s32)g_FieldEntity[id].PosZ;
-            spad[5].vx = (s32)(FieldEntityGetDirVectorX(
-                                   (g_FieldEntity[id].MoveDir + 0x20) & 0xFF) *
-                               g_FieldEntity[id].SolidRange);
+            spad[3].vx = (s32)(*(s32*)((u8*)&D_80074EB0 + off) + spad[3].vx);
+            spad[3].vy = (s32)(*(s32*)((u8*)&D_80074EB4 + off) + spad[3].vy);
+            spad[3].vz = (s32) * (s32*)((u8*)&D_80074EB8 + off);
+            spad[5].vx =
+                (s32)(FieldEntityGetDirVectorX(
+                          (*(u8*)((u8*)&D_80074EDA + off) + 0x20) & 0xFF) *
+                      *(u16*)((u8*)&D_80074F10 + off));
             temp_lo_2 = -FieldEntityGetDirVectorY(
-                            (g_FieldEntity[id].MoveDir + 0x20) & 0xFF) *
-                        g_FieldEntity[id].SolidRange;
+                            (*(u8*)((u8*)&D_80074EDA + off) + 0x20) & 0xFF) *
+                        *(u16*)((u8*)&D_80074F10 + off);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = temp_lo_2;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -2655,14 +2688,15 @@ loop_31:
             sp20 =
                 FieldEntityWalkmechCross(&sp10, &spad[4], &spad[5], &spad[1]);
             temp_v0_5 = FieldEntityCollisionCheck(sp18, &spad[4]);
-            sp10 = g_FieldEntity[id].PosI;
+            sp10 = *(u16*)((u8*)&D_80074F16 + off);
             sp28 = temp_v0_5 != 0;
-            spad[5].vx = (s32)(FieldEntityGetDirVectorX(
-                                   (g_FieldEntity[id].MoveDir - 0x20) & 0xFF) *
-                               g_FieldEntity[id].SolidRange);
+            spad[5].vx =
+                (s32)(FieldEntityGetDirVectorX(
+                          (*(u8*)((u8*)&D_80074EDA + off) - 0x20) & 0xFF) *
+                      *(u16*)((u8*)&D_80074F10 + off));
             temp_lo_3 = -FieldEntityGetDirVectorY(
-                            (g_FieldEntity[id].MoveDir - 0x20) & 0xFF) *
-                        g_FieldEntity[id].SolidRange;
+                            (*(u8*)((u8*)&D_80074EDA + off) - 0x20) & 0xFF) *
+                        *(u16*)((u8*)&D_80074F10 + off);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = temp_lo_3;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -2670,14 +2704,15 @@ loop_31:
             var_fp =
                 FieldEntityWalkmechCross(&sp10, &spad[4], &spad[5], &spad[2]);
             temp_v0_6 = FieldEntityCollisionCheck(sp18, &spad[4]);
-            sp10 = g_FieldEntity[id].PosI;
+            sp10 = *(u16*)((u8*)&D_80074F16 + off);
             var_s6 = temp_v0_6 != 0;
             spad[5].vx =
-                (s32)(FieldEntityGetDirVectorX(g_FieldEntity[id].MoveDir) *
-                      g_FieldEntity[id].SolidRange);
+                (s32)(FieldEntityGetDirVectorX(*(u8*)((u8*)&D_80074EDA + off)) *
+                      *(u16*)((u8*)&D_80074F10 + off));
             var_s4 = 0;
-            temp_lo_4 = -FieldEntityGetDirVectorY(g_FieldEntity[id].MoveDir) *
-                        g_FieldEntity[id].SolidRange;
+            temp_lo_4 =
+                -FieldEntityGetDirVectorY(*(u8*)((u8*)&D_80074EDA + off)) *
+                *(u16*)((u8*)&D_80074F10 + off);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = temp_lo_4;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -2695,13 +2730,13 @@ loop_31:
                     }
                 } else {
                     if ((var_s5 != 0) && (sp20 == 0) && (var_fp == 0)) {
-                        var_v0_9 = g_FieldEntity[id].MoveDir - var_s5;
+                        var_v0_9 = *(u8*)((u8*)&D_80074EDA + off) - var_s5;
                         goto block_67;
                     }
                     if ((var_s4 != 0) && (sp28 == 0) && (var_s6 == 0)) {
-                        var_v0_9 = g_FieldEntity[id].MoveDir - var_s4;
+                        var_v0_9 = *(u8*)((u8*)&D_80074EDA + off) - var_s4;
                     block_67:
-                        g_FieldEntity[id].MoveDir = var_v0_9;
+                        *(u8*)((u8*)&D_80074EDA + off) = var_v0_9;
                     }
                 block_68:
                     if (sp20 != 0) {
@@ -2711,11 +2746,11 @@ loop_31:
                     } else {
                         if (sp28 != 0) {
                         block_72:
-                            g_FieldEntity[id].MoveDir =
-                                g_FieldEntity[id].MoveDir + 0xF8;
+                            *(u8*)((u8*)&D_80074EDA + off) =
+                                *(u8*)((u8*)&D_80074EDA + off) + 0xF8;
                         } else if ((var_fp != 0) || (var_s6 != 0)) {
-                            g_FieldEntity[id].MoveDir =
-                                g_FieldEntity[id].MoveDir + 8;
+                            *(u8*)((u8*)&D_80074EDA + off) =
+                                *(u8*)((u8*)&D_80074EDA + off) + 8;
                         }
                         goto loop_31;
                     }
@@ -2725,7 +2760,7 @@ loop_31:
     }
     temp_s3 = sp18 * 0x84;
     sp30 = FieldEntityWalkmechCross(
-        &g_FieldEntity[id].PosI, &spad[3], &spad[5], &spad[0]);
+        &*(u16*)((u8*)&D_80074F16 + off), &spad[3], &spad[5], &spad[0]);
     if ((sp18 == g_PlayerModelId) && (g_FieldAnimLock == 0)) {
         temp_s0_2 = &g_FieldEntity[id];
         g_FieldLineCheckResult =
@@ -2740,14 +2775,14 @@ loop_31:
     if ((var_s5 == 0) && (sp20 == 0) && (var_fp == 0) && (var_s4 == 0) &&
         (sp28 == 0) && (var_s6 == 0) && (sp30 == 0)) {
         temp_a1 = sp18 * 0x84;
-        g_FieldEntity[id].PosX = spad[3].vx;
-        g_FieldEntity[id].PosY = spad[3].vy;
-        g_FieldEntity[id].PosZ = spad[3].vz << 0xC;
+        *(s32*)((u8*)&D_80074EB0 + off) = spad[3].vx;
+        *(s32*)((u8*)&D_80074EB4 + off) = spad[3].vy;
+        *(s32*)((u8*)&D_80074EB8 + off) = spad[3].vz << 0xC;
         var_v0 = 1;
-        if (g_FieldEntity[id].scriptedMoveMode == 0) {
+        if (*(u8*)((u8*)&D_80074F01 + off) == 0) {
             var_v0 = 1;
             if (sp18 == g_PlayerModelId) {
-                g_FieldEntity[id].animSpeed = 0x10;
+                *(s16*)((u8*)&D_80074F04 + off) = 0x10;
                 if (g_FieldPadRaw & 0x40) {
                     var_a2_2 = &g_FieldStateData.runAnimId;
                     var_v0_10 = &g_FieldModelLoaderData[sp18];
@@ -2761,7 +2796,7 @@ loop_31:
                                     .animationCount) {
                     var_a0_3 = (u8)*var_a2_2;
                 }
-                g_FieldEntity[id].activeAnimId = var_a0_3;
+                *(u8*)((u8*)&D_80074F02 + off) = var_a0_3;
                 var_v0 = 1;
             }
         }
