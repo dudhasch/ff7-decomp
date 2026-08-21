@@ -1663,6 +1663,55 @@ a near-miss, in rough order of frequency:
   65/0 and 43/4 are inserted blocks, and not one of them is predictable from
   the target -- the pass to raise is `perm_ins_block`, and the only way to
   place one is to search.
+* **Do not transcribe m2c's `if (c != 0) { do { … } while (i < c); }` -- that
+  *is* a `for`, and writing both costs two instructions per loop.** gcc
+  expands `for (i = 0; i < c; i++)` as an init, a zero-trip test and a
+  do-while, which is exactly what m2c reconstructs from the CFG; add your own
+  `if (c != 0)` around it and gcc does not fold the two tests, because the
+  bound is a `u8` field whose load it will not prove redundant. It reads like
+  a faithful transcription and it is a duplicate. `FieldModelCreatePktsForPart`
+  in `src/field/field2.c` has eight such loops and the redundant guards were
+  worth **16 instructions** -- two thirds of everything that function was over
+  length. The same shape shows up wherever m2c prints a guarded do-while,
+  which is every counted loop in the codebase.
+* **A comparison used as a *value* needs its own statement, or gcc branches
+  around the arithmetic instead of computing it.** `x + ((c != K) ? y : 0)`
+  and `x + (y & -(c != K))` are the same tree after fold, and both reach
+  `expand_expr` underneath the `+`, where gcc 2.6.3 emits a conditional jump
+  around the addition -- five instructions and two extra blocks. Assign the
+  comparison to a local first and it is a statement of its own, `do_store_flag`
+  runs, and you get the target's branchless `andi` / `xori` / `sltu` / `negu` /
+  `and`. So when m2c prints `(v & -((x & M) != K))` -- its rendering of exactly
+  that sequence -- the source has a named boolean, not a clever mask. Four
+  sites in `FieldModelCreatePktsForPart`.
+* **Declaration order is inert for *registers* and decisive for *stack
+  slots*.** The standing rule (allocation is by priority, not position) is
+  about hard registers; reload's spill slots are handed out in pseudo order,
+  and `expand_decl` creates one pseudo per local at the top of the function in
+  declaration order. So a function whose spilled locals sit at the wrong
+  offsets is telling you its declarations are in the wrong order, and the fix
+  is free: read the target's slots, and declare the locals in that order.
+  `FieldModelCreatePktsForPart` has six spilled locals at `0x28`…`0x50` and
+  all six land at once. In the same function, moving those declarations for
+  any *other* reason -- a `u8` to the end of the list, four pointers to the
+  front -- is exactly inert, which is the register half of the rule holding.
+* **Inverting an `if` and swapping its arms is not a no-op, even when the CFG
+  comes out identical.** The blocks are emitted in source order, so which arm
+  is the fall-through decides two things that look like they belong to other
+  passes: which insns reorg can steal into the two branch delay slots, and
+  therefore how many times a subexpression common to both arms is
+  rematerialised; and whether combine gets to fold a shift-and-shift in the
+  arm that is now laid out second. `FieldModelCreatePktsForPart`'s graph-type
+  test measures 727 instructions written `!= 1 && != 2` with the arms swapped
+  and 731 written `== 1 || == 2` -- one instruction per copy of the loop, from
+  `t & 0xC0` being computed three times rather than twice and
+  `((t >> 4) & 0x100) >> 4` folding to two instructions rather than staying at
+  three. Neither is reachable by attacking it directly: every spelling of that
+  shift measures identically, and hoisting the mask into a local is +8 because
+  it then spans two calls and spills. A `goto` chain that reproduces the
+  target's branch polarity and block order *literally* is also 731 -- so read
+  the length, not the CFG.
+
 * **`checkfn`'s "inserted" is not a length measurement — read the `+N
   instructions` figure instead.** An instruction that merely *moved* is
   reported as one insertion and one deletion, so the counts scale with how
