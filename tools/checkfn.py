@@ -90,6 +90,28 @@ def target_insn_count(source, func):
         return sum(1 for line in fh if INSN_RE.match(line))
 
 
+def target_text_insn_count(source, func):
+    """Instruction lines from `glabel <func>` onwards.
+
+    target_insn_count() counts the whole .s, which for a function with a jump
+    table also counts the table's `.word` entries -- they carry the same
+    `/* offset addr bytes */` prefix and sit in the file's .rodata ahead of the
+    body. That is what the diff has to cover, but it is not what the function's
+    .text weighs.
+    """
+    path = asm_path(source, func)
+    if not os.path.exists(path):
+        return None
+    started, n = False, 0
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if line.startswith("glabel %s" % func):
+                started = True
+            elif started and INSN_RE.match(line):
+                n += 1
+    return n if started else None
+
+
 def object_for(source):
     rel = os.path.relpath(os.path.abspath(source), REPO).replace(os.sep, "/")
     return os.path.join(REPO, "build", "us", rel + ".o")
@@ -261,6 +283,32 @@ OVERRIDE_RE = re.compile(
     r'MASPSX_OVERRIDE\(\s*"[^"]*"\s*,\s*(\w+)\s*\)', re.S)
 
 
+def compiled_insn_count(source, func):
+    """How long the function we just built actually is, in instructions.
+
+    The `inserted`/`deleted` counts below are diff-alignment artifacts, not a
+    length measurement: an instruction that merely moved is reported as one of
+    each, and a body that is exactly the target's length can report six
+    insertions. Length is a hard invariant -- a function that is four
+    instructions long cannot match however few rows differ -- so it is worth
+    its own number. Returns None if the symbol is not in the object.
+    """
+    obj = object_for(source)
+    proc = subprocess.run(["mipsel-linux-gnu-nm", "-S", obj],
+                          cwd=REPO, capture_output=True, text=True,
+                          check=False)
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[3] == func:
+            try:
+                return int(parts[1], 16) // 4
+            except ValueError:
+                return None
+    return None
+
+
 def pinned_functions(source):
     with open(os.path.join(REPO, source), errors="replace") as fh:
         return set(OVERRIDE_RE.findall(fh.read()))
@@ -344,6 +392,15 @@ def check(source, func, syms, show_rows=False, pinned=()):
         detail.append("%d inserted" % ins)
     if dele:
         detail.append("%d deleted" % dele)
+    have = compiled_insn_count(source, func)
+    # `want` counts every line the .s declares, including the `.word` entries
+    # of a jump table that sits in the file's .rodata ahead of the function --
+    # seven of them for FieldMain. The symbol's size covers only .text, so the
+    # length has to be compared against the text-only count.
+    text_want = target_text_insn_count(source, func)
+    if have is not None and have != text_want:
+        detail.append("%+d instructions (%d against %d)"
+                      % (have - text_want, have, text_want))
     print("MISMATCH %s  %s%s" % (func, ", ".join(detail), note))
     if show_rows:
         for kind, b, c in bad_rows:
