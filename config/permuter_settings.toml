@@ -43,6 +43,12 @@ objdump_command = "mipsel-linux-gnu-objdump -drz -m mips:3000"
 # src/battle/battle2.c fixed-point multiply, src/world/world.h, include/common.h.
 "MUL" = "int"
 "ABS" = "int"
+# The PSY-Q GTE intrinsics expand to `__asm__ volatile`, which pycparser
+# cannot parse -- and a syntax error anywhere in base.c makes import.py skip
+# the prune, so every function in the unit is compiled into every candidate
+# (CLAUDE.md, "Stripping is not enough on its own"). All of them are
+# statement macros, so `void` is the honest declaration.
+"gte_[a-z0-9_]+" = "void"
 "LEN" = "int"
 # Deliberately *not* preserved: GET_PARAM_S16, READ_S8 and READ_S16 all write
 # through an argument. Hidden behind an opaque `void f()` the randomizer stops

@@ -11,6 +11,16 @@
 .set noat
 .set noreorder
 
+# The GTE mnemonics (nccs, nclip, mvmva, ...) are macros, not opcodes:
+# mipsel-linux-gnu-as does not know them, and every target .s that lights
+# a model uses them. The candidate objects get these through macro.inc,
+# which INCLUDE_ASM's expansion pulls in; the reference object assembled by
+# import.py never did, so importing any Kawai* function died with
+# `Error: unrecognized opcode 'nccs'` and left no scratch behind.
+# gte.inc spells them upper-case and GAS matches macro names
+# case-insensitively, so the lower-case forms in asm/ resolve.
+.include "gte.inc"
+
 .macro glabel label, visibility=global
     .\visibility \label
     .type \label, @function

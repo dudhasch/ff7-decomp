@@ -2781,6 +2781,35 @@ mipsel-linux-gnu-cpp -Iinclude -Iinclude/psxsdk -DNON_MATCHINGS -DFF7_STR \
   | grep -v warning:
 ```
 
+**A function that uses the GTE intrinsics could not be imported at all, and
+the two reasons are now fixed in `config/`.** Every `Kawai*` lighting function
+carried a park note saying "pinned pending a permuter pass" and none had ever
+had one, because `import.py` died and deleted its own scratch on the way out:
+
+* `mipsel-linux-gnu-as` does not know the GTE *mnemonics* -- `nccs`, `nclip`,
+  `mvmva`, `gpl`, `avsz3` and the rest are `.macro`s in `include/gte.inc`,
+  which `include/macro.inc` pulls in and which reach a normal build through
+  `INCLUDE_ASM`'s `.include`. The *target* `.s` that import.py assembles into
+  the reference object never got them, so the import failed with
+  `Error: unrecognized opcode 'nccs'`. `config/permuter_prelude.inc` now does
+  `.include "gte.inc"`; the file spells them upper-case and GAS matches macro
+  names case-insensitively, so the lower-case forms in `asm/` resolve.
+* pycparser cannot parse the `__asm__ volatile` that `gte_ldv0` and friends
+  expand to, and **a syntax error anywhere in base.c makes import.py skip the
+  prune silently** -- the exact trap this file already documents one section
+  above, reached from a different direction. `config/permuter_settings.toml`
+  now preserves `gte_[a-z0-9_]+` as opaque `void`, so the front end sees a
+  call and the real macro is restored in the late-define block before every
+  candidate compiles.
+
+The check that the fix worked is the prune, not the import message:
+`KawaiLightingApplyToPolyColor`'s base.c is 7 KB with exactly one function
+definition in it. Note that the relocation-multiset check this file
+recommends cannot pass for a function with preserved macros -- raw `base.c`
+still calls `gte_nccs` as a function, and only the candidates get the real
+`.word`. That is true of `PC_INC` and `GET_PARAM_U8` too; read the size and
+the prune instead.
+
 `import.py` takes `<c_file> <asm_file|func_name>` — there is no `-o` flag. The
 `func_name` form only works if the function still has a `GLOBAL_ASM` stub, which
 this repo does not use (it uses `INCLUDE_ASM`), so pass the target `.s` path
