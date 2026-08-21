@@ -3207,6 +3207,17 @@ const u32 D_800A00BC[] = {0x00360000, 0x012A007A};
  * the two pointer assignments, nor moving them after the stores (32 rows),
  * nor between them, nor the declaration order of the locals, nor writing the
  * first store through `from` moves it.
+ *
+ * One thing to know before running the permuter on it: the scratch cannot
+ * reach score 0. `seIds`' initialiser is a local `.rodata` blob in our object,
+ * so every reference relocates against `.rodata`; the target reaches the same
+ * bytes through `D_800A00BC`, which lives in *another* unit's `.rodata` and is
+ * therefore not defined in `target.s` at all. `permuter_rodata_local.py`
+ * demotes labels the target file defines and has nothing to demote here, and
+ * `align --strings` has no declaration to rewrite. So `--stop-on-zero` will
+ * not fire even on a byte-identical candidate: run it with `--better-only` and
+ * re-measure every output with `variant_eval.py` instead of trusting the
+ * score.
  * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityTriggerCheck);
