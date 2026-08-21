@@ -1607,7 +1607,28 @@ void FieldInitDefaultValues(void) {
  * wall-clock limit rather than to exhaustion -- for exactly **one** row in the
  * real build. The other 25 outputs are between 160 and 390 and none of them is
  * worth opening. Do not read a score that size as progress; re-measure every
- * output with variant_eval. */
+ * output with variant_eval. 
+ * One correction to the paragraph above, and it is the kind of thing the
+ * permuter's score cannot see: `pcBase` buys its row by *breaking* the
+ * preheader's movable order. Without it the two hoisted symbol addresses come
+ * out as the target has them -- `lui s1,%hi(g_DebugText)` then
+ * `lui s2,%hi(g_FieldScriptPC)` -- because g_DebugText's first use, in the
+ * debug block, precedes any reference to the PC table, and move_movables
+ * emits in insn order. Assigned as the do-body's first statement, `pcBase`
+ * puts the PC table's address first and those four rows go wrong; the net is
+ * 15 rows with it against 16 without, both at -1 instruction. So the two
+ * bodies are a row apart on the metric and the *later* one is structurally
+ * closer to the target. If this function is picked up again, start from the
+ * body without `pcBase`.
+ *
+ * Re-measured there, the remaining cluster does not move: the target issues
+ * `sll a3,v1,1` (the PC slot index) before `sll v1,v1,6` (the script base)
+ * and this build issues them the other way round. Moving the `slot`
+ * assignment above `scriptBase`, above `scripts = g_FieldScripts`, or to the
+ * top of the do-body all measure 25; `g_CurrentEntity * 64` for the shift and
+ * `<< 1` for the index are both exactly inert at 16. The order is not
+ * reachable from statement order or from the spelling.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
