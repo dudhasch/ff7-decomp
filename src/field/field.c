@@ -1190,6 +1190,16 @@ extern s16 D_801144D0;
  * want it, and they want it together -- one site alone is 53/8 either way,
  * both 51/6, neither 55/10.
  *
+ * A `do { } while (0);` after the *layer-4* run walk's inner do/while -- inside
+ * the `if (count != 0)`, after the loop closes -- is worth eight rows and two
+ * insertions (51/6 to 43/4). Placement is the whole of it: the same barrier
+ * after layer 2's inner loop is 51/6, after layer 3's inert on top of the
+ * layer-4 one, and doubling the layer-4 one gives the 51/6 back. This is the
+ * `perm_ins_block` class, the same as the three that took AddBackgroundToRender
+ * from 193 to 65, and as there the identity of what the original wrote is not
+ * recoverable -- what it emitted was a NOTE_INSN_LOOP_BEG/END pair and an exit
+ * CODE_LABEL after the walk's own loop.
+ *
  * Re-measured against the 51/6 base, since a note's negatives are only good
  * for the state they were taken in and this body has moved twice: `run[1] =
  * sprite34Count;` ahead of `count = run[2];` is 73/6 at layer 3, at layer 4 or
@@ -1422,6 +1432,8 @@ layer4:
                     sprt++;
                     pairs += 2;
                 } while (--count != 0);
+                do {
+                } while (0);
             }
         }
         run += 3;
