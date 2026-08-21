@@ -2379,8 +2379,35 @@ takes about three seconds against roughly forty for a ninja round trip, and the
 verdict is the one `checkfn.py` would give (same alias discounting, same
 scoping). A variant is described as *edits against a pinned base*, and each
 `old` string must match exactly once or the run aborts, so a typo cannot
-silently score as "no change". The tool is currently hardcoded to
-`func_801D080C`; point the constants at another function to reuse it.
+silently score as "no change".
+
+The spec names its own source and function, so one tool serves the whole
+repo, and several specs given at once are scored concurrently:
+
+```shell
+.venv/bin/python3 tools/variant_eval.py --pin src/field/field4.c
+.venv/bin/python3 tools/variant_eval.py .variants/*.json --jobs=8 --rows
+```
+
+The compiler, assembler and jump-table flags are read out of `build.ninja`'s
+edge for that object rather than duplicated in the tool -- the `//!` header's
+meaning lives in `tools/ninja/gen.py`, and a second parser would drift the
+first time someone adds a PSYQ version, with a wrong verdict rather than an
+error as the failure.
+
+**It unparks only the function under test, and that is load-bearing.**
+Compiling the unit with `-DNON_MATCHINGS`, which is the obvious way to select
+the C bodies, replaces *every* parked function's pinned `.s` with its C body
+-- and those bodies are the wrong length. Everything after the first one then
+sits at the wrong offset, so a byte-perfect function reads as a wall of
+branch-target rows off by a constant: `KawaiLightingApplyToPolyColor` scored
+22 that way while `checkfn.py` said MATCH, all of them branch targets 4 bytes
+low, because the parked `KawaiSetVertexColorFromLighting` above it is one
+instruction longer as C than as asm. The check that the setup is honest is a
+no-edit spec on a function that already matches: it must score exactly 0.
+
+The reference is `expected/build/us/<source>.o`, which holds the *target*
+bytes, so the verdict agrees with `checkfn.py` to the row.
 
 ### 3b. Check .rodata ownership before writing the C
 

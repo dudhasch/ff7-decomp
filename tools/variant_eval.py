@@ -30,6 +30,24 @@ everyone else is measuring against.
 Verdict format matches checkfn.py: symbol references that resolve to the same
 address are counted as aliases, not differences, and the comparison is scoped
 to exactly the instructions the target `.s` declares.
+
+The spec names its own function, so one tool serves the whole repo:
+
+    {"tag": "...", "source": "src/field/field4.c",
+     "func": "KawaiSetVertexColorFromLighting", "edits": [[...]]}
+
+Compiler, assembler and jump-table flags are read out of `build.ninja`'s edge
+for that object rather than duplicated here -- the `//!` header's meaning lives
+in tools/ninja/gen.py and a second copy of it would drift. The reference is
+`expected/build/us/<source>.o`.
+
+Pass several specs to run them concurrently:
+
+    .venv/bin/python3 tools/variant_eval.py .variants/*.json --jobs 8
+
+Pin a base per source before sweeping (once, and re-pin after landing a change):
+
+    .venv/bin/python3 tools/variant_eval.py --pin src/field/field4.c
 """
 import hashlib
 import json
@@ -46,17 +64,40 @@ import checkfn  # noqa: E402
 
 PYTHON = os.path.join(REPO, ".venv", "bin", "python3")
 DIFF = os.path.join(REPO, "tools", "asm-differ", "diff.py")
-BASE_C = os.path.join(REPO, ".variants", "_base.c")
-BASE_SHA = os.path.join(REPO, ".variants", "_base.sha256")
+NINJA = os.path.join(REPO, "build.ninja")
 
-# src/menu/cnfgmenu.c's line from build.ninja: cc1-psx-272, -O2 -G0 -g -gcoff,
-# aspsx 2.21. NON_MATCHINGS selects the C body over the INCLUDE_ASM stub.
-SOURCE = "src/menu/cnfgmenu.c"
-FUNC = "func_801D080C"
-REF_OBJ = "expected/build/us/src/menu/cnfgmenu.c.o"
-CC1 = "cc1-psx-272"
-CC_FLAGS = ["-O2", "-G0", "-g", "-gcoff"]
-AS_FLAGS = ["--expand-div", "--aspsx-version=2.21"]
+
+def base_paths(source):
+    """One pinned snapshot per source file, so several functions in different
+    units can be swept at the same time without sharing a base."""
+    stem = re.sub(r"\W", "_", source)
+    d = os.path.join(REPO, ".variants")
+    return os.path.join(d, "_base_%s.c" % stem), os.path.join(d, "_base_%s.sha256" % stem)
+
+
+def resolve_build(source):
+    """Read the object's cc1 / cc_flags / as_flags / jtbl_flags out of
+    build.ninja. The `//!` header's meaning lives in tools/ninja/gen.py; a
+    second parser here would drift the first time someone adds a PSYQ version,
+    and the failure would be a wrong verdict rather than an error."""
+    if not os.path.exists(NINJA):
+        die("no build.ninja -- run `make build` once so the flags can be read")
+    obj = "build/us/%s.o" % source
+    with open(NINJA, encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.search(r"^build %s: psx-cc .*?(?=^build )" % re.escape(obj),
+                  text, re.M | re.S)
+    if not m:
+        die("build.ninja has no psx-cc edge for %s" % obj)
+    edge = m.group(0)
+    var = lambda k, d: (re.search(r"^\s+%s = (.*)$" % k, edge, re.M) or [None, d])[1]
+    return {
+        "cc1": var("cc1", "cc1-psx-272").strip(),
+        "cc_flags": var("cc_flags", "-O2 -G0 -g -gcoff").split(),
+        "as_flags": var("as_flags", "--expand-div --aspsx-version=2.34").split(),
+        "jtbl_flags": var("jtbl_flags", "").split(),
+        "ref_obj": "expected/%s" % obj,
+    }
 
 
 def die(msg):
@@ -64,21 +105,78 @@ def die(msg):
     sys.exit(2)
 
 
-def read_base():
-    if not os.path.exists(BASE_C):
-        die("no base snapshot at %s -- create it with\n"
-            "         cp %s .variants/_base.c && sha256sum .variants/_base.c "
-            "| cut -d' ' -f1 > .variants/_base.sha256" % (BASE_C, SOURCE))
-    with open(BASE_C, encoding="utf-8", newline="") as fh:
+def read_base(source):
+    base_c, base_sha = base_paths(source)
+    if not os.path.exists(base_c):
+        die("no base snapshot for %s -- pin one with\n"
+            "         .venv/bin/python3 tools/variant_eval.py --pin %s"
+            % (source, source))
+    with open(base_c, encoding="utf-8", newline="") as fh:
         text = fh.read()
-    if os.path.exists(BASE_SHA):
-        want = open(BASE_SHA).read().strip()
+    if os.path.exists(base_sha):
+        want = open(base_sha).read().strip()
         got = hashlib.sha256(text.encode("utf-8")).hexdigest()
         if want != got:
-            die("the base snapshot has changed under us (%s != %s).\n"
+            die("the base snapshot for %s has changed under us (%s != %s).\n"
                 "         Every variant measured against it is now "
-                "incomparable; stop and re-pin." % (got[:12], want[:12]))
+                "incomparable; stop and re-pin." % (source, got[:12], want[:12]))
     return text
+
+
+def pin(source):
+    d = os.path.join(REPO, ".variants")
+    if not os.path.isdir(d):
+        os.makedirs(d)
+    base_c, base_sha = base_paths(source)
+    with open(os.path.join(REPO, source), encoding="utf-8", newline="") as fh:
+        text = fh.read()
+    with open(base_c, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    with open(base_sha, "w", encoding="utf-8") as fh:
+        fh.write(hashlib.sha256(text.encode("utf-8")).hexdigest() + "\n")
+    sys.stderr.write("pinned %s -> %s\n" % (source, os.path.relpath(base_c, REPO)))
+
+
+def unpark(text, name):
+    """Make one MASPSX_OVERRIDE-parked body the live one, exactly as
+    tools/unpark.py does to the real file.
+
+    Compiling the whole unit with -DNON_MATCHINGS instead -- which is what this
+    tool used to do -- replaces *every* parked function's pinned .s with its C
+    body, and those bodies are the wrong length. Everything after the first one
+    then sits at the wrong offset, so a byte-perfect function reads as a wall of
+    branch-target rows off by a constant. Measured: KawaiLightingApplyToPolyColor
+    scored 22 rows that way while checkfn said MATCH, all of them branch targets
+    4 bytes low, because the parked KawaiSetVertexColorFromLighting above it is
+    one instruction longer as C than as asm.
+    """
+    lines = text.split(chr(10))
+    ov = None
+    for i, ln in enumerate(lines):
+        if re.match(r"\s*MASPSX_OVERRIDE\s*\(", ln):
+            blob = chr(10).join(lines[i:i + 3])
+            if re.search(r"\b%s\s*\)" % re.escape(name), blob):
+                ov = i
+                break
+    if ov is None:
+        return text          # already live; nothing to do
+    start = ov
+    while not lines[start].startswith("#ifndef NON_MATCHINGS"):
+        start -= 1
+    els = ov
+    while not lines[els].startswith("#else"):
+        els += 1
+    end, depth = els + 1, 0
+    while True:
+        ln = lines[end]
+        if ln.startswith("#if"):
+            depth += 1
+        elif ln.startswith("#endif"):
+            if depth == 0:
+                break
+            depth -= 1
+        end += 1
+    return chr(10).join(lines[:start] + lines[els + 1:end] + lines[end + 1:])
 
 
 def apply_edits(text, edits):
@@ -101,10 +199,14 @@ def apply_edits(text, edits):
 DIAG_RE = re.compile(r"^\S.*:\d+: (?!warning:)")
 
 
-def compile_variant(src, obj, work):
+def compile_variant(src, obj, work, cfg, orig):
+    # The variant is written to a temp directory, so a quoted include like
+    # "field_private.h" no longer resolves next to the source. Put the real
+    # source's directory on the search path, which is where cpp would have
+    # found it in the normal build.
     cpp = subprocess.run(
-        ["mipsel-linux-gnu-cpp", "-Iinclude", "-Iinclude/psxsdk",
-         "-DUSE_INCLUDE_ASM", "-DFF7_STR", "-DNON_MATCHINGS",
+        ["mipsel-linux-gnu-cpp", "-I" + os.path.dirname(orig), "-Iinclude", "-Iinclude/psxsdk",
+         "-DUSE_INCLUDE_ASM", "-DFF7_STR",
          "-MMD", "-MF", os.path.join(work, "dep.d"), "-lang-c",
          "-undef", "-Wall", "-fno-builtin", src],
         cwd=REPO, capture_output=True)
@@ -116,9 +218,11 @@ def compile_variant(src, obj, work):
         "bin/str | iconv --from-code=UTF-8 --to-code=Shift-JIS "
         "| bin/%s -quiet -mcpu=3000 -mgas %s "
         "| python3 tools/maspsx/maspsx.py %s "
+        "| python3 tools/psx_jtbl_align.py %s "
         "| mipsel-linux-gnu-as -Iinclude -march=r3000 -mtune=r3000 "
         "-no-pad-sections -O1 -G0 -o %s"
-        % (CC1, " ".join(CC_FLAGS), " ".join(AS_FLAGS), obj))
+        % (cfg["cc1"], " ".join(cfg["cc_flags"]),
+           " ".join(cfg["as_flags"]), " ".join(cfg["jtbl_flags"]), obj))
     proc = subprocess.run(["bash", "-c", script], cwd=REPO,
                           input=cpp.stdout, capture_output=True)
     out = proc.stdout.decode("utf-8", "replace") + \
@@ -135,10 +239,10 @@ def compile_variant(src, obj, work):
         die("no object produced")
 
 
-def score(obj, want, rows_wanted, context):
+def score(obj, want, rows_wanted, context, cfg, func, out):
     proc = subprocess.run(
-        [PYTHON, DIFF, "-o", "--format=json", "-f", obj, "-F", REF_OBJ,
-         FUNC, "--max-lines", str(want * 2 + 128)],
+        [PYTHON, DIFF, "-o", "--format=json", "-f", obj, "-F", cfg["ref_obj"],
+         func, "--max-lines", str(want * 2 + 128)],
         cwd=REPO, capture_output=True, text=True)
     if proc.returncode != 0:
         die("diff.py failed:\n%s" % proc.stderr.strip())
@@ -177,8 +281,8 @@ def score(obj, want, rows_wanted, context):
     # Rows, not instructions: asm-differ renders a moved instruction as a
     # changed row against a `<` marker rather than as a delete/insert pair, so
     # these do not subtract cleanly from the 1205 the .s declares.
-    print("TOTAL %d  (%d changed, %d inserted, %d deleted; target has %d insns)"
-          % (chg + ins + dele, chg, ins, dele, want))
+    out.append("TOTAL %d  (%d changed, %d inserted, %d deleted; target has %d insns)"
+               % (chg + ins + dele, chg, ins, dele, want))
 
     if not rows_wanted:
         return chg + ins + dele
@@ -190,49 +294,120 @@ def score(obj, want, rows_wanted, context):
         if not (0 <= n < len(scoped)):
             continue
         if n != prev + 1:
-            print("     ...")
+            out.append("     ...")
         prev = n
         line = (scoped[n].get("current") or {}).get("src_line", "")
-        print("%-3s %-4s %-40s | %-40s %s"
-              % (kinds.get(n, ""), n,
-                 checkfn.text_of(scoped[n].get("base")) or "",
-                 checkfn.text_of(scoped[n].get("current")) or "", line))
+        out.append("%-3s %-4s %-40s | %-40s %s"
+                   % (kinds.get(n, ""), n,
+                      checkfn.text_of(scoped[n].get("base")) or "",
+                      checkfn.text_of(scoped[n].get("current")) or "", line))
     return chg + ins + dele
 
 
-def main(argv):
-    if len(argv) < 2:
-        sys.stderr.write(__doc__)
-        return 2
-    spec_path = argv[1]
-    rows_wanted = "--rows" in argv
-    keep = "--keep" in argv
-    context = 3
-    for a in argv:
-        if a.startswith("--context="):
-            context = int(a.split("=", 1)[1])
-
+def run_one(spec_path, rows_wanted, keep, context):
+    """Score one spec. Everything it touches is private to this call: its own
+    temp directory, its own object, and read-only repo inputs -- so N of these
+    run concurrently without a shared build directory to corrupt."""
+    out = []
     with open(spec_path, encoding="utf-8") as fh:
         spec = json.load(fh)
     tag = spec.get("tag") or os.path.basename(spec_path).rsplit(".", 1)[0]
-    text = apply_edits(read_base(), spec.get("edits", []))
+    source = spec.get("source")
+    func = spec.get("func")
+    if not source or not func:
+        die("%s: spec needs \"source\" and \"func\"" % spec_path)
 
-    want = checkfn.target_insn_count(os.path.join(REPO, SOURCE), FUNC)
+    cfg = resolve_build(source)
+    text = unpark(apply_edits(read_base(source), spec.get("edits", [])), func)
+    want = checkfn.target_insn_count(os.path.join(REPO, source), func)
+
     work = tempfile.mkdtemp(prefix="variant-%s-" % re.sub(r"\W", "_", tag))
     try:
-        src = os.path.join(work, "cnfgmenu.c")
+        src = os.path.join(work, os.path.basename(source))
         with open(src, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
         obj = os.path.join(work, "variant.o")
-        compile_variant(src, obj, work)
-        print("VARIANT %s" % tag)
-        score(obj, want, rows_wanted, context)
+        compile_variant(src, obj, work, cfg, source)
+        out.append("VARIANT %s  [%s %s]" % (tag, source, func))
+        total = score(obj, want, rows_wanted, context, cfg, func, out)
     finally:
         if keep:
-            sys.stderr.write("kept %s\n" % work)
+            out.append("kept %s" % work)
         else:
             shutil.rmtree(work, ignore_errors=True)
-    return 0
+    return tag, total, out
+
+
+def main(argv):
+    args = argv[1:]
+    if not args:
+        sys.stderr.write(__doc__)
+        return 2
+
+    if args[0] == "--pin":
+        if len(args) < 2:
+            die("--pin needs a source path, e.g. src/field/field4.c")
+        for s in args[1:]:
+            pin(s)
+        return 0
+
+    rows_wanted = "--rows" in args
+    keep = "--keep" in args
+    context = 3
+    jobs = 1
+    specs = []
+    for a in args:
+        if a.startswith("--context="):
+            context = int(a.split("=", 1)[1])
+        elif a.startswith("--jobs="):
+            jobs = int(a.split("=", 1)[1])
+        elif a in ("--rows", "--keep"):
+            continue
+        else:
+            specs.append(a)
+    if not specs:
+        die("no spec files given")
+
+    # A failed spec must not take the batch down with it: die() exits the
+    # process, so each spec runs in its own worker and a non-zero exit is
+    # reported against that tag alone.
+    results = []
+    if jobs > 1 and len(specs) > 1:
+        import multiprocessing.pool
+        with multiprocessing.pool.ThreadPool(min(jobs, len(specs))) as pool:
+            futs = [(s, pool.apply_async(_guarded, (s, rows_wanted, keep, context)))
+                    for s in specs]
+            for s, f in futs:
+                results.append(f.get())
+    else:
+        results = [_guarded(s, rows_wanted, keep, context) for s in specs]
+
+    worst = 0
+    for tag, total, out in results:
+        for line in out:
+            print(line)
+        if total is None:
+            worst = 2
+        print("")
+    if len(results) > 1:
+        print("=== summary, best first")
+        for tag, total, _ in sorted(results, key=lambda r: (r[1] is None, r[1])):
+            print("  %-40s %s" % (tag, "FAILED" if total is None else total))
+    return worst
+
+
+def _guarded(spec_path, rows_wanted, keep, context):
+    import io as _io
+    import contextlib
+    tag = os.path.basename(spec_path).rsplit(".", 1)[0]
+    err = _io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            return run_one(spec_path, rows_wanted, keep, context)
+    except SystemExit:
+        return tag, None, ["VARIANT %s" % tag] +             ["  " + l for l in err.getvalue().rstrip().splitlines()]
+    except Exception as exc:  # noqa: BLE001 - one bad spec must not kill the batch
+        return tag, None, ["VARIANT %s" % tag, "  %s: %s" % (type(exc).__name__, exc)]
 
 
 if __name__ == "__main__":
