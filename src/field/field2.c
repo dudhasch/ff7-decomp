@@ -4109,6 +4109,20 @@ extern u8 D_8009C6D8;
  * instead of caching it all measure exactly 13 (the re-read is 36). The
  * length is exact and the relocations are clean, so this is a permuter target
  * for which score 0 is reachable.
+ *
+ * 13 -> 6, and the step is decomp-permuter's `perm_temp_for_expr`: `total =
+ * roll;` between the fourth cumulative sum and its comparison, with the
+ * comparison reading `total`. `total` is dead there, so it costs no
+ * instruction, and reusing *that* variable is the whole of it -- a fresh `s32`
+ * local measures 13, `rate` 9, `formation` 13 and `i` 30, so this is an
+ * allocno-priority effect on `total` specifically and not an arbitrary
+ * spelling. What natural C the original wrote to get it is not recovered; the
+ * assignment is ordinary C and semantically inert, which is why it is taken.
+ *
+ * The 6 left are `slot` and `total` trading $a1 and $v1 across the third
+ * comparison. Inert against that: `s32 slot`, four declaration positions for
+ * `total`, splitting the third sum into `total = sum; total += ...;`, and
+ * re-reading `enc->special[2]` at the store instead of caching it.
  * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
@@ -4186,7 +4200,8 @@ void FieldBattleCheck(void) {
                     rate = (s32)(enc->special[3] << 16) >> 27;
                 }
                 sum = total + rate;
-                if ((u8)roll < (u8)sum) {
+                total = roll;
+                if ((u8)total < (u8)sum) {
                     formation = enc->special[3] & 0x3FF;
                 found:
                     D_8009ABF6 = formation;
