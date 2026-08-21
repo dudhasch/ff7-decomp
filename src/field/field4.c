@@ -10009,7 +10009,25 @@ s32 OpcodeFuncNfade(void) {
  *
  * Permuter food: what is needed is a shape that keeps the two arms apart for
  * some reason other than the register, not another spelling of the same two
- * tests. */
+ * tests.
+ *
+ * And the permuter has now had a go, with the result recorded rather than
+ * repeated: base score **10** -- exactly the two register rows at
+ * `allocno_compare`'s 5 points each, so the scratch is measuring the right
+ * thing -- and **no improvement in 32,000 candidates** with
+ * `perm_ins_block=20` and `perm_temp_for_expr=200`. That is a strong negative
+ * and it fits the diagnosis: 10 is a local optimum with a cliff on both sides,
+ * because the one edit that fixes the register also makes the two tails
+ * identical hard-register patterns and cross-jumping then deletes three
+ * insns, which the scorer charges 300 for. Nothing the randomizer can reach in
+ * one step crosses that.
+ *
+ * Note the scratch only became scoreable at all with
+ * `tools/permuter_latedefines.py` and `tools/permuter_rodata_local.py` (see
+ * CLAUDE.md step 4): before those, `PC_INC` was compiled as a call and the
+ * "fadew" literal and jump table scored as permanent differences, and the base
+ * read as 372 bytes against 396 with six mismatched relocation symbols. Do not
+ * re-derive that. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFadew);
 #else
