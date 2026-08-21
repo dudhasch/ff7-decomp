@@ -505,8 +505,7 @@ typedef struct {
     s32 MoveStartY;       // 0x1C
     s32 MoveStartZ;       // 0x20
     s8 Unk24[8];          // 0x24-0x2B
-    s16 MoveB;            // 0x2C
-    u8 Unk2E[2];          // 0x2E-0x2F
+    s32 MoveB;            // 0x2C-0x2F
     s16 MoveSteps;        // 0x30
     s16 MoveStep;         // 0x32
     u8 Unk34;             // 0x34
