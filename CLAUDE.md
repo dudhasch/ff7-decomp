@@ -1663,6 +1663,43 @@ a near-miss, in rough order of frequency:
   65/0 and 43/4 are inserted blocks, and not one of them is predictable from
   the target -- the pass to raise is `perm_ins_block`, and the only way to
   place one is to search.
+* **Do not guess at `n_refs` and `live_length` -- cc1 prints them.** The
+  `.lreg` dump names every pseudo with exactly the two numbers
+  `allocno_compare` ranks on, and `.greg`'s post-reload RTL shows which hard
+  register each one ended up in, so a residue that reads as register naming can
+  be turned into arithmetic instead of a guess:
+
+  ```shell
+  mipsel-linux-gnu-cpp <the flags from `ninja -t commands`> src/field/field.c \
+    | bin/str | iconv -f UTF-8 -t Shift-JIS > /tmp/f.i
+  cd /tmp/d && /ff7/bin/cc1-psx-26 -quiet -mcpu=3000 -mgas -O2 -G0 \
+    -dumpbase f.c -dl /tmp/f.i -o /dev/null      # -dg for .greg
+  ```
+
+  The dump has to be written **inside the container, to a container path**: a
+  `-dumpbase` under the bind-mounted repository creates the files and leaves
+  them 0 bytes, with no error, which reads exactly like a pass that did not
+  run. `cd` into the target directory and copy the results out afterwards.
+
+  What you get per function is
+  `Register 73 used 47 times across 538 insns; ...; pointer.` -- `n_refs` and
+  `live_length` -- and `;; N regs to allocate: ...` at the top of the `.greg`
+  entry, which is the allocno list already sorted by priority. Map a pseudo to
+  its hard register by finding an insn number in `.greg` (post-reload, prints
+  `(reg:SI 13 t5)`) and looking the same insn number up in `.lreg`
+  (pre-allocation, prints `(reg:SI 73)`).
+
+  The payoff is knowing when to stop. `AddBackgroundToRender`'s residue is 65
+  rows of pure register naming and the three quantities that have to permute
+  score -0.56, -0.88 and -0.95; for the second to overtake the first its
+  reference count would have to go from 5 to 12 and the third's from 4 to 16.
+  That is not something a spelling change reaches, and two sessions of trying
+  to add references one at a time would have found nothing. Note also what the
+  numbers do *not* settle: `find_reg` gives an allocno the lowest-numbered
+  register that does not conflict, so a different assignment can come from a
+  different conflict set rather than a different ranking, and the target's
+  `.s` cannot tell you which.
+
 * **When two locals hold each other's register and nothing you write moves
   them, you are looking at `allocno_compare`, and only two of its three terms
   are reachable from C.** gcc 2.6.3 sorts global allocnos by

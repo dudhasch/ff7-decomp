@@ -1722,6 +1722,34 @@ extern FieldBgOtSlot D_8009ACA2;
  * so `run` is still ranked one place too high. D_8011448C against $s0, the two
  * 0xFF000000 materialisations and g_FieldTriggers all follow from it.
  *
+ * The three quantities can be read straight out of cc1's own dumps rather than
+ * guessed at (see CLAUDE.md for the incantation -- the dump has to be written
+ * inside the container, a bind-mounted `-dumpbase` silently produces 0-byte
+ * files). In `.lreg`, pseudo 73 is `run`, 97 is the 0x124DC constant and 142
+ * is `&D_80071A48`, and `.greg`'s post-reload RTL shows them taking $t5, $t6
+ * and $t7 here:
+ *
+ *     Register  73 used 47 times across 538 insns   pri (235-538)/538 = -0.56
+ *     Register  97 used  5 times across  80 insns   pri ( 10- 80)/ 80 = -0.88
+ *     Register 142 used  4 times across 146 insns   pri (  8-146)/146 = -0.95
+ *
+ * so on `allocno_compare`'s ranking alone `run` is not one place too high, it
+ * is at the top by a wide margin: for the 0x124DC constant to overtake it its
+ * reference count would have to go from 5 to 12, and for `&D_80071A48` from 4
+ * to 16. That is not a tweak, and the obvious way to get there does not work
+ * -- a `FieldBgCamera* cam = D_80071A48;` local used at all 22 sites is 165/3
+ * whether it is assigned at the top of the function or beside `run`, because
+ * it also turns every `mem` with a `symbol_ref` address into a based access
+ * and the relocation set changes with it (2 symbol aliases against 14).
+ *
+ * Which leaves the other half of `find_reg`: an allocno takes the lowest
+ * numbered hard register that does not *conflict*, and the conflict sets of
+ * the two programs need not be the same. A target that gives `run` $t7 may
+ * simply have something else live across $t5 and $t6 there -- the "value that
+ * is not in the block" case from CLAUDE.md -- rather than a different ranking.
+ * Nothing in the target's `.s` distinguishes the two explanations, which is
+ * why this is a search problem and not a reading one.
+ *
  * Re-measured against *this* base, since a park note's negatives are only good
  * for the state they were taken in: a per-layer `sprite` is 151, a per-layer
  * `count` 119, both split 157. The old note's numbers for the same three
