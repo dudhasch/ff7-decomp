@@ -999,7 +999,7 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 87 changed / 17 inserted, down from 174/23. Four levers got it there and
+ * 67 changed / 15 inserted, down from 174/23. Six levers got it there and
  * three of them contradict what this note used to say, so read the rejected
  * list at the bottom as history, not as evidence.
  *
@@ -1039,6 +1039,21 @@ extern s16 D_801144D0;
  *    immediately after its SetDrawMode rather than after the SetSemiTrans
  *    if/else. 12 rows between them.
  *
+ * 5. Both sprite counters are incremented *last* in their inner loop body,
+ *    after the three pointer bumps, not before them. 7 rows. Only moving one
+ *    of the two is worth less than moving both (83/19 and 84/15 against
+ *    80/17), and moving them to the *front* of the body is worse than either.
+ *
+ * 6. `tpages++` is a statement of its own, not part of the SetDrawMode
+ *    argument: `SetDrawMode(modes, 0, 1, tpages[0], NULL); tpages++;` at all
+ *    four sites. 13 rows. Written as `*tpages++` the load and the spilled
+ *    pointer's read-modify-write are one dependency chain that sched2 keeps
+ *    together, and the `addiu s8,s8,0xc` the target puts in the load-delay
+ *    slot has nowhere to go. Note this only pays with `modes` written out
+ *    separately -- `SetDrawMode(modes++, 0, 1, tpages[0], NULL)` measures 71
+ *    against 67, and with `*tpages++` still in the argument it is 71 either
+ *    way.
+ *
  * `white` is not a tidiness variable. The target materialises 0x80 into a
  * callee-saved register once at the layer-3 entry and again at the layer-4
  * entry (`ori $s1,$zero,0x80` at both, the second one alone in its own block),
@@ -1066,8 +1081,18 @@ extern s16 D_801144D0;
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
  *     and 4 (115 against 96) -- the target loads count with `lh` into a temp
  *     and copies it to $s3, which is still not reproduced here.
- *   - `SetDrawMode(modes++, ...)` at the layer-1/3/4 sites (97 against 87).
+ *   - `SetDrawMode(modes++, ...)` at the layer-1/3/4 sites (97 against 87
+ *     before lever 6, 71 against 67 after it).
  *   - layer 2 written b0, r0, g0 (98 against 87).
+ *   - layer 4 alone written back as a backward goto walk, keeping 1-3 as
+ *     loops: 134/20 against 67/15. The four walks stand or fall together --
+ *     see lever 1. What prompted it is real, though, and is still open: the
+ *     layer-4 loop hoists `&run[1]` into its preheader as a giv
+ *     (`addiu s2,s4,2`, bumped by 6 each iteration) where the target and our
+ *     own layer 3 both address it as `2(s4)`. Two rows.
+ *   - the counters moved to just after `pairs[0]` (71/13) or just after the
+ *     clut store (70/17) instead of to the end of the body.
+ *   - `tpages++` written ahead of `modes++` rather than after (88 against 67).
  *   - `D_801144C8 = spriteCount` deferred to the layer-4 entry: it does flip
  *     the allocation on its own (147/22, before the loop change was found) but
  *     the store then lands in the wrong block -- the target stores it at the
@@ -1109,7 +1134,8 @@ void FieldBackgroundInitPackets(
             goto layer2;
         }
         if (run[0] == 0x7FFE) {
-            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            SetDrawMode(modes, 0, 1, tpages[0], NULL);
+            tpages++;
             D_8011448C++;
             modes++;
         } else {
@@ -1127,10 +1153,10 @@ void FieldBackgroundInitPackets(
                     sprt16->u0 = tile1->u;
                     sprt16->v0 = tile1->v;
                     sprt16->clut = tile1->clut;
-                    spriteCount++;
                     tile1++;
                     sprt16++;
                     pairs += 2;
+                    spriteCount++;
                 } while (--count != 0);
             }
         }
@@ -1170,10 +1196,10 @@ layer2:
                 sprt16->clut = tile2->clut;
                 pairs[0] = tile2->flags;
                 pairs[1] = tile2->param;
-                spriteCount++;
                 tile2++;
                 sprt16++;
                 pairs += 2;
+                spriteCount++;
             } while (--count != 0);
         }
         run += 3;
@@ -1191,7 +1217,8 @@ layer3:
             goto layer4;
         }
         if (run[0] == 0x7FFE) {
-            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            SetDrawMode(modes, 0, 1, tpages[0], NULL);
+            tpages++;
             modes++;
         } else {
             count = run[2];
@@ -1217,10 +1244,10 @@ layer3:
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
                     pairs[1] = D_8007EBD4->param;
-                    sprite34Count++;
                     D_8007EBD4++;
                     sprt++;
                     pairs += 2;
+                    sprite34Count++;
                 } while (--count != 0);
             }
         }
@@ -1234,7 +1261,8 @@ layer4:
             return;
         }
         if (run[0] == 0x7FFE) {
-            SetDrawMode(modes, 0, 1, *tpages++, NULL);
+            SetDrawMode(modes, 0, 1, tpages[0], NULL);
+            tpages++;
             modes++;
         } else {
             count = run[2];
@@ -1260,10 +1288,10 @@ layer4:
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
                     pairs[1] = D_8007EBD4->param;
-                    sprite34Count++;
                     D_8007EBD4++;
                     sprt++;
                     pairs += 2;
+                    sprite34Count++;
                 } while (--count != 0);
             }
         }
