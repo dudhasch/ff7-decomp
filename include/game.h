@@ -819,7 +819,7 @@ extern u8 D_800730DD[][0x14];
 extern FieldEntity g_FieldEntity[];
 extern u8 D_800756E8[]; // per-model flags, indexed by field model id
 extern s32 D_800756F8[];
-extern Unk80075D00* D_80075D00;
+extern Unk80075D00* g_MovieStream;
 extern volatile u16 D_80075DEC;  // buffer index, either 0 or 1
 extern u8 g_FieldMapVars[256];   // map-local memory bank for field scripts
 extern s8 D_80077F64[2][0x3400]; // polygon buffer

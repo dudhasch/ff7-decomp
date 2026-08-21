@@ -1,1 +1,2 @@
 func_8003A08C = 0x8003A08C; // ignore:true
+g_MovieStream = 0x80075D00; // size:0x4

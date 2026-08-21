@@ -801,8 +801,8 @@ void FieldMain(void) {
  *     function was parked the .s referenced six `const u32 D_800A0024[]`
  *     definitions, and leaving those in beside the compiled C emits every
  *     blob twice and grows the overlay by 48 bytes.
- *   - D_8009A060 must NOT be volatile: volatile pins its load ahead of the
- *     `li v0,1`, and the target has the constant first (in the branch delay
+ *   - g_FieldMovieDrawBg must NOT be volatile: volatile pins its load ahead of
+ * the `li v0,1`, and the target has the constant first (in the branch delay
  *     slot of the movie-stream test).
  *   - the C uses g_FieldStateData.eventCmd throughout, never the D_8009ABF5
  * alias; the alias costs a %hi/%lo pair per use where gcc wants 1(s2), and it
@@ -813,17 +813,16 @@ void FieldMain(void) {
 extern FieldWalkmesh** D_8009A044;
 extern s16* D_800E4274;
 extern s16* D_80114458;
-extern s32 D_8009A060;
-extern volatile s32 D_800965E4;
+extern s32 g_FieldMovieDrawBg;
+extern volatile s32 g_FieldMovieVSyncMode;
 extern u8 g_FieldLineCheckResult;
 extern s16 D_80071E38;
 extern s16 D_80071E3C;
 extern MATRIX* D_80071E40;
-extern u8 D_8009AC2C;
 extern u32 g_FieldOTHead[2];
 extern FieldLine D_8007E7AC;
-extern s32 D_80114478;
-extern s32 D_8011447C;
+extern s32 g_FieldVSyncBeforeDraw;
+extern s32 g_FieldVSyncAfterDraw;
 extern volatile s16 g_FieldNextModule;
 extern s32 g_FieldScreenCenterX;
 extern s32 g_FieldScreenCenterY;
@@ -881,7 +880,7 @@ s32 FieldMainLoop(void) {
         ClearOTagR(&buf->OtUi, 1);
         FieldCameraAssign();
         g_FieldPadRaw = FieldButtonsUpdate(&D_80071E38, &D_80071E3C);
-        g_FieldStateData.currentMovieFrame = D_80075D00->unk8;
+        g_FieldStateData.currentMovieFrame = g_MovieStream->unk8;
         FieldEventUpdate((s32)&buf->OtUi);
         g_PlayerModelId = g_FieldStateData.pcModelId;
         FieldBGScrollInit();
@@ -961,7 +960,7 @@ s32 FieldMainLoop(void) {
         FieldEntityMovementUpdate(g_FieldPadRaw);
         FieldEntityLineInteract(&g_FieldEntity[g_PlayerModelId], &D_8007E7AC);
         FieldEntityCheckTalk();
-        if (g_FieldMovieStreamActive == 0 || D_8009A060 == 1) {
+        if (g_FieldMovieStreamActive == 0 || g_FieldMovieDrawBg == 1) {
             AddBackgroundToRender(buf);
         }
         HandleKawaiDataInModel(buf);
@@ -969,11 +968,11 @@ s32 FieldMainLoop(void) {
         FieldRainAddToRender(buf->ot, buf->Rain, D_80071E40, &buf->RainDm);
         FieldArrowsAddToRender(buf, D_80071E40, g_FieldTriggers + 0x38);
         func_800138EC();
-        D_80114478 = VSync(1);
+        g_FieldVSyncBeforeDraw = VSync(1);
         while (DrawSync(1) != 0) {
         }
-        D_8011447C = VSync(1);
-        if (g_FieldMovieStreamActive != 0 && D_800965E4 != 1) {
+        g_FieldVSyncAfterDraw = VSync(1);
+        if (g_FieldMovieStreamActive != 0 && g_FieldMovieVSyncMode != 1) {
             VSync(3);
         } else {
             VSync(2);
@@ -1008,7 +1007,7 @@ s32 FieldMainLoop(void) {
         g_FieldCurDispEnv = &g_FieldDispEnv[(s16)D_80075DEC];
         g_FieldCurDrawEnv = &g_FieldDrawEnvBg[(s16)D_80075DEC];
         FieldUpdateMovieStream();
-        if (D_8009AC2C == 0) {
+        if (g_FieldStateData.mpdspSet == 0) {
             DrawOTag(&buf->OtSceneDrenv);
             DrawOTag(&buf->ot[0xFFF]);
             DrawOTag(&buf->OtFadeDrenv);
