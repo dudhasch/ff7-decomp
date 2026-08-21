@@ -1159,19 +1159,33 @@ extern FieldLine D_8007E7AC;
  * and 6 are short; the totals nearly cancel, so the whole function is six
  * instructions under the target's 1855.
  *
+ * sp10/sp14/sp18, sp20 and sp30/sp34 are three VECTORs, not six s32 locals.
+ * PSY-Q's VECTOR is 16 bytes (vx, vy, vz, pad), so three of them land at
+ * exactly the target's 0x10, 0x20 and 0x30 -- which is what the gaps in m2c's
+ * slot names were telling us. The split is not cosmetic: only sp10, sp20 and
+ * sp30 have their address taken, so the stores to sp14 and sp18 in passes 6,
+ * 7 and 8 are dead and gcc deletes them, which is the two `sw` per pass this
+ * body was short. Worth 26 rows.
+ *
+ * Where the remaining instructions are, per pass (want/got):
+ *     1: 44/44    2: 110/119  3: 209/215  4: 224/208
+ *     5: 87/87    6: 293/288  7: 433/440  8: 441/450
+ * Passes 1 and 5 are exact; the function is now ten instructions *over*.
+ *
  * The leads, in order of size:
- *   - Passes 4 (+16) and 6 (+15) have never been read against the target.
- *   - `tools/struct_access_audit.py field2 FieldEntityMovementUpdate
- *      --symbol g_FieldEntity --base 0x80074EA4 --size 0x84` is down to six
- *     rows, all small: MoveStep is stored six times too often (the census
- *     counts only %hi-addressed accesses, so the three per pass that now go
- *     through $s5 are invisible to it -- read that row with care).
- *   - Passes 7 and 8 each have two `sll`/`sra` pairs the target does not and
- *     are two stack stores short; the frame is 0x30 short and the target uses
- *     one more callee-saved register.
- *   - `li s3,0x3` and the `%hi/%lo(g_FieldEntity)` base are still not hoisted
- *     in pass 2's preheader, which is the same lever as passes 7 and 8 and
- *     has not been tried there.
+ *   - Pass 4 (+16 short) has never been read against the target, and pass 2
+ *     (-9) and pass 3 (-6) have not been looked at since the switches landed.
+ *   - Passes 7 and 8 recompute `i * 0x84` twice more than the target does,
+ *     near the end of the loop body -- the target keeps it in $s0 for the
+ *     whole iteration. m2c's `temp_s0_8 = i * 0x84;` at the loop top is
+ *     write-only and gcc drops it, so each block re-derives the index.
+ *   - **Do not delete the write-only index locals.** Removing all eleven of
+ *     them costs 20 rows and an instruction: they change nothing in passes 7
+ *     and 8 (both measure identically) but move pass 4 by one and the
+ *     allocation behind it.
+ *   - After SquareRoot0 the target copies the result with `move v1,v0` and
+ *     shifts out of $v1; ours coalesces the two and shifts in place, leaving
+ *     the branch delay slot empty. One row per pass.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
@@ -1182,12 +1196,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
     FieldEntity* ents;
     s32 next;
     s32 lastFrame;
-    s32 sp10;
-    s32 sp14;
-    s32 sp18;
-    s32 sp20;
-    s32 sp30;
-    s32 sp34;
+    VECTOR sp10;
+    VECTOR sp20;
+    VECTOR sp30;
     FieldModelEntry* temp_v0_13;
     FieldModelEntry* temp_v0_5;
     FieldModelEntry* temp_v1;
@@ -1463,12 +1474,12 @@ void FieldEntityMovementUpdate(s32 arg0) {
                 if (var_v0_15 < 0) {
                     var_v0_15 += 0xFFF;
                 }
-                sp30 = var_v0_15 >> 0xC;
+                sp30.vx = var_v0_15 >> 0xC;
                 var_v0_16 = g_FieldEntity[i].MoveEndY;
                 if (var_v0_16 < 0) {
                     var_v0_16 += 0xFFF;
                 }
-                sp34 = var_v0_16 >> 0xC;
+                sp30.vy = var_v0_16 >> 0xC;
                 temp_v0_4 =
                     FieldEntityCalculateZ(
                         &sp10, &sp20, &sp30,
@@ -1528,21 +1539,21 @@ void FieldEntityMovementUpdate(s32 arg0) {
                         var_a1 += 0xFFF;
                     }
                     temp_a1_4 = var_a1 >> 0xC;
-                    sp10 = temp_a1_4;
+                    sp10.vx = temp_a1_4;
                     temp_v1_5 =
                         g_FieldEntity[i].MoveEndY - g_FieldEntity[i].MoveStartY;
                     var_a0_3 = temp_v1_5 >> 0xC;
                     if (temp_v1_5 < 0) {
                         var_a0_3 = (s32)(temp_v1_5 + 0xFFF) >> 0xC;
                     }
-                    sp14 = var_a0_3;
+                    sp10.vy = var_a0_3;
                     var_v0_19 =
                         g_FieldEntity[i].MoveEndZ - g_FieldEntity[i].MoveStartZ;
                     if (var_v0_19 < 0) {
                         var_v0_19 += 0xFFF;
                     }
                     temp_v0_6 = var_v0_19 >> 0xC;
-                    sp18 = temp_v0_6;
+                    sp10.vz = temp_v0_6;
                     temp_v0_7 = SquareRoot0(
                         (temp_a1_4 * temp_a1_4) + (var_a0_3 * var_a0_3) +
                         (temp_v0_6 * temp_v0_6));
@@ -1677,21 +1688,21 @@ void FieldEntityMovementUpdate(s32 arg0) {
                         var_a1_2 += 0xFFF;
                     }
                     temp_a1_5 = var_a1_2 >> 0xC;
-                    sp10 = temp_a1_5;
+                    sp10.vx = temp_a1_5;
                     temp_v1_8 =
                         g_FieldEntity[i].MoveEndY - g_FieldEntity[i].MoveStartY;
                     var_a0_5 = temp_v1_8 >> 0xC;
                     if (temp_v1_8 < 0) {
                         var_a0_5 = (s32)(temp_v1_8 + 0xFFF) >> 0xC;
                     }
-                    sp14 = var_a0_5;
+                    sp10.vy = var_a0_5;
                     var_v0_24 =
                         g_FieldEntity[i].MoveEndZ - g_FieldEntity[i].MoveStartZ;
                     if (var_v0_24 < 0) {
                         var_v0_24 += 0xFFF;
                     }
                     temp_v0_14 = var_v0_24 >> 0xC;
-                    sp18 = temp_v0_14;
+                    sp10.vz = temp_v0_14;
                     var_v0_25 = SquareRoot0(
                         (temp_a1_5 * temp_a1_5) + (var_a0_5 * var_a0_5) +
                         (temp_v0_14 * temp_v0_14));
