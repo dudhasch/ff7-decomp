@@ -5998,7 +5998,21 @@ s32 OpcodeFuncMova(void) {
  * have no such value, so two of the original four remain. Also measured here
  * and inert: `g_FieldModelData->modelEntries + idx` instead of `&...[idx]`,
  * and a local for `g_FieldModelData`; a local for `modelEntries` costs 6 more
- * rows. */
+ * rows.
+ * 14 -> 10, the same lever and the same residue as OpcodeFuncMove: the
+ * animation-restart block duplicated into both arms of
+ * `if (g_EntityToModel) { ... } else { ... }`. The condition is an array's
+ * address, so it is always true and pure and flow deletes the test and one
+ * copy at no cost in length; the block structure it leaves is what puts the
+ * two halves of `anims` on the target's registers. Wrapping only from
+ * `modelIdx = ...` is identical (10); wrapping only the last statement is
+ * 32 / +2. The condition has to be an *array* -- `g_FieldModelData` is a
+ * pointer global, gcc cannot prove it non-null, and both arms survive:
+ * 63 rows and +44 instructions.
+ *
+ * The 10 left are the modelIdx / entryIdx / g_FieldModelData rotation this
+ * note and OpcodeFuncMove's both describe, unchanged.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldMoveToEntityUpdate);
 #else
@@ -6036,16 +6050,31 @@ s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
                 }
                 moving->activeAnimId = 1;
             }
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
-            g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame =
-                0;
-            modelIdx = g_EntityToModel[g_CurrentEntity];
-            model =
-                &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
-                                                    .modelEntryIndex];
-            anims = model->modelData + model->animationOffset;
-            g_FieldModels[modelIdx].animLastFrame =
-                *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+            if (g_EntityToModel) {
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed =
+                    0x10;
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]]
+                    .animCurrentFrame = 0;
+                modelIdx = g_EntityToModel[g_CurrentEntity];
+                model = &g_FieldModelData->modelEntries
+                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                anims = model->modelData + model->animationOffset;
+                g_FieldModels[modelIdx].animLastFrame =
+                    *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] -
+                    1;
+            } else {
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed =
+                    0x10;
+                g_FieldModels[g_EntityToModel[g_CurrentEntity]]
+                    .animCurrentFrame = 0;
+                modelIdx = g_EntityToModel[g_CurrentEntity];
+                model = &g_FieldModelData->modelEntries
+                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                anims = model->modelData + model->animationOffset;
+                g_FieldModels[modelIdx].animLastFrame =
+                    *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] -
+                    1;
+            }
         started:
             D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
             return 1;
