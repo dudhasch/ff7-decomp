@@ -1382,6 +1382,17 @@ extern s16 D_801144D0;
  * lever and nothing else, which is exactly why it cannot pay for itself: the
  * six nops it costs are real instructions and the alignment it buys is not.
  *
+ * decomp-permuter has now been run against this exact body (base score
+ * 1937, 126k iterations, `perm_pad_var_decl` at 200 since the residue is
+ * stack layout) and its best candidate, 1547, measures **43/4** -- exactly
+ * the body it started from. The change was `perm_temp_for_expr`'s: an `int`
+ * temporary between `count` and `run[2]` in one of the two layers. Applied
+ * to layer 3, to layer 4, and as an `s16` rather than an `int`, it is
+ * inert; applied to both layers at once it is 68/4. So a fifth of the
+ * permuter's score moved for no change in the build at all, on a scratch
+ * whose relocations are clean and whose base.c compiles to exactly 395
+ * instructions. Re-measure before believing any run on this function.
+ *
  * `while (--count)` and `while (0 != --count)` are byte-identical to
  * `while (--count != 0)`; `while (count-- != 1)` is 52/17 and
  * `while (count-- > 1)` 61/16. Writing the decrement as the loop body's
