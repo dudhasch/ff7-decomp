@@ -108,44 +108,44 @@ extern u32 g_FieldPad2Pressed;
 extern u32 g_FieldPad2Released;
 extern s32 func_8001C808(void);
 extern s16 D_800E0748[];
-extern s16 D_800E074A[];
+extern s16 g_FieldDebugPageY[];
 extern s16 D_800E074C[];
-extern s16 D_800E074E[];
-extern u8 D_800E0750[];
-extern u8 D_800E0751[];
-extern u8 D_800E0752[];
-extern s16 D_800E0754[];
-extern s16 D_800E0756[];
+extern s16 g_FieldDebugPageH[];
+extern u8 g_FieldDebugPageR[];
+extern u8 g_FieldDebugPageG[];
+extern u8 g_FieldDebugPageB[];
+extern s16 g_FieldDebugPageHeadRow[];
+extern s16 g_FieldDebugPageRow[];
 extern char g_FieldDebugRowText[];
 extern u8 D_800E08A8[];
-extern u8 D_800E08C0[];
+extern u8 g_FieldDebugPageHidden[];
 extern u8 D_800E1028[];
 extern u8 D_800E3B28[];
 extern u8 D_800E3FA8[];
 extern u8 D_800E4128[];
 extern u16 D_800E4200[];
-extern u8 D_800E4D90[];
-extern u8 D_800E4D94[];
-extern u8 D_800E4D98[];
-extern u8 D_800E4D9A[];
-extern u8 D_800E4D9C[];
-extern u8 D_800E4D9E[];
-extern u8 D_800E4DA4[];
-extern u8 D_800E4DA8[];
-extern u8 D_800E4DAC[];
-extern u8 D_800E4DAE[];
-extern u8 D_800E4DB0[];
-extern u8 D_800E4DB4[];
-extern u8 D_800E4DD4[];
-extern u8 D_800E4DD8[];
-extern u8 D_800E4DDC[];
-extern u8 D_800E4DDE[];
-extern u8 D_800E4DE0[];
-extern u8 D_800E4DE4[];
+extern u8 g_FieldMimPalData[];
+extern u8 g_FieldMimPalSize[];
+extern u8 g_FieldMimPalX[];
+extern u8 g_FieldMimPalY[];
+extern u8 g_FieldMimPalW[];
+extern u8 g_FieldMimPalH[];
+extern u8 g_FieldMimTex0Data[];
+extern u8 g_FieldMimTex0Size[];
+extern u8 g_FieldMimTex0X[];
+extern u8 g_FieldMimTex0Y[];
+extern u8 g_FieldMimTex0Rect[];
+extern u8 g_FieldMimTex0Tpage[];
+extern u8 g_FieldMimTex1Data[];
+extern u8 g_FieldMimTex1Size[];
+extern u8 g_FieldMimTex1X[];
+extern u8 g_FieldMimTex1Y[];
+extern u8 g_FieldMimTex1Rect[];
+extern u8 g_FieldMimTex1Tpage[];
 extern u8 D_800DFDFC[];
-extern u8 D_80071C20;
+extern u8 g_FieldRandomIndex;
 extern u8 g_EntityForSplitJoin;
-extern s16 D_800DF120[][2];
+extern s16 g_FieldDirVectors[][2];
 extern s16 g_FieldDebugRb;
 /* Double-buffered 7-entry ordering table for the debug overlay. Entry 6 is the
  * tail the overlay's primitives hang off, entry 0 the head linked into the
@@ -189,8 +189,10 @@ extern u8 D_8009D5A7;
 extern u8 D_800716CC;
 extern u8
     g_FieldMovieOpcodeActive; // set while a movie opcode is driving playback
-extern u32 D_80075E10;        // top of the buffer the movie stream decodes into
-extern u16 D_800E42A8[]; // per-model default walk speed, indexed by model id
+extern u32
+    g_FieldModelBufferTop; // top of the buffer the movie stream decodes into
+extern u16 g_FieldModelSavedMoveSpeed[]; // per-model default walk speed,
+                                         // indexed by model id
 extern s16 g_FieldMovieStreamDone;
 void func_80034FC8(u32 buffer, s16 movieId); // STR ring setup
 void func_800354CC(void);                    // STR playback start
@@ -205,8 +207,8 @@ extern u8 D_80095DE0[];
 extern char D_800A0848[];
 extern char D_800A08D0[];
 extern s32 g_BattleCharIdToCharId[11];
-extern u8 D_8009AD30[];
-extern FieldState D_8009ABF4;
+extern u8 g_CharIdToEntity[];
+extern FieldState g_FieldStateData;
 extern u8 g_FieldRandListIndex;
 extern u8 g_FieldRandListOffset;
 extern s32 D_8009A108;
@@ -224,7 +226,7 @@ extern u8 g_FieldExitArrowPktIdx;
 extern POLY_FT4 g_FieldExitArrowPkts[2];
 s32 GetGraphType(void);
 extern MATRIX** D_80083578;
-extern MATRIX* D_80083270;
+extern MATRIX* g_DebugMatrixP;
 extern s16 D_8009A162;
 extern u8 D_8009A15C;
 
@@ -355,7 +357,7 @@ extern volatile u16 g_FieldMoviePlayed;
 extern u16 g_FieldPreloadMapId;
 extern u32 g_FieldLzsInfo[];
 extern u32 g_WmPreSize;
-extern u8 D_800716D4;
+extern u8 g_FieldMusicLock;
 extern u8 D_8009ABF5;
 extern u8 g_FieldAnimLock;
 extern u8 g_RainControl;

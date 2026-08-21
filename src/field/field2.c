@@ -396,9 +396,9 @@ void FieldEntityInitPos(void) {
     s16 i;
 
     if (g_FieldAnimLock == 0) {
-        g_PlayerModelId = D_8009ABF4.pcModelId;
-        g_FieldEntity[g_PlayerModelId].PosI = D_8009ABF4.pcWalkMeshId;
-        if (D_8009ABF4.pcPosX == 0x7FFF) {
+        g_PlayerModelId = g_FieldStateData.pcModelId;
+        g_FieldEntity[g_PlayerModelId].PosI = g_FieldStateData.pcWalkMeshId;
+        if (g_FieldStateData.pcPosX == 0x7FFF) {
             g_FieldEntity[g_PlayerModelId].PosX =
                 ((D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 0] +
                   D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4] +
@@ -418,8 +418,8 @@ void FieldEntityInitPos(void) {
                  3)
                 << 12;
         } else {
-            g_FieldEntity[g_PlayerModelId].PosX = D_8009ABF4.pcPosX << 12;
-            g_FieldEntity[g_PlayerModelId].PosY = D_8009ABF4.pcPosY << 12;
+            g_FieldEntity[g_PlayerModelId].PosX = g_FieldStateData.pcPosX << 12;
+            g_FieldEntity[g_PlayerModelId].PosY = g_FieldStateData.pcPosY << 12;
             FieldEntityVectorSub(
                 edgeA,
                 &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4],
@@ -428,8 +428,8 @@ void FieldEntityInitPos(void) {
                 edgeB,
                 &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 8],
                 &D_800E4274[g_FieldEntity[g_PlayerModelId].PosI * 12 + 4]);
-            point[0] = D_8009ABF4.pcPosX;
-            point[1] = D_8009ABF4.pcPosY;
+            point[0] = g_FieldStateData.pcPosX;
+            point[1] = g_FieldStateData.pcPosY;
             g_FieldEntity[g_PlayerModelId].PosZ =
                 FieldEntityCalculateZ(
                     edgeA, edgeB, point,
@@ -437,21 +437,21 @@ void FieldEntityInitPos(void) {
                 << 12;
         }
         g_FieldEntity[g_PlayerModelId].SolidRange =
-            (D_8009ABF4.currentFieldScale * 0x11) >> 8;
-        moveSpeed = D_8009ABF4.currentFieldScale * 2;
+            (g_FieldStateData.currentFieldScale * 0x11) >> 8;
+        moveSpeed = g_FieldStateData.currentFieldScale * 2;
         g_FieldEntity[g_PlayerModelId].animSpeed = 0x10;
         g_FieldEntity[g_PlayerModelId].MoveSpeed = moveSpeed;
     }
-    for (i = 0; i < D_8009ABF4.modelCount; i++) {
+    for (i = 0; i < g_FieldStateData.modelCount; i++) {
         g_FieldEntity[i].MoveDirAdd = 0;
     }
 }
 
 void FieldEntityAddRotate(s32 arg0, s16 entityIdx) {
     if (g_FieldAnimLock == 0) {
-        if (D_8009ABF4.activeKeys2 & PADR1) {
+        if (g_FieldStateData.activeKeys2 & PADR1) {
             g_FieldEntity[entityIdx].MoveDirAdd = 0xE0;
-        } else if (D_8009ABF4.activeKeys2 & PADL1) {
+        } else if (g_FieldStateData.activeKeys2 & PADL1) {
             g_FieldEntity[entityIdx].MoveDirAdd = 0x20;
         } else {
             g_FieldEntity[entityIdx].MoveDirAdd = 0;
@@ -507,12 +507,12 @@ void FieldEntityAnimationUpdate(s32 entityId) {
 INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
 
 void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
-    D_8009ABF4.eventCmd = EVTCMD_FIELD_MAP_CHANGE;
-    D_8009ABF4.eventCmdParam = gateway->destFieldId;
-    D_8009ABF4.pcPosX = gateway->destPosX;
-    D_8009ABF4.pcPosY = gateway->destPosY;
-    D_8009ABF4.pcWalkMeshId = gateway->destWalkMeshId;
-    *(u16*)&D_8009ABF4.pcDirection = gateway->destDirection;
+    g_FieldStateData.eventCmd = EVTCMD_FIELD_MAP_CHANGE;
+    g_FieldStateData.eventCmdParam = gateway->destFieldId;
+    g_FieldStateData.pcPosX = gateway->destPosX;
+    g_FieldStateData.pcPosY = gateway->destPosY;
+    g_FieldStateData.pcWalkMeshId = gateway->destWalkMeshId;
+    *(u16*)&g_FieldStateData.pcDirection = gateway->destDirection;
 }
 
 /* Per-frame talk scan: on the rising edge of the OK button, score every entity
@@ -630,9 +630,9 @@ void FieldEntityCheckTalk(void) {
 }
 #endif
 
-s16 FieldEntityGetDirVectorX(u8 arg0) { return D_800DF120[arg0][0]; }
+s16 FieldEntityGetDirVectorX(u8 arg0) { return g_FieldDirVectors[arg0][0]; }
 
-s16 FieldEntityGetDirVectorY(u8 arg0) { return D_800DF120[arg0][1]; }
+s16 FieldEntityGetDirVectorY(u8 arg0) { return g_FieldDirVectors[arg0][1]; }
 
 extern u8 g_FieldAtanTable[];
 
@@ -945,7 +945,7 @@ extern s16 D_8009AC1C;
  * characters on a different floor of the same map never block one another.
  * Only the player's own collisions arm the other entity's push script.
  *
- * The entity count is `D_8009ABF4.modelCount` -- FieldState + 0x28 -- and
+ * The entity count is `g_FieldStateData.modelCount` -- FieldState + 0x28 -- and
  * reading it as that struct member rather than through the flat `D_8009AC1C`
  * symbol is what makes this match. As a struct reference the load may alias the
  * `g_FieldEntity[i]` stores in the body, so gcc leaves it in the loop and
@@ -966,7 +966,7 @@ s32 FieldEntityCollisionCheck(s16 entityId, VECTOR* pos) {
 
     hit = 0;
     range = g_FieldEntity[entityId].SolidRange;
-    for (i = 0; i < D_8009ABF4.modelCount; i++) {
+    for (i = 0; i < g_FieldStateData.modelCount; i++) {
         if (i == entityId) {
             continue;
         }
@@ -1494,7 +1494,7 @@ extern u8* D_800E0204;
 /* The per-field model-file table: one 24-byte record per field, of which the
  * loader uses the first two words as DS_read's sector and size. It is its own
  * object, immediately behind g_FieldLzsInfo. */
-extern u32 D_800DA5C8[];
+extern u32 g_FieldFileSectors[];
 
 /* The face-selection block the model loader leaves in the scratchpad for
  * KawaiLoadEyesMouthTexToVram to read back: which mouth and eye frame to
@@ -1540,17 +1540,19 @@ void FieldModelLoadAndInit(void) {
     D_800DFCA0 = (FieldTexBlockHeader*)0x80128000;
     buf =
         FieldModelStructInit((FieldModelFileDesc*)D_8007E770, g_FieldModelData);
-    D_80075E10 = (u32)buf;
+    g_FieldModelBufferTop = (u32)buf;
     D_800E0204 = buf;
-    DS_read(D_800DA5C8[g_CurrentFieldIndex * 6],
-            D_800DA5C8[g_CurrentFieldIndex * 6 + 1], (u_long*)0x801B0000, NULL);
+    DS_read(g_FieldFileSectors[g_CurrentFieldIndex * 6],
+            g_FieldFileSectors[g_CurrentFieldIndex * 6 + 1],
+            (u_long*)0x801B0000, NULL);
     while (SystemCdromReadChain() != 0) {
     }
     ((u8**)0x1F800000)[0] = D_800DF08C;
     ((u8**)0x1F800000)[1] = D_800DF0D4;
-    D_80075E10 = (u32)FieldModelLoadGlobalModels(
-        (FieldModelFileDesc*)D_8007E770, g_FieldModelData, (u8*)D_80075E10, 1);
-    D_80075E10 = (u32)LoadLocalFieldModelAndInitAll(
+    g_FieldModelBufferTop = (u32)FieldModelLoadGlobalModels(
+        (FieldModelFileDesc*)D_8007E770, g_FieldModelData,
+        (u8*)g_FieldModelBufferTop, 1);
+    g_FieldModelBufferTop = (u32)LoadLocalFieldModelAndInitAll(
         (FieldModelFileDesc*)D_8007E770, g_FieldModelData, (u8*)D_800A00DC,
         (u32*)0x801B0000);
     for (i = 1; i < g_FieldModelData->modelCount; i++) {
@@ -1829,7 +1831,7 @@ void FieldCameraAssign(void) {
     if (g_FieldMovieStreamActive == 0 || g_FieldCameraMatrixSel == 1) {
         D_80071E40 = *D_80083578;
     } else {
-        D_80071E40 = D_80083270;
+        D_80071E40 = g_DebugMatrixP;
     }
 }
 
@@ -1845,39 +1847,40 @@ void FieldUpdateMovieStream(void) {
         }
         return;
     }
-    if (D_8009ABF4.eventCmd == EVTCMD_UNK14) {
+    if (g_FieldStateData.eventCmd == EVTCMD_UNK14) {
         func_80035658();
         g_FieldMovieStreamActive = 0;
         g_FieldMoviePlayed = 0;
-        D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        g_FieldStateData.movieCommandState = MOVCMD_DONE;
         return;
     }
     status = SystemCdromReadChain();
     switch (status) {
     case 0:
-        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE &&
-            D_8009ABF4.movieCommandState == MOVCMD_IDLE) {
-            if (D_80075E10 <= 0x801AFFFF) {
-                func_80034FC8(D_80075E10, D_8009ABF4.eventCmdParam);
+        if (g_FieldStateData.eventCmd == EVTCMD_LOAD_MOVIE &&
+            g_FieldStateData.movieCommandState == MOVCMD_IDLE) {
+            if (g_FieldModelBufferTop <= 0x801AFFFF) {
+                func_80034FC8(
+                    g_FieldModelBufferTop, g_FieldStateData.eventCmdParam);
             } else {
-                func_80034FC8(0x801B0000, D_8009ABF4.eventCmdParam);
+                func_80034FC8(0x801B0000, g_FieldStateData.eventCmdParam);
             }
-            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+            g_FieldStateData.movieCommandState = MOVCMD_ACTIVE;
             g_FieldMoviePlayed = 1;
         }
         if ((s16)g_FieldMovieStreamActive == 1) {
             g_FieldMovieStreamDone = 1;
             g_FieldMovieStreamActive = 0;
             g_FieldMoviePlayed = 0;
-            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+            g_FieldStateData.movieCommandState = MOVCMD_DONE;
         }
         break;
     case 0xA:
-        if (D_8009ABF4.eventCmd == EVTCMD_LOAD_MOVIE) {
-            D_8009ABF4.movieCommandState = MOVCMD_DONE;
+        if (g_FieldStateData.eventCmd == EVTCMD_LOAD_MOVIE) {
+            g_FieldStateData.movieCommandState = MOVCMD_DONE;
         }
-        if (D_8009ABF4.eventCmd == EVTCMD_PLAY_MOVIE) {
-            D_8009ABF4.movieCommandState = MOVCMD_ACTIVE;
+        if (g_FieldStateData.eventCmd == EVTCMD_PLAY_MOVIE) {
+            g_FieldStateData.movieCommandState = MOVCMD_ACTIVE;
             func_800354CC();
             g_FieldMovieStreamActive = 1;
         }
@@ -2043,8 +2046,8 @@ u8 FieldGetRandomU8FromList(void) {
 }
 
 u8 FieldGetNextRandomU8(void) {
-    D_80071C20++;
-    return g_RandomTable[D_80071C20];
+    g_FieldRandomIndex++;
+    return g_RandomTable[g_FieldRandomIndex];
 }
 
 extern s8 D_800716D0;

@@ -728,11 +728,12 @@ typedef struct {
 } KawaiColorFadeSlot;
 
 extern u8 g_KawaiFadeScratch[]; /* scratch RGB quad, 0x20 before the table */
-extern KawaiColorFadeSlot D_800DFE3C[16];
+extern KawaiColorFadeSlot g_KawaiColorFadeSlots[16];
 
 /* The slot table starts 0x20 past the scratch quad. Reaching it that way,
- * rather than through its own D_800DFE3C symbol, is what lets cse hand the
- * scratch's own address back as `-0x20($a2)` off the table base register. */
+ * rather than through its own g_KawaiColorFadeSlots symbol, is what lets cse
+ * hand the scratch's own address back as `-0x20($a2)` off the table base
+ * register. */
 #define KawaiFadeSlots ((KawaiColorFadeSlot*)(g_KawaiFadeScratch + 0x20))
 
 /* Fade a model's vertex colour over time (KAWAI sub-command). data[0]==0 inits
@@ -753,11 +754,12 @@ extern KawaiColorFadeSlot D_800DFE3C[16];
  *   - the return values are 1 / 0 / 1, not 1 / 1 / 0. The default's `1` is the
  *     `li v0,0x1` the switch already materialised as its compare constant.
  *   - the slot table is reached as `g_KawaiFadeScratch + 0x20`, not through its
- * own D_800DFE3C symbol. cse links two constants only when they share a
- *     symbol_ref base, so spelling it this way is what lets it hand the
+ * own g_KawaiColorFadeSlots symbol. cse links two constants only when they
+ * share a symbol_ref base, so spelling it this way is what lets it hand the
  *     scratch quad's own address back as `-0x20($a2)` off the table base
  *     register -- both for the first scratch store and for the call argument.
- *     Named through D_800DFE3C, gcc materialises a second base register.
+ *     Named through g_KawaiColorFadeSlots, gcc materialises a second base
+ * register.
  *   - `done = 0` sits at the top of the arm, before the packet push. It is
  *     dead there, but it makes the variable live across the call, which is
  *     what puts it in $s1 rather than a caller-saved register -- and the whole
@@ -1154,7 +1156,7 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiAnimatedPointLight);
 // Begin of field_event.c
 /////////////////////////////////////////////////
 
-extern u8 D_800716D4;
+extern u8 g_FieldMusicLock;
 void FieldWindowResetAll(void);
 void FieldInitDefaultValues(void);
 void FieldEventRunInit(void);
@@ -1193,7 +1195,7 @@ void FieldEventInit(
     FieldWindowResetAll();
     FieldInitDefaultValues();
     FieldEventRunInit();
-    if (D_800716D4 == 0) {
+    if (g_FieldMusicLock == 0) {
         FieldEventClearAkaoStruct();
         *D_8009A000 = 0xF2;
         SystemAkaoExecute();
@@ -4219,10 +4221,10 @@ s32 OpcodeFuncFmusc(void) {
 // In Akao because it uses the AKAO block area
 /* TUTOR (0x21): open the main menu and play the tutorial with the given id.
  * First call arms the PARTY_MENU event command, flags the menu overlay and
- * resolves the tutorial's block into D_800E48E0 for the main loop to stream;
- * once the menu reports MOVCMD_DONE, clear the command and advance past the
- * operand. */
-extern u8* D_800E48E0;
+ * resolves the tutorial's block into g_FieldTutorialAkaoBlock for the main loop
+ * to stream; once the menu reports MOVCMD_DONE, clear the command and advance
+ * past the operand. */
+extern u8* g_FieldTutorialAkaoBlock;
 
 /* This function's `.s` used to own D_800A08D0, the "evt result=" string
  * src/field/field5.c reaches by symbol, which is what kept a verified match
@@ -4244,7 +4246,8 @@ s32 OpcodeFuncTutor(void) {
         if (g_DebugLevel & 3) {
             FieldDebugAddParseValueToPage2("data=", tutorialId, 2);
         }
-        D_800E48E0 = (u8*)g_FieldScripts + GetAkaoBlockOffset(tutorialId);
+        g_FieldTutorialAkaoBlock =
+            (u8*)g_FieldScripts + GetAkaoBlockOffset(tutorialId);
         return 1;
     }
     if (g_FieldState->eventCmd == EVTCMD_PARTY_MENU) {
@@ -5184,7 +5187,7 @@ s32 OpcodeFuncPmova(void) {
     if (partyId == 0xFF) {
         actorId = 0xFF;
     } else {
-        actorId = D_8009AD30[partyId];
+        actorId = g_CharIdToEntity[partyId];
     }
     return FieldMoveToEntityUpdate(actorId);
 }
@@ -5312,7 +5315,7 @@ void OpcodeFuncPdira(void) {
     if (partyId == 0xFF) {
         actorId = 0xFF;
     } else {
-        actorId = D_8009AD30[partyId];
+        actorId = g_CharIdToEntity[partyId];
     }
     FieldEventSetDirByActorId(actorId);
 }
@@ -5378,7 +5381,7 @@ s32 OpcodeFuncPtura(void) {
     if (partyId == 0xFF) {
         actorId = 0xFF;
     } else {
-        actorId = D_8009AD30[partyId];
+        actorId = g_CharIdToEntity[partyId];
     }
     return FieldEntityTurnToEntity(actorId);
 }
@@ -5986,7 +5989,7 @@ s32 OpcodeFuncPgtdr(void) {
     if (slot < 3) {
         partyId = D_8009D391[slot];
         if (partyId != 0xFF) {
-            actorId = D_8009AD30[partyId];
+            actorId = g_CharIdToEntity[partyId];
             if (actorId != 0xFF) {
                 if (g_EntityToModel[actorId] != 0xFF) {
                     if (g_DebugLevel & 3) {
@@ -6069,7 +6072,7 @@ s32 OpcodeFuncPxyzi(void) {
     if (slot < 3) {
         partyId = D_8009D391[slot];
         if (partyId < 9) {
-            actorId = D_8009AD30[partyId];
+            actorId = g_CharIdToEntity[partyId];
             if (g_EntityToModel[actorId] != 0xFF) {
                 FieldEventWriteMemoryS16(
                     1, 4, g_FieldModels[g_EntityToModel[actorId]].PosX >> 12);
@@ -6227,7 +6230,7 @@ s32 OpcodeFuncWclsEx(void) {
         DebugPrintOpcode("wcls!", 0);
     }
     window = GET_PARAM_U8(1);
-    if (D_8008326C[window] == 0xFF) {
+    if (g_WindowToEntity[window] == 0xFF) {
         PC_INC(2);
         return 0;
     }
@@ -6243,10 +6246,10 @@ s32 OpcodeFuncWsizw(void) {
         DebugPrintOpcode("wsizw", 8);
     }
     window = GET_PARAM_U8(1);
-    if (D_8008326C[window] == 0xFF) {
+    if (g_WindowToEntity[window] == 0xFF) {
         return OpcodeFuncWsize();
     }
-    if (D_8008326C[window] == g_CurrentEntity) {
+    if (g_WindowToEntity[window] == g_CurrentEntity) {
         FieldWindowSetStateToClose(window);
         FieldDialogMessageUpdateStates(window, 0);
     }
@@ -7461,7 +7464,7 @@ s32 OpcodeFuncScrlp(void) {
     if (partyId == 0xFF) {
         actorId = 0xFF;
     } else {
-        actorId = D_8009AD30[partyId];
+        actorId = g_CharIdToEntity[partyId];
     }
     partyId = actorId;
     if (g_EntityToModel[partyId] != 0xFF) {
@@ -8971,7 +8974,7 @@ void FieldEventSplitJoinSetMove(
     u8* anims;
 
     if (D_8009D391[0] != 0xFF) {
-        leaderId = D_8009AD30[D_8009D391[0]];
+        leaderId = g_CharIdToEntity[D_8009D391[0]];
         if (leaderId != 0xFF) {
             if (g_DebugLevel & 3) {
                 FieldDebugAddParseValueToPage2("set move x=", x, 4);
@@ -8997,7 +9000,8 @@ void FieldEventSplitJoinSetMove(
             g_FieldModels[g_EntityToModel[entityId]].MoveEndX = x << 12;
             g_FieldModels[g_EntityToModel[entityId]].MoveEndY = y << 12;
             modelIdx = g_EntityToModel[entityId];
-            D_800E42A8[modelIdx] = g_FieldModels[modelIdx].MoveSpeed;
+            g_FieldModelSavedMoveSpeed[modelIdx] =
+                g_FieldModels[modelIdx].MoveSpeed;
             from.vx = g_FieldModels[g_EntityToModel[entityId]].PosX >> 12;
             from.vy = g_FieldModels[g_EntityToModel[entityId]].PosY >> 12;
             from.vz = g_FieldModels[g_EntityToModel[entityId]].PosZ >> 12;
@@ -9061,7 +9065,7 @@ s32 FieldEventSplitJoinEndMove(s16 entityId) {
     g_FieldModels[g_EntityToModel[entityId]].ActionState = 0;
     D_800756E8[g_EntityToModel[entityId]] = 0;
     g_FieldModels[g_EntityToModel[entityId]].MoveSpeed =
-        D_800E42A8[g_EntityToModel[entityId]];
+        g_FieldModelSavedMoveSpeed[g_EntityToModel[entityId]];
     return 1;
 }
 

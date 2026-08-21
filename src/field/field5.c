@@ -1993,9 +1993,9 @@ void FieldDebugInitBuffers(void) {
 
     hide = 1;
     for (off = 0x762; off >= 0; off -= 0x17A) {
-        D_800E08C0[off] = hide;
+        g_FieldDebugPageHidden[off] = hide;
     }
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     g_FieldDebugRb = 0;
     g_FieldDebugCurPage = 0;
     g_FieldDebugTransp = 0;
@@ -2087,15 +2087,16 @@ void InitFieldDebugPages(void) {
  * back to page 0 when every page is currently being rendered.
  *
  * The element address has to go through `page` rather than being indexed
- * inline: as a bare `D_800E08C0[i * 378]` gcc hoists the symbol's %hi/%lo out
- * of the loop, where the original rematerialises it each iteration. */
+ * inline: as a bare `g_FieldDebugPageHidden[i * 378]` gcc hoists the symbol's
+ * %hi/%lo out of the loop, where the original rematerialises it each iteration.
+ */
 s16 FieldDebugPagesResetPosSize(s16 x, s16 y, s16 w, s16 h) {
     s16 i;
 
     for (i = 0; i < 6; i++) {
         u8* page;
 
-        page = &D_800E08C0[i * 378];
+        page = &g_FieldDebugPageHidden[i * 378];
         if (*page) {
             FieldDebugPageSetPosSize(i, x, y, w, h);
             FieldDebugPageResetStrings(i);
@@ -2117,20 +2118,20 @@ void FieldDebugPageInit(s16 page, s16 x, s16 y, s16 w, s16 h) {
     FieldDebugPageSetPosSize(page, x, y, w, h);
     off = page * 378;
     offClear = off;
-    if (D_800E08C0[off] != 2) {
+    if (g_FieldDebugPageHidden[off] != 2) {
         FieldDebugPageResetStrings(page);
     } else {
-        D_800E08C0[offClear] = 0;
-        D_8009D824 = 1;
+        g_FieldDebugPageHidden[offClear] = 0;
+        g_FieldDebugPagesDirty = 1;
     }
 }
 
 void FieldDebugPageSetPosSize(s16 page, s16 x, s16 y, s16 w, s16 h) {
     D_800E0748[page * 189] = x;
-    D_800E074A[page * 189] = y;
+    g_FieldDebugPageY[page * 189] = y;
     D_800E074C[page * 189] = w;
-    D_800E074E[page * 189] = h;
-    D_8009D824 = 1;
+    g_FieldDebugPageH[page * 189] = h;
+    g_FieldDebugPagesDirty = 1;
 }
 
 /* The byte offset has to be a named local and the elements reached through a
@@ -2146,12 +2147,12 @@ void FieldDebugPageAddPos(s16 page, s16 x, s16 y) {
     s16 px;
     s16 py;
 
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     off = page * 378;
     px = *(s16*)((u8*)D_800E0748 + off);
-    py = *(s16*)((u8*)D_800E074A + off);
+    py = *(s16*)((u8*)g_FieldDebugPageY + off);
     *(s16*)((u8*)D_800E0748 + off) = px + x;
-    *(s16*)((u8*)D_800E074A + off) = py + y;
+    *(s16*)((u8*)g_FieldDebugPageY + off) = py + y;
 }
 
 /* Same shape as FieldDebugPageAddPos above; see the note there. */
@@ -2160,14 +2161,16 @@ void FieldDebugPageAddSize(s16 page, s16 w, s16 h) {
     s16 pw;
     s16 ph;
 
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     off = page * 378;
     pw = *(s16*)((u8*)D_800E074C + off);
-    ph = *(s16*)((u8*)D_800E074E + off);
+    ph = *(s16*)((u8*)g_FieldDebugPageH + off);
     *(s16*)((u8*)D_800E074C + off) = pw + w;
-    *(s16*)((u8*)D_800E074E + off) = ph + h;
+    *(s16*)((u8*)g_FieldDebugPageH + off) = ph + h;
 }
-bool FieldDebugPageIsRender(s16 arg0) { return D_800E08C0[arg0 * 378] == 0; }
+bool FieldDebugPageIsRender(s16 arg0) {
+    return g_FieldDebugPageHidden[arg0 * 378] == 0;
+}
 
 /* Blank all 24 rows of a debug page and restore its default colour. The row
  * text is a 14-byte record per row, the per-row colour a single byte, so the
@@ -2186,13 +2189,13 @@ void FieldDebugPageResetStrings(s16 page) {
         i++;
         off += 14;
     }
-    D_800E0750[page * 378] = 7;
-    D_800E0751[page * 378] = 0xF;
-    D_800E0752[page * 378] = 0x1F;
-    D_800E0756[page * 189] = 0;
-    D_800E0754[page * 189] = 0;
-    D_800E08C0[page * 378] = 0;
-    D_8009D824 = 1;
+    g_FieldDebugPageR[page * 378] = 7;
+    g_FieldDebugPageG[page * 378] = 0xF;
+    g_FieldDebugPageB[page * 378] = 0x1F;
+    g_FieldDebugPageRow[page * 189] = 0;
+    g_FieldDebugPageHeadRow[page * 189] = 0;
+    g_FieldDebugPageHidden[page * 378] = 0;
+    g_FieldDebugPagesDirty = 1;
 }
 
 void FieldDebugRenderClear(void) {
@@ -2210,28 +2213,28 @@ void FieldDebugRenderPage(s16 page);
  *
  * The page counter and the byte offset have to be two independent induction
  * variables, and the visibility byte reached by bare subscript. Anything that
- * derives the offset from the counter (`D_800E08C0[page * 378]`, with or
- * without a pointer local) lets gcc strength-reduce the two into one walking
- * pointer with the symbol folded into its start value; giving it a plain
- * register index instead leaves the `symbol(reg)` addressing the original has,
- * which maspsx rematerialises through $at every iteration. */
+ * derives the offset from the counter (`g_FieldDebugPageHidden[page * 378]`,
+ * with or without a pointer local) lets gcc strength-reduce the two into one
+ * walking pointer with the symbol folded into its start value; giving it a
+ * plain register index instead leaves the `symbol(reg)` addressing the original
+ * has, which maspsx rematerialises through $at every iteration. */
 void FieldDebugRender(u_long* ot) {
     s32 page;
     s32 off;
 
-    if (D_8009D824) {
+    if (g_FieldDebugPagesDirty) {
         FieldDebugRenderClear();
         page = 0;
         off = 0;
         ClearOTag(D_800E41C8[g_FieldDebugRb], 7);
         do {
-            if (D_800E08C0[off] == 0) {
+            if (g_FieldDebugPageHidden[off] == 0) {
                 FieldDebugRenderPage(page);
             }
             off += 378;
             page++;
         } while (page < 6);
-        D_8009D824 = 0;
+        g_FieldDebugPagesDirty = 0;
     }
     addPrims(ot, D_800E41C8[g_FieldDebugRb], &D_800E41C8[g_FieldDebugRb][6]);
 }
@@ -2409,13 +2412,13 @@ typedef struct {
  *
  * Two spellings carry this function, and neither is optional:
  *
- *   - the header fields are reached as `*(s16*)((u8*)D_800E0754 + off)` with
- *     `off` already a *byte* offset. Indexed as `D_800E0754[page * 189]` the
- *     element needs a scaling `sll`, and gcc folds the symbol's %hi/%lo into
- *     that same `addu`, so one base register then serves every access. With
- *     `off` already scaled the address stays `(symbol)(reg)` in the mem and
- *     the assembler rebuilds it through $at each time, which is what the
- *     original does.
+ *   - the header fields are reached as `*(s16*)((u8*)g_FieldDebugPageHeadRow +
+ * off)` with `off` already a *byte* offset. Indexed as
+ * `g_FieldDebugPageHeadRow[page * 189]` the element needs a scaling `sll`, and
+ * gcc folds the symbol's %hi/%lo into that same `addu`, so one base register
+ * then serves every access. With `off` already scaled the address stays
+ * `(symbol)(reg)` in the mem and the assembler rebuilds it through $at each
+ * time, which is what the original does.
  *   - the store of the incremented head row goes through `hdr`, a pointer to
  *     the record header derived from the *text* symbol (`g_FieldDebugRowText -
  * 0x10`). That is where `addiu s0,s0,-0x10` / `sh v0,0xc(s0)` comes from:
@@ -2430,14 +2433,15 @@ s32 AddStrNextDebugRow(s16 page, const char* str) {
 
     off = page * 378;
     rows = g_FieldDebugRowText + off;
-    FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
+    FieldDebugStringCopy(
+        &rows[*(s16*)((u8*)g_FieldDebugPageHeadRow + off) * 14], str);
     hdr = (FieldDebugPageHdr*)(g_FieldDebugRowText - 0x10 + off);
-    hdr->headRow = *(s16*)((u8*)D_800E0754 + off) + 1;
-    if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
-        *(s16*)((u8*)D_800E0754 + off)) {
-        *(s16*)((u8*)D_800E0754 + off) = 0;
+    hdr->headRow = *(s16*)((u8*)g_FieldDebugPageHeadRow + off) + 1;
+    if ((*(s16*)((u8*)g_FieldDebugPageH + off) - 8) / 10 <
+        *(s16*)((u8*)g_FieldDebugPageHeadRow + off)) {
+        *(s16*)((u8*)g_FieldDebugPageHeadRow + off) = 0;
     }
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     return 1;
 }
 
@@ -2465,17 +2469,18 @@ s32 AddColorStrNextDebugRow(s16 page, const char* str, u8 color) {
 
     off = page * 378;
     rows = g_FieldDebugRowText + off;
-    FieldDebugStringCopy(&rows[*(s16*)((u8*)D_800E0754 + off) * 14], str);
+    FieldDebugStringCopy(
+        &rows[*(s16*)((u8*)g_FieldDebugPageHeadRow + off) * 14], str);
     colors = (u8*)(g_FieldDebugRowText + 0x150 + off);
-    colors[*(s16*)((u8*)D_800E0754 + off)] = color;
-    next = *(s16*)((u8*)D_800E0754 + off) + 1;
+    colors[*(s16*)((u8*)g_FieldDebugPageHeadRow + off)] = color;
+    next = *(s16*)((u8*)g_FieldDebugPageHeadRow + off) + 1;
     hdr = (FieldDebugPageHdr*)(g_FieldDebugRowText - 0x10 + off);
     hdr->headRow = next;
-    if ((*(s16*)((u8*)D_800E074E + off) - 8) / 10 <
-        *(s16*)((u8*)D_800E0754 + off)) {
-        *(s16*)((u8*)D_800E0754 + off) = 0;
+    if ((*(s16*)((u8*)g_FieldDebugPageH + off) - 8) / 10 <
+        *(s16*)((u8*)g_FieldDebugPageHeadRow + off)) {
+        *(s16*)((u8*)g_FieldDebugPageHeadRow + off) = 0;
     }
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     return 1;
 }
 
@@ -2483,7 +2488,7 @@ s32 SetStrToDebugRow(s16 page, s16 row, const char* str) {
     char* rows = g_FieldDebugRowText + page * 378;
 
     FieldDebugStringCopy(&rows[row * 14], str);
-    D_8009D824 = 1;
+    g_FieldDebugPagesDirty = 1;
     return 1;
 }
 
@@ -2497,27 +2502,27 @@ s32 SetDebugStrRowColor(s16 page, s16 row, u8 color) {
 }
 
 void FieldDebugPageSetHeadRow(s16 page, s16 row) {
-    D_800E0756[page * 189] = row;
-    D_8009D824 = 1;
+    g_FieldDebugPageRow[page * 189] = row;
+    g_FieldDebugPagesDirty = 1;
 }
 
 void FieldDebugPageSetColor(s16 page, u8 r, u8 g, u8 b) {
-    if (D_800E08C0[page * 378] == 0) {
-        D_800E0750[page * 378] = r;
-        D_800E0751[page * 378] = g;
-        D_800E0752[page * 378] = b;
-        D_8009D824 = 1;
+    if (g_FieldDebugPageHidden[page * 378] == 0) {
+        g_FieldDebugPageR[page * 378] = r;
+        g_FieldDebugPageG[page * 378] = g;
+        g_FieldDebugPageB[page * 378] = b;
+        g_FieldDebugPagesDirty = 1;
     }
 }
 
 void FieldDebugPageNotInit(s16 page) {
-    D_800E08C0[page * 378] = 1;
-    D_8009D824 = 1;
+    g_FieldDebugPageHidden[page * 378] = 1;
+    g_FieldDebugPagesDirty = 1;
 }
 
 void FieldDebugPageHide(s16 page) {
-    D_800E08C0[page * 378] = 2;
-    D_8009D824 = 1;
+    g_FieldDebugPageHidden[page * 378] = 2;
+    g_FieldDebugPagesDirty = 1;
 }
 
 static void FieldDebugTranspSwitch(void) {

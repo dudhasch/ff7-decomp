@@ -281,7 +281,7 @@ extern s16 D_80071E3C;
  *   - that same pointer is the base register the whole tail addresses off
  *     (0(s1) eventCmd, 1(s1) eventCmdParam, 0x4b fadeType, 0x4d fadeAdjust,
  *     0x63 prevFieldId, 0xf1 the switch selector -- every FieldState offset
- *     minus one). Spelling those as D_8009ABF4.<member> instead costs a
+ *     minus one). Spelling those as g_FieldStateData.<member> instead costs a
  *     second anchor register (gcc picks &prevFieldId) and 37 rows.
  *   - D_8009AC1E and D_8009AC18 must be volatile: the target loads both with
  *     lhu, and a plain u16 with an (s16) cast folds to lh, a plain u16 stored
@@ -292,7 +292,7 @@ extern s16 D_80071E3C;
  *   - the switch selector goes into a u8 local, not a u32 one -- the u32 form
  *     loses the andi.
  *
- *   - the pre-loop fadeType store is `D_8009ABF4.fadeType = 0`, not
+ *   - the pre-loop fadeType store is `g_FieldStateData.fadeType = 0`, not
  *     `D_8009AC40[0] = 0`. Same address, same halfword, one row apart: the
  *     member shares a symbol_ref with the fade block inside the loop, so cse
  *     relates the two and `ev` comes out as `addiu s1,<reg>,-0x4b` off the
@@ -375,13 +375,13 @@ extern s16 D_80071E3C;
  *      position is wrong, and no position reaches it -- but the loop-top
  *      placement now has a diagnosis rather than just a number. There `ev`
  *      *is* hoisted into the preheader, ahead of the three constants, as
- *      `lui s1,%hi(D_8009ABF4) / addiu s1,s1,%lo(D_8009ABF4+0x1)` -- its own
- *      two-instruction address rather than the target's one-instruction
- *      `addiu s1,s3,-0x4b` -- and the fade base's own `lui s3 / addiu s3`
- *      *disappears*, because the fade stores are then addressed as `0x4b(s1)`
- *      off it. `scan_loop` records movables in insn order and `move_movables`
- *      hoists them in that order, so whichever of the two is referenced first
- *      in the loop body becomes the anchor and the other is folded into it.
+ *      `lui s1,%hi(g_FieldState) / addiu s1,s1,%lo(g_FieldState+0x1)` -- its
+ * own two-instruction address rather than the target's one-instruction `addiu
+ * s1,s3,-0x4b` -- and the fade base's own `lui s3 / addiu s3` *disappears*,
+ * because the fade stores are then addressed as `0x4b(s1)` off it. `scan_loop`
+ * records movables in insn order and `move_movables` hoists them in that order,
+ * so whichever of the two is referenced first in the loop body becomes the
+ * anchor and the other is folded into it.
  *      `*ev = 0;` sits in the `D_800965EC == 2` block, which is ahead of the
  *      fade block, so `ev` wins -- and the target wants the fade base to win.
  *      The only placement that hoists at all is the very top of the loop
@@ -502,12 +502,12 @@ extern s16 D_80071E3C;
  *      ran against a program five instructions shorter than this one. Its best
  *      candidate there (2515 against a base of 3100) measures 79/6 here, and
  *      each of its six edits measured separately is a regression too:
- *      `long preloadId` + `int exitKind` 73/5, `ev = &D_8009ABF4.eventCmd`
- *      with `D_8009AC40[0] = 0` 72/4, the `fillVal` local folded back inline
- *      70/4, a `do { } while (0)` around the `g_CurrentFieldIndex` store 70/5,
- *      the `(s16)` cast back on the compare 72/4, dropping `volatile` from
- *      D_8009AC1A 81/3. On the repaired base its next find -- `idxOfs = 0x63;`
- *      at the top of the frame loop, used at one of the two
+ *      `long preloadId` + `int exitKind` 73/5, `ev =
+ * &g_FieldStateData.eventCmd` with `D_8009AC40[0] = 0` 72/4, the `fillVal`
+ * local folded back inline 70/4, a `do { } while (0)` around the
+ * `g_CurrentFieldIndex` store 70/5, the `(s16)` cast back on the compare 72/4,
+ * dropping `volatile` from D_8009AC1A 81/3. On the repaired base its next find
+ * -- `idxOfs = 0x63;` at the top of the frame loop, used at one of the two
  *      `*(u16*)(ev + 0x63)` stores -- scored 2085 against 2585 and measures
  *      103/6 at the first store, 79/6 at the second, 90/6 at both.
  *      The scratch's target.s has since been rewritten to name the six
@@ -580,8 +580,8 @@ void FieldMain(void) {
     D_8011409C[0].dtd = 1;
     D_8011409C[1].dtd = 1;
     func_800128B8();
-    D_8009ABF4.fadeType = 0;
-    ev = (volatile u8*)&D_8009ABF4.fadeType - 0x4B;
+    g_FieldStateData.fadeType = 0;
+    ev = (volatile u8*)&g_FieldStateData.fadeType - 0x4B;
     if (D_800965EC != 1 && D_800965EC != 2 && D_800965EC != 3 &&
         D_800965EC != 5 && D_800965EC != 0xD) {
         ClearImage(&clip, 0, 0, 0);
@@ -591,11 +591,12 @@ void FieldMain(void) {
         DebugRunEveryLoop();
         D_80071A5C = 0;
         g_FieldPreloadMapId = 0;
-        if ((D_800965EC == 1 || D_800965EC == 3) && D_8009ABF4.fadeType == 0) {
+        if ((D_800965EC == 1 || D_800965EC == 3) &&
+            g_FieldStateData.fadeType == 0) {
             func_800129D0();
-            D_8009ABF4.fadeType = 3;
+            g_FieldStateData.fadeType = 3;
             D_80071A58 = 3;
-            D_8009ABF4.fadeAdjust = 0;
+            g_FieldStateData.fadeAdjust = 0;
             D_8007E768 = 0;
             D_80095DD4 = 1;
         }
@@ -623,28 +624,28 @@ void FieldMain(void) {
         while (DrawSync(1) != 0) {
         }
         if (D_800965EC != 0xD) {
-            D_8009ABF4.fadeType = 1;
-            D_8009ABF4.fadeSpeed = 0x10;
-            D_8009ABF4.fadeAdjust = 0x100;
-            D_8009ABF4.fadeRed = 0;
-            D_8009ABF4.fadeGreen = 0;
-            D_8009ABF4.fadeBlue = 0;
+            g_FieldStateData.fadeType = 1;
+            g_FieldStateData.fadeSpeed = 0x10;
+            g_FieldStateData.fadeAdjust = 0x100;
+            g_FieldStateData.fadeRed = 0;
+            g_FieldStateData.fadeGreen = 0;
+            g_FieldStateData.fadeBlue = 0;
         }
         if (D_800965EC == 0 || D_800965EC == 1 || D_800965EC == 3 ||
             D_800965EC == 6 || D_800965EC == 8 || D_800965EC == 7 ||
             D_800965EC == 9 || D_800965EC == 0xB || D_800965EC == 0xA) {
-            D_8009ABF4.layer2_bgScrollXSpeed = 0;
-            D_8009ABF4.layer2_bgScrollYSpeed = 0;
-            D_8009ABF4.layer3_bgScrollXSpeed = 0;
-            D_8009ABF4.layer3_bgScrollYSpeed = 0;
-            D_8009ABF4.layer3_depth = 1;
-            D_8009ABF4.layer2_depth = 0xFFF;
+            g_FieldStateData.layer2_bgScrollXSpeed = 0;
+            g_FieldStateData.layer2_bgScrollYSpeed = 0;
+            g_FieldStateData.layer3_bgScrollXSpeed = 0;
+            g_FieldStateData.layer3_bgScrollYSpeed = 0;
+            g_FieldStateData.layer3_depth = 1;
+            g_FieldStateData.layer2_depth = 0xFFF;
             D_8009A100 = 0;
             D_80071E38 = 0;
             D_80071E3C = 0;
             g_FieldBGCameraHeightBias =
                 ((FieldTriggerHeader*)g_FieldTriggers)->camHeightBias;
-            FieldEventInit(&D_8009ABF4, g_FieldEntity, *D_8007EB64);
+            FieldEventInit(&g_FieldState, g_FieldEntity, *D_8007EB64);
             g_FieldEntity[D_8009AC1E].Dir = D_8009AC18;
             fillVal = -1;
             if ((g_RainControl & 0x80) == 0) {
@@ -803,9 +804,9 @@ void FieldMain(void) {
  *   - D_8009A060 must NOT be volatile: volatile pins its load ahead of the
  *     `li v0,1`, and the target has the constant first (in the branch delay
  *     slot of the movie-stream test).
- *   - the C uses D_8009ABF4.eventCmd throughout, never the D_8009ABF5 alias;
- *     the alias costs a %hi/%lo pair per use where gcc wants 1(s2), and it is
- *     what lets s4 become the `addiu s4,s2,1` base the target uses for
+ *   - the C uses g_FieldStateData.eventCmd throughout, never the D_8009ABF5
+ * alias; the alias costs a %hi/%lo pair per use where gcc wants 1(s2), and it
+ * is what lets s4 become the `addiu s4,s2,1` base the target uses for
  *     pcPosX/pcPosY/pcWalkMeshId.
  *   - `/ 4096`, not `>> 12`: the target has the bgez/addiu 0xfff rounding. */
 
@@ -814,12 +815,12 @@ extern s16* D_800E4274;
 extern s16* D_80114458;
 extern s32 D_8009A060;
 extern volatile s32 D_800965E4;
-extern u8 D_80071C0C;
+extern u8 g_FieldLineCheckResult;
 extern s16 D_80071E38;
 extern s16 D_80071E3C;
 extern MATRIX* D_80071E40;
 extern u8 D_8009AC2C;
-extern u32 D_8007E7A0[2];
+extern u32 g_FieldOTHead[2];
 extern FieldLine D_8007E7AC;
 extern s32 D_80114478;
 extern s32 D_8011447C;
@@ -866,7 +867,7 @@ s32 FieldMainLoop(void) {
     g_FieldMovieStreamActive = 0;
     g_FieldMovieStreamDone = 0;
     g_FieldMoviePlayed = 0;
-    D_80071C0C = 0;
+    g_FieldLineCheckResult = 0;
     g_isFieldLoading = 0;
 
     for (;;) {
@@ -874,78 +875,86 @@ s32 FieldMainLoop(void) {
             D_80075DEC++;
         }
         D_80075DEC = D_80075DEC & 1;
-        D_8009ABF4.renderBuffer = D_80075DEC;
+        g_FieldStateData.renderBuffer = D_80075DEC;
         buf = &g_FieldRenderData[(s16)D_80075DEC];
         ClearOTagR(buf->ot, 0x1000);
         ClearOTagR(&buf->OtUi, 1);
         FieldCameraAssign();
         g_FieldPadRaw = FieldButtonsUpdate(&D_80071E38, &D_80071E3C);
-        D_8009ABF4.currentMovieFrame = D_80075D00->unk8;
+        g_FieldStateData.currentMovieFrame = D_80075D00->unk8;
         FieldEventUpdate((s32)&buf->OtUi);
-        g_PlayerModelId = D_8009ABF4.pcModelId;
+        g_PlayerModelId = g_FieldStateData.pcModelId;
         FieldBGScrollInit();
         FieldBGScrollUpdate();
-        FieldBGShakeUpdate(&D_8009ABF4.shakeX);
-        FieldBGShakeUpdate(&D_8009ABF4.shakeY);
+        FieldBGShakeUpdate(&g_FieldStateData.shakeX);
+        FieldBGShakeUpdate(&g_FieldStateData.shakeY);
         FieldBGUpdateDrawenv(buf);
         PreloadNextFieldMap(&g_FieldEntity[g_PlayerModelId],
                             (FieldLine*)(g_FieldTriggers + 0x38));
-        if ((D_8009ABF4.activeKeys & 0x90F) == 0x90F) {
-            D_8009ABF4.eventCmd = 0xA;
+        if ((g_FieldStateData.activeKeys & 0x90F) == 0x90F) {
+            g_FieldStateData.eventCmd = 0xA;
             func_80035658();
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 1) {
+        if (g_FieldStateData.eventCmd == 1) {
             return;
         }
-        if (D_8009ABF4.eventCmd == 0xC) {
+        if (g_FieldStateData.eventCmd == 0xC) {
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 0xD) {
+        if (g_FieldStateData.eventCmd == 0xD) {
             StopFieldMapPreload();
             g_FieldNextModule = 0xC;
             return;
         }
-        if (D_8009ABF4.eventCmd == 0x19) {
+        if (g_FieldStateData.eventCmd == 0x19) {
             g_FieldNextModule = 0x10;
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 0xF || D_8009ABF4.eventCmd == 0x10 ||
-            D_8009ABF4.eventCmd == 0x11 || D_8009ABF4.eventCmd == 0x15 ||
-            D_8009ABF4.eventCmd == 0x16 || D_8009ABF4.eventCmd == 0x17 ||
-            D_8009ABF4.eventCmd == 0x18) {
+        if (g_FieldStateData.eventCmd == 0xF ||
+            g_FieldStateData.eventCmd == 0x10 ||
+            g_FieldStateData.eventCmd == 0x11 ||
+            g_FieldStateData.eventCmd == 0x15 ||
+            g_FieldStateData.eventCmd == 0x16 ||
+            g_FieldStateData.eventCmd == 0x17 ||
+            g_FieldStateData.eventCmd == 0x18) {
             g_FieldNextModule = 0xD;
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 6 || D_8009ABF4.eventCmd == 7 ||
-            D_8009ABF4.eventCmd == 9 || D_8009ABF4.eventCmd == 0xE ||
-            D_8009ABF4.eventCmd == 8 || D_8009ABF4.eventCmd == 0x12 ||
-            D_8009ABF4.eventCmd == 0x13) {
+        if (g_FieldStateData.eventCmd == 6 || g_FieldStateData.eventCmd == 7 ||
+            g_FieldStateData.eventCmd == 9 ||
+            g_FieldStateData.eventCmd == 0xE ||
+            g_FieldStateData.eventCmd == 8 ||
+            g_FieldStateData.eventCmd == 0x12 ||
+            g_FieldStateData.eventCmd == 0x13) {
             g_FieldNextModule = 5;
             StopFieldMapPreload();
             return;
         }
-        if ((g_FieldPadRaw & 0x10) && D_8009ABF4.menuDisabled == 0 &&
+        if ((g_FieldPadRaw & 0x10) && g_FieldStateData.menuDisabled == 0 &&
             g_FieldMoviePlayed == 0 && g_FieldMovieStreamActive == 0) {
             g_FieldNextModule = 5;
-            D_8009ABF4.eventCmd = 9;
-            D_8009ABF4.eventCmdParam = 0;
+            g_FieldStateData.eventCmd = 9;
+            g_FieldStateData.eventCmdParam = 0;
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 5 || D_8009ABF4.eventCmd == 0x1A) {
+        if (g_FieldStateData.eventCmd == 5 ||
+            g_FieldStateData.eventCmd == 0x1A) {
             StopFieldMapPreload();
             return;
         }
-        if (D_8009ABF4.eventCmd == 2) {
-            D_8009ABF4.pcPosX = g_FieldEntity[g_PlayerModelId].PosX / 4096;
-            D_8009ABF4.pcPosY = g_FieldEntity[g_PlayerModelId].PosY / 4096;
+        if (g_FieldStateData.eventCmd == 2) {
+            g_FieldStateData.pcPosX =
+                g_FieldEntity[g_PlayerModelId].PosX / 4096;
+            g_FieldStateData.pcPosY =
+                g_FieldEntity[g_PlayerModelId].PosY / 4096;
             g_FieldNextModule = 2;
-            D_8009ABF4.pcWalkMeshId = g_FieldEntity[g_PlayerModelId].PosI;
+            g_FieldStateData.pcWalkMeshId = g_FieldEntity[g_PlayerModelId].PosI;
             StopFieldMapPreload();
             return;
         }
@@ -1004,7 +1013,7 @@ s32 FieldMainLoop(void) {
             DrawOTag(&buf->ot[0xFFF]);
             DrawOTag(&buf->OtFadeDrenv);
             if (D_8009AC40[0] != 0) {
-                DrawOTag(&D_8007E7A0[(s16)D_80075DEC]);
+                DrawOTag(&g_FieldOTHead[(s16)D_80075DEC]);
             }
         }
         DrawOTag(&buf->OtUi);
@@ -1014,8 +1023,8 @@ s32 FieldMainLoop(void) {
 /* Parse a MIM (field background map image) header and upload its palette and
  * two texture pages to VRAM. `mim` points at the loaded file; three
  * variable-length records follow one another, each opening with a 32-bit byte
- * length, and each seeds a slice of the state block at D_800E4D90. The palette
- * goes up with LoadImage, the two pages with LoadTPage, with a DrawSync
+ * length, and each seeds a slice of the state block at g_FieldMimPalData. The
+ * palette goes up with LoadImage, the two pages with LoadTPage, with a DrawSync
  * between every step.
  *
  * The body was rewritten from the target; the previous one did not compile
@@ -1026,16 +1035,17 @@ s32 FieldMainLoop(void) {
  *     0(a1) and 2(a1) with `addiu a1,a1,4` between the pairs, which is a
  *     source-level walk; constant displacements off one base would come out as
  *     a single `addiu a1,a1,0xC`.
- *   - the second LoadTPage is guarded by `if (*(u32*)&D_800E4DD8[0] != 0)` --
- *     the `lw v1,D_800E4DD8` / `beqz v1` right after the first LoadTPage.
+ *   - the second LoadTPage is guarded by `if (*(u32*)&g_FieldMimTex1Size[0] !=
+ * 0)` -- the `lw v1,g_FieldMimTex1Size` / `beqz v1` right after the first
+ * LoadTPage.
  *   - every value read back for the LoadTPage argument lists is spelled as an
- *     offset from D_800E4D90 rather than through its own symbol. Naming the
- *     symbol twice -- once for the store, once for the read -- makes gcc
+ *     offset from g_FieldMimPalData rather than through its own symbol. Naming
+ * the symbol twice -- once for the store, once for the read -- makes gcc
  *     materialise its %hi/%lo into a register, and with nine such symbols the
  *     function grew nine callee-saved registers and a 0x50 frame. Reached as
- *     `(u8*)D_800E4D90 + 0x1C` the address is named once and the assembler
- *     rebuilds it at the use, which is what the target does. Worth 38 rows,
- *     and the same mechanism as the byte-offset idiom in CLAUDE.md.
+ *     `(u8*)g_FieldMimPalData + 0x1C` the address is named once and the
+ * assembler rebuilds it at the use, which is what the target does. Worth 38
+ * rows, and the same mechanism as the byte-offset idiom in CLAUDE.md.
  *   - `unusedLocals` reserves the 0x28 of stack the original allocates after
  *     `rect` and never touches; see FieldDebugInitBuffers for the same thing.
  *   - each block's length is stored to the state word first and then read back
@@ -1047,71 +1057,76 @@ s32 FieldMainLoop(void) {
  *     through the global, cse hands the just-stored register straight back,
  *     the shift is done in place, and the slots fill. Re-reading the *source*
  *     word instead of the destination is not the same thing and costs 18.
- *   - the LoadImage source is `(u8*)D_800E4D94 - 4`, not `D_800E4D90` by name,
- *     even though the two are the same address and the store just above uses
- *     the name. Naming it twice gives cse a second reference, it promotes the
- *     address to a callee-saved register and the frame grows -- 7 rows. The
- *     `.s` names D_800E4D90 there, so the relocation reads `D_800E4D94-0x4`
- *     against the target's `D_800E4D90`; the linked bytes are identical and
- *     `tools/checkfn.py` resolves the negative addend. */
+ *   - the LoadImage source is `(u8*)g_FieldMimPalSize - 4`, not
+ * `g_FieldMimPalData` by name, even though the two are the same address and the
+ * store just above uses the name. Naming it twice gives cse a second reference,
+ * it promotes the address to a callee-saved register and the frame grows -- 7
+ * rows. The
+ *     `.s` names g_FieldMimPalData there, so the relocation reads
+ * `g_FieldMimPalSize-0x4` against the target's `g_FieldMimPalData`; the linked
+ * bytes are identical and `tools/checkfn.py` resolves the negative addend. */
 void FieldLoadMimToVram(s32 arg0, u8* mim) {
     RECT rect;
     u8 unusedLocals[0x28];
     u32 next;
     u16 unk0A;
 
-    *(u32*)&D_800E4D94[0] = *(u32*)mim;
-    next = (*(u32*)&D_800E4D94[0] >> 2) * 4 - 0xC;
-    *(u16*)&D_800E4D98[0] = *(u16*)(mim + 4);
-    *(u16*)&D_800E4D9A[0] = *(u16*)(mim + 6);
-    *(u16*)&D_800E4D9C[0] = *(u16*)(mim + 8);
+    *(u32*)&g_FieldMimPalSize[0] = *(u32*)mim;
+    next = (*(u32*)&g_FieldMimPalSize[0] >> 2) * 4 - 0xC;
+    *(u16*)&g_FieldMimPalX[0] = *(u16*)(mim + 4);
+    *(u16*)&g_FieldMimPalY[0] = *(u16*)(mim + 6);
+    *(u16*)&g_FieldMimPalW[0] = *(u16*)(mim + 8);
     unk0A = *(u16*)(mim + 0xA);
     mim += 0xC;
-    *(u8**)&D_800E4D90[0] = mim;
-    *(u16*)&D_800E4D9E[0] = unk0A;
+    *(u8**)&g_FieldMimPalData[0] = mim;
+    *(u16*)&g_FieldMimPalH[0] = unk0A;
     mim += next;
 
     /* First texture page block. */
-    *(u32*)&D_800E4DA8[0] = *(u32*)mim;
-    next = (*(u32*)&D_800E4DA8[0] >> 2) * 4 - 0xC;
+    *(u32*)&g_FieldMimTex0Size[0] = *(u32*)mim;
+    next = (*(u32*)&g_FieldMimTex0Size[0] >> 2) * 4 - 0xC;
     mim += 4;
-    *(u16*)&D_800E4DAC[0] = *(u16*)mim;
-    *(u16*)&D_800E4DAE[0] = *(u16*)(mim + 2);
+    *(u16*)&g_FieldMimTex0X[0] = *(u16*)mim;
+    *(u16*)&g_FieldMimTex0Y[0] = *(u16*)(mim + 2);
     mim += 4;
-    *(u16*)&D_800E4DB0[0] = *(u16*)mim * 2;
-    *(u16*)((u8*)D_800E4DB0 + 2) = *(u16*)(mim + 2);
+    *(u16*)&g_FieldMimTex0Rect[0] = *(u16*)mim * 2;
+    *(u16*)((u8*)g_FieldMimTex0Rect + 2) = *(u16*)(mim + 2);
     mim += 4;
-    *(u8**)&D_800E4DA4[0] = mim;
+    *(u8**)&g_FieldMimTex0Data[0] = mim;
     mim += next;
 
     /* Second texture page block. */
-    *(u32*)&D_800E4DD8[0] = *(u32*)mim;
+    *(u32*)&g_FieldMimTex1Size[0] = *(u32*)mim;
     mim += 4;
-    *(u16*)&D_800E4DDC[0] = *(u16*)mim;
-    *(u16*)&D_800E4DDE[0] = *(u16*)(mim + 2);
+    *(u16*)&g_FieldMimTex1X[0] = *(u16*)mim;
+    *(u16*)&g_FieldMimTex1Y[0] = *(u16*)(mim + 2);
     mim += 4;
-    *(u16*)&D_800E4DE0[0] = *(u16*)mim * 2;
-    *(u16*)((u8*)D_800E4DE0 + 2) = *(u16*)(mim + 2);
+    *(u16*)&g_FieldMimTex1Rect[0] = *(u16*)mim * 2;
+    *(u16*)((u8*)g_FieldMimTex1Rect + 2) = *(u16*)(mim + 2);
     mim += 4;
-    *(u8**)&D_800E4DD4[0] = mim;
+    *(u8**)&g_FieldMimTex1Data[0] = mim;
 
     rect.x = 0;
     rect.y = 0x1E0;
     rect.w = 0x100;
     rect.h = 0x10;
     DrawSync(0);
-    LoadImage(&rect, *(u_long**)((u8*)D_800E4D94 - 4));
+    LoadImage(&rect, *(u_long**)((u8*)g_FieldMimPalSize - 4));
     DrawSync(0);
-    *(u16*)&D_800E4DB4[0] = LoadTPage(
-        *(u_long**)((u8*)D_800E4D90 + 0x14), 1, 0,
-        *(s16*)((u8*)D_800E4D90 + 0x1C), *(s16*)((u8*)D_800E4D90 + 0x1E),
-        *(u16*)((u8*)D_800E4D90 + 0x20), *(u16*)((u8*)D_800E4D90 + 0x22));
-    if (*(u32*)((u8*)D_800E4D90 + 0x48) != 0) {
+    *(u16*)&g_FieldMimTex0Tpage[0] = LoadTPage(
+        *(u_long**)((u8*)g_FieldMimPalData + 0x14), 1, 0,
+        *(s16*)((u8*)g_FieldMimPalData + 0x1C),
+        *(s16*)((u8*)g_FieldMimPalData + 0x1E),
+        *(u16*)((u8*)g_FieldMimPalData + 0x20),
+        *(u16*)((u8*)g_FieldMimPalData + 0x22));
+    if (*(u32*)((u8*)g_FieldMimPalData + 0x48) != 0) {
         DrawSync(0);
-        *(u16*)&D_800E4DE4[0] = LoadTPage(
-            *(u_long**)((u8*)D_800E4D90 + 0x44), 1, 0,
-            *(s16*)((u8*)D_800E4D90 + 0x4C), *(s16*)((u8*)D_800E4D90 + 0x4E),
-            *(u16*)((u8*)D_800E4D90 + 0x50), *(u16*)((u8*)D_800E4D90 + 0x52));
+        *(u16*)&g_FieldMimTex1Tpage[0] = LoadTPage(
+            *(u_long**)((u8*)g_FieldMimPalData + 0x44), 1, 0,
+            *(s16*)((u8*)g_FieldMimPalData + 0x4C),
+            *(s16*)((u8*)g_FieldMimPalData + 0x4E),
+            *(u16*)((u8*)g_FieldMimPalData + 0x50),
+            *(u16*)((u8*)g_FieldMimPalData + 0x52));
     }
     DrawSync(0);
 }

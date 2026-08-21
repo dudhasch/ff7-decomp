@@ -879,9 +879,9 @@ extern u8 D_8009D684;
 extern u8 D_8009D685;
 extern u8 D_8009D686;
 extern u8 D_8009D60E;
-extern u8 g_DebugLevel; // field debug related
-extern u8 D_8009D824;
-extern s16 D_8009D828[]; // per-model base animation speed
+extern u8 g_DebugLevel;           // field debug related
+extern u8 g_FieldDebugPagesDirty; // 0x8009D824
+extern s16 D_8009D828[];          // per-model base animation speed
 extern u8 D_8009D8F8[];
 extern u32 D_8009D260;
 extern volatile s32 D_8009D268[];
