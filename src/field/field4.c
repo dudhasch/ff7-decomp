@@ -5502,16 +5502,24 @@ extern u8 D_8009D820;
  * separate `temp_v0` pointers are cse re-deriving the base after each store,
  * not six source variables).
  *
- * The residue is scheduling around the mode read: the target interleaves the
- * `g_EntityToModel` load, the PC load and the `modelIdx * 0x84` computation
- * so that the `%hi`/`%lo` of g_FieldScripts lands last, and we emit the PC
- * and the script base first. Measured and worse: storing `GET_PARAM_U8(3)`
- * directly and re-reading it for the test (31/13). Measured and identical:
- * passing the string literals to DebugPrintOpcode directly instead of through
- * a `char*` local. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncOfstd);
-#else
+ * The last 11 rows were the mode read, and they were not scheduling at all --
+ * they were the order gcc expands a store. Written as two statements,
+ * `ofsType = GET_PARAM_U8(3);` then `...OfsType = ofsType;`, the value is a
+ * whole statement of its own and is emitted first: the PC load and the
+ * g_FieldScripts base come out ahead of the `g_EntityToModel` lookup that
+ * addresses the store. Written as one chained assignment,
+ * `g_FieldModels[...].OfsType = ofsType = GET_PARAM_U8(3);`,
+ * `expand_assignment` computes the destination address *before* it expands
+ * the right-hand side, so the lookup goes first and the PC read lands
+ * immediately above the `sb` -- which is exactly the target's block. Same
+ * instructions, same count, one statement. `s32 ofsType` is byte-identical
+ * to the `u8`, so only the chaining matters.
+ *
+ * Measured and worse: storing `GET_PARAM_U8(3)` directly with the parameter
+ * re-read for the test, and the same with a separate local assigned after the
+ * store (31/13 both -- two reads of the PC, and cse will not fold them across
+ * the store). Measured and identical: passing the string literals to
+ * DebugPrintOpcode directly instead of through a `char*` local. */
 s32 OpcodeFuncOfstd(void) {
     u8 ofsType;
 
@@ -5538,8 +5546,8 @@ s32 OpcodeFuncOfstd(void) {
             FieldEventReadMemoryS16(2, 6);
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetEndZ =
             FieldEventReadMemoryS16(3, 8);
-        ofsType = GET_PARAM_U8(3);
-        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OfsType = ofsType;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].OfsType = ofsType =
+            GET_PARAM_U8(3);
         if (ofsType != 0) {
             g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetStartX =
                 g_FieldModels[g_EntityToModel[g_CurrentEntity]].OffsetX;
@@ -5559,7 +5567,6 @@ s32 OpcodeFuncOfstd(void) {
     PC_INC(0xC);
     return 0;
 }
-#endif
 
 /* Block until this entity's offset animation finishes. OfsType 3 means the last
  * step ran, so clear it and fall through; 0 means there was never one. */
@@ -5649,14 +5656,24 @@ s32 OpcodeFuncTurnw(void) {
  *   wants, so read the target), `s32 dir` (14), the TurnEnd comparison
  *   reversed (12).
  *
- * What is left is reorg: the target steals the `sh ...,0x3e(...)` at the head
- * of the shared return block into each arm's `j` delay slot and redirects the
- * jump past it, so the store appears twice and the shared block is just
- * `li v0,1` plus the jump to the epilogue. We reach the same block with the
- * store still merged into it. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurn);
-#else
+ * The last 11 rows were block layout, not reorg, though they read as reorg:
+ * the target's `done:` block sits *after* the shared `PC_INC(6); return 0;`
+ * tail, not before it. Written as `... done: return 1; } PC_INC(6); return 0;`
+ * the `return 1` block is laid out first, so it is the fall-through of the
+ * store block and the `goto done` branch lands on a `j` -- and the two delay
+ * slots reorg wants to fill (the last `&&` test's, with a duplicated
+ * `li v0,1`, and the preceding `bne`'s, with the `sll` from the block below)
+ * both stay empty. Closing the `if` with an explicit `goto done;` and putting
+ * `done: return 1;` after the PC_INC tail puts the blocks in the target's
+ * order, and reorg does the rest: the store block ends in `j` with the `sh`
+ * duplicated into its delay slot, and the early exit jumps straight to the
+ * epilogue with `li v0,1` duplicated into its own.
+ *
+ * This is the third variation on where an opcode handler's tail goes, and the
+ * three are not interchangeable -- OpcodeFuncTurnw wants the tail duplicated
+ * at every early return, this one wants two tails in a specific *order*, and
+ * FieldMoveToEntityUpdate wants one tail that the guard jumps into. Read the
+ * target's block addresses before choosing. */
 s32 OpcodeFuncTurn(void) {
     s16 dir;
 
@@ -5695,13 +5712,13 @@ s32 OpcodeFuncTurn(void) {
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnSteps =
             GET_PARAM_U8(4);
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].TurnEnd = dir;
-    done:
-        return 1;
+        goto done;
     }
     PC_INC(6);
     return 0;
+done:
+    return 1;
 }
-#endif
 
 /* TURNR/TURNL/TRNRC/TRNLC: start (or restart) a turn on the current entity's
  * model. Operand 5 selects the turn kind and operand 3 the direction --
@@ -5740,14 +5757,25 @@ s32 OpcodeFuncTurn(void) {
  *     (37/3). Worth 35/7 -> 18/1. Also measured: caching g_CurrentEntity in
  *     a local (94/23).
  *
- * The last row is reorg, and it is the same one OpcodeFuncTurn is parked on:
- * the target steals the `sh ...,0x3e(...)` at the head of the shared return
- * block into each arm's `j` delay slot and redirects the jump past it, so the
- * store appears once per arm; we reach the same block with the store still
- * merged into it. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncTurnr);
-#else
+ *   - the `return 1` and the `PC_INC(6); return 0;` are two blocks and their
+ *     *order* matters: `done: return 1;` goes after the PC_INC tail, reached
+ *     by an explicit `goto done;` that closes the `if`. Laid out the other way
+ *     round -- which is what writing `return 1;` inside the `if` gives -- the
+ *     store block falls straight into the return and the two delay slots reorg
+ *     wants stay empty. 18/1 -> 2. Same lever as OpcodeFuncTurn; see its note.
+ *   - the debug-name pick is an `if`/`else`, not `name = "turnr"; if (...)
+ *     name = "turnl";`. Both compile to the identical instructions, so this is
+ *     invisible in a register diff -- what it decides is the order the four
+ *     string literals land in `.rodata`, because gcc calls
+ *     `output_constant_def` as it expands each STRING_CST and an `if`/`else`
+ *     expands its *true* arm first. The target's pool is turnl, turnr, trnlc,
+ *     trnrc: the conditional name first, which only the `if`/`else` (or a
+ *     ternary, byte-identical) produces. The straight-line form puts turnr
+ *     first, every `%lo` in the function is then 8 bytes off, and -- this is
+ *     the trap -- `checkfn.py` still reports the function as 2 rows out from
+ *     "register naming" while `make build` fails the whole overlay's SHA-1.
+ *     Defaulting to the l-name and testing `== 0` gets the pool right and the
+ *     branch polarity wrong: 4 rows. */
 s32 OpcodeFuncTurnr(void) {
     FieldEntity* entity;
     FieldEntity* snapshot;
@@ -5761,16 +5789,18 @@ s32 OpcodeFuncTurnr(void) {
         if (g_DebugLevel & 3) {
             switch (GET_PARAM_U8(5)) {
             case 1:
-                name = "turnr";
                 if (GET_PARAM_U8(3) != 0) {
                     name = "turnl";
+                } else {
+                    name = "turnr";
                 }
                 DebugPrintOpcode(name, 5);
                 break;
             case 2:
-                name = "trnrc";
                 if (GET_PARAM_U8(3) != 0) {
                     name = "trnlc";
+                } else {
+                    name = "trnrc";
                 }
                 DebugPrintOpcode(name, 5);
                 break;
@@ -5825,12 +5855,13 @@ s32 OpcodeFuncTurnr(void) {
                 break;
             }
         }
-        return 1;
+        goto done;
     }
     PC_INC(6);
     return 0;
+done:
+    return 1;
 }
-#endif
 
 /* Snap this entity to a facing, cancelling any turn in progress. Returns 1 when
  * the entity actually has a model, unlike most opcodes. */

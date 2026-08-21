@@ -205,7 +205,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Five ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Six ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -1576,6 +1576,46 @@ a near-miss, in rough order of frequency:
   before touching the expression; when there is no such value the rotation does
   not move at all, which is where `OpcodeFuncMove` and `FieldMoveToEntityUpdate`
   are still parked.
+* **A chained assignment expands the destination address before the value; two
+  statements expand the value first.** `expand_assignment` computes the address
+  of the left-hand side and only then calls `store_expr` on the right, so
+  `s->field = t = f();` emits the address computation ahead of `f()`'s
+  operands, while `t = f(); s->field = t;` emits `f()` first because it is a
+  complete statement of its own. When a store's address and its value are each
+  several instructions — an indexed lookup on one side, a chain of loads on the
+  other — the two spellings give the same instructions in two different orders,
+  and no amount of scheduling advice reaches it. `OpcodeFuncOfstd` in
+  `src/field/field4.c` was 11 rows out on exactly this: the target reads
+  `g_EntityToModel[g_CurrentEntity]` before the script PC, and only the chained
+  form produces that. This is a different lever from the right-to-left
+  *store order* of `a = b = c = K` recorded above; both come from the same
+  statement shape.
+* **Two return blocks are laid out in source order, and reorg can only fill a
+  delay slot from a block it *jumps* to.** An opcode handler whose body is
+  `if (ok) { ... return 1; } PC_INC(n); return 0;` lays the `return 1` block
+  first, so the body falls straight into it and every branch that wanted to
+  reach it is a fall-through with nothing to steal. Close the `if` with an
+  explicit `goto done;` and put `done: return 1;` *after* the `PC_INC` tail and
+  the two blocks swap: the body now ends in a `j` whose delay slot takes the
+  store above it, and an early `goto done` gets `li v0,1` duplicated into its
+  own slot. `OpcodeFuncTurn` went 11 rows to MATCH on this and `OpcodeFuncTurnr`
+  18/1 to 2. This is the third variation on where a handler's tail goes —
+  `OpcodeFuncTurnw` wants the tail duplicated at every early return,
+  `FieldMoveToEntityUpdate` wants one tail the guard jumps into — so read the
+  target's block addresses rather than picking by taste.
+* **A string literal's `.rodata` slot is decided by the order gcc expands the
+  STRING_CST, and `if`/`else` expands its true arm first.** `name = "turnr";
+  if (c) { name = "turnl"; }` and `if (c) { name = "turnl"; } else { name =
+  "turnr"; }` compile to the same instructions in the same order — they differ
+  only in which literal is defined first, and therefore in every `%lo` in the
+  function. **This is the fourth way a clean-looking diff lies**: `checkfn.py`
+  reports the shifted references as two rows of "register naming", the function
+  looks one small step from done, and `make build` fails the whole overlay's
+  SHA-1 because every later `.rodata` offset moved. When the only rows left are
+  `%lo` of a string, read the `.s`'s `glabel` order and make the source expand
+  the literals in that order; a ternary is byte-identical to the `if`/`else` if
+  you prefer it. `OpcodeFuncTurnr` in `src/field/field4.c` needs turnl before
+  turnr.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -1598,7 +1638,7 @@ once unparked in the same build. Before spending a budget on any member of a
 clone family — the `Opcode*` palette ops, the `FieldEvent*` accessors, the
 `Kawai*` handlers — unpark the whole family and re-measure.
 
-#### Five ways a clean-looking diff lies
+#### Six ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -1664,6 +1704,16 @@ declares. Passing the flag by hand has a trap of its own: it must come *after*
 the function name, because `diff.py -o --max-lines 2000 <fn>` binds `<fn>` to
 the end-address positional and returns an empty diff with score 0 — which reads
 as a flawless match.
+
+**A shifted string literal.** Two spellings of a conditional debug name can
+compile to identical instructions and still put the function's string literals
+in `.rodata` in different orders — see the STRING_CST bullet above. Every
+`%lo(<string>)` in the function then names a slot 8 bytes off, `checkfn.py`
+reports it as a couple of rows of register naming, and the function reads as
+one small step from done. It is not: `make build` fails the overlay's SHA-1,
+because every later `.rodata` offset in the unit moved. When the only rows left
+are `%lo` of a string, check the `.s`'s `glabel` order before anything else.
+`OpcodeFuncTurnr` cost a full red build to learn this.
 
 #### Sweeping many variants at once
 
