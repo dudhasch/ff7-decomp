@@ -1663,6 +1663,20 @@ a near-miss, in rough order of frequency:
   65/0 and 43/4 are inserted blocks, and not one of them is predictable from
   the target -- the pass to raise is `perm_ins_block`, and the only way to
   place one is to search.
+* **A `do { } while (0);` is a free test for which pass you are fighting.** It
+  emits nothing, so it cannot change an allocno's reference count or live
+  range; all it does is end a basic block, which is a scheduling boundary. So
+  drop one at the end of a loop body and re-measure: if the row count moves at
+  all, the residue is sched2's and source position is a live lever; if it is
+  *exactly* inert, the residue is register allocation and every barrier,
+  reordering and re-spelling you are about to try is inert too. Measured on
+  two functions in `src/field/field.c` that both read as noise:
+  `FieldBackgroundInitPackets` moves 34 rows to 26 on one barrier, and
+  `AddBackgroundToRender` is 65 either way — at the end of any one of its four
+  inner loop bodies or all four at once. That second result is worth as much
+  as the first: it is what turns "65 rows of register naming" from a guess
+  into a finding, and it costs one sweep.
+
 * **Do not guess at `n_refs` and `live_length` -- cc1 prints them.** The
   `.lreg` dump names every pseudo with exactly the two numbers
   `allocno_compare` ranks on, and `.greg`'s post-reload RTL shows which hard
