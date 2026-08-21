@@ -2262,6 +2262,67 @@ A correctly pruned scratch has the two `.text` figures within a few percent of
 each other — the whole object *is* the function under test. Anything else means
 the prune did not happen, whatever the log said.
 
+**That check reads the wrong object, though: `base.o` is written by `import.py`
+and never rebuilt.** `permuter_strip_asm.py` runs *after* the import and edits
+`base.c` only, so a correctly stripped scratch still has a fat `base.o` sitting
+beside it — three field-overlay scratches all showed `base.o` at 7440 bytes
+against targets of 3220, 2680 and 1628, which reads exactly like a prune
+failure and is not one. Compile `base.c` with the scratch's own `compile.sh`
+and size *that*:
+
+```shell
+./nonmatchings/<fn>/compile.sh nonmatchings/<fn>/base.c x /tmp/b.o
+mipsel-linux-gnu-size /tmp/b.o nonmatchings/<fn>/target.o
+```
+
+Do it inside the container and through `tools/docker-build.ps1`, not a bare
+`docker run` with a different mount point — `compile.sh` does `cd /ff7` and
+then uses relative `-Iinclude`, so a scratch compiled against the image's baked
+copy of the repo silently produces a 48-byte object.
+
+**Run that compile with its diagnostics visible, every time, before starting a
+search.** `permuter_macros.py align` rewrites declarations in `base.c` to match
+the target's relocation names, and it can rewrite the *wrong* one: on
+`FieldMain` it turned `extern volatile u32 D_8009AC3C[1];` into a second
+declaration of `D_8009AC40`, so `D_8009AC3C` was undeclared at its only use.
+gcc 2.6.3 substitutes 0 for an unknown identifier and keeps generating code
+(see *A compile error that ninja calls a success*), the permuter's own log says
+nothing, and the base score looks entirely plausible — 3100 for a function
+sixty rows out. Every candidate in that run was hill-climbing a program five
+instructions shorter than the one being matched. The check is one line:
+
+```shell
+./nonmatchings/<fn>/compile.sh nonmatchings/<fn>/base.c x /tmp/b.o 2>&1 \
+  | grep -v 'warning:'
+```
+
+Silence is the pass condition.
+
+**A permuter score can improve while the real diff gets worse, and symbol
+aliases are why.** The scorer compares relocation *symbols*; `checkfn.py`
+discounts a difference that is purely a symbol name for the same address. So
+every alias the scratch still carries is a lever the search can pull for free
+— it moves the score and moves nothing in the build. `FieldMain`'s best
+candidate scored 2515 against a base of 3100 and measured **79 changed / 6
+inserted** against 64/3 for the body it came from; decomposed into its six
+individual edits, every one of them was a regression on its own as well
+(70–81 rows). Two habits follow. Before trusting a run, diff the relocation
+multisets and fix what `align` missed:
+
+```shell
+diff <(mipsel-linux-gnu-objdump -drz /tmp/b.o \
+        | grep -oE 'R_MIPS_[A-Z0-9_]+[[:space:]]+[^[:space:]]+' \
+        | awk '{print $2}' | sort | uniq -c) \
+     <(mipsel-linux-gnu-objdump -drz nonmatchings/<fn>/target.o | ...)
+```
+
+An empty diff means the score describes the code — `AddBackgroundToRender` and
+`FieldBackgroundInitPackets` are both clean this way, `FieldMain` is not: the
+target names six interior members of `g_FieldRenderData` by their own
+addresses, and `D_8009AC40` where the C reaches the same halfword through
+`D_8009ABF4`. And after trusting it, still re-measure the winner with
+`checkfn.py` before believing a single row of it.
+
 **A parked body that does not compile is not permuter input.** 23 of the field
 overlay's 72 `MASPSX_OVERRIDE` bodies are m2c seeds that gcc rejects — mostly
 `request for member 'unkN' in something not a structure or union`, from

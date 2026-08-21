@@ -363,6 +363,25 @@ extern s16 D_80071E3C;
  *      (80/5), `i = 0xF` hoisted above the branch too (92/4), `fill` hoisted
  *      instead (97/5), the arms written as a goto rather than an else (77/4,
  *      byte-identical). 3 rows.
+ *   6. what decomp-permuter has said so far is worth nothing, and the reason
+ *      is written up in CLAUDE.md. Its scratch was built by
+ *      `permuter_macros.py align`, which rewrote `extern volatile u32
+ *      D_8009AC3C[1];` into a second declaration of `D_8009AC40` -- so
+ *      `D_8009AC3C` was undeclared at line `D_8009A004[0] = D_8009AC3C[0];`,
+ *      gcc folded it to 0, and the whole search ran against a program five
+ *      instructions shorter than this one. Its best candidate (2515 against a
+ *      base of 3100) measures **79/6** here, and each of its six edits
+ *      measured separately is a regression too: `long preloadId` + `int
+ *      exitKind` 73/5, `ev = &D_8009ABF4.eventCmd` with `D_8009AC40[0] = 0`
+ *      72/4, the `fillVal` local folded back inline 70/4, a `do { } while (0)`
+ *      around the `g_CurrentFieldIndex` store 70/5, the `(s16)` cast back on
+ *      the compare 72/4, and dropping `volatile` from D_8009AC1A 81/3. The
+ *      base is repaired now; treat anything from before as unmeasured.
+ *      Note also that even a repaired scratch scores this function partly on
+ *      symbol aliases -- the target names six interior members of
+ *      g_FieldRenderData by their own addresses, and D_8009AC40 where this C
+ *      reaches the same halfword through D_8009ABF4 -- so re-measure every
+ *      output with checkfn.py rather than reading its score.
  * The remaining rows are branch-target addresses, which follow from the
  * length difference and cost nothing once the clusters above are closed. */
 #ifndef NON_MATCHINGS
