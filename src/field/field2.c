@@ -3933,12 +3933,26 @@ extern u8 D_8009C6D8;
  * Measured and inert, all 62/1: `roll` as s32, u32, u16 or s16 (the `(u8)`
  * casts at the comparisons carry the masking either way). `u8 sum` is 61/1 --
  * one row, and it makes the accumulator's width a semantic question for no
- * structural gain, so it is not taken. Codegen pinned via MASPSX_OVERRIDE. */
+ * structural gain, so it is not taken.
+ *
+ * 62 rows / 1 insertion / -4 -> 40 / 0 / -2, and the answer to the question
+ * the paragraph above leaves open is a named pointer local. `s16* cur =
+ * &D_8009ABF6;` assigned immediately above the `!= D_8007E774` test, with
+ * that test, its store, and the *second* walk's fallback store reaching the
+ * symbol through `*cur`, is what makes cse relate the two references instead
+ * of fusing each `%lo` into its own access -- which is what puts the address
+ * in a callee-saved register across the FieldGetNextRandomU8 call, exactly
+ * as the target has it. Scope matters: routing the second walk's `slot`
+ * store through `cur` as well is 42, and the first walk's stores must stay
+ * on the bare symbol. The remaining rows are all branch displacements off by
+ * 8, which is the two instructions still missing.
+ * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
 #else
 void FieldBattleCheck(void) {
     FieldEncounterTable* enc;
+    s16* cur;
     s32 i;
     s32 sum;
     s32 rate;
@@ -4025,13 +4039,14 @@ void FieldBattleCheck(void) {
                         break;
                     }
                 }
-                if (D_8009ABF6 != D_8007E774) {
-                    D_8007E774 = D_8009ABF6;
+                cur = &D_8009ABF6;
+                if (*cur != D_8007E774) {
+                    D_8007E774 = *cur;
                     return;
                 }
                 sum = 0;
                 roll = FieldGetNextRandomU8() >> 2;
-                D_8009ABF6 = enc->fallback & 0x3FF;
+                *cur = enc->fallback & 0x3FF;
                 for (i = 0; i < 5; i++) {
                     slot = ((u16*)enc)[i + 1];
                     sum += (s32)(slot << 16) >> 26;

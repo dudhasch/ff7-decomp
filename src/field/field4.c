@@ -9332,7 +9332,16 @@ s32 OpcodeFuncSolid(void) {
  * the target's two. Re-measured with the else arm reordered as well: 48
  * changed / 10 inserted, against 48 / 8 for duplication alone and 18 / 5 for
  * the reorder alone. Whatever puts the index computation in both arms is in
- * the source, not in the tail. Permuter food. */
+ * the source, not in the tail.
+ *
+ * A named `u16* pc` assigned in both arms, so that `PC_INC(7)` becomes
+ * `*pc += 7;` and the address chain is computed per arm, does not do it
+ * either -- and the asymmetric placement that would stop find_cross_jump
+ * merging the two (the assignment last in the if arm but mid-block in the
+ * else, so the arms' final insns differ) is no better than the symmetric
+ * one: 28 rows both ways against 24 for the plain PC_INC. The pointer is
+ * dead on the return path, so gcc sinks its materialisation into the join
+ * wherever the source puts it. Permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
