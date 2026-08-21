@@ -1009,7 +1009,7 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 55 changed / 15 inserted, down from 174/23. Seven levers got it there and
+ * 55 changed / 14 inserted, down from 174/23. Seven levers got it there and
  * three of them contradict what this note used to say, so read the rejected
  * list at the bottom as history, not as evidence.
  *
@@ -1049,10 +1049,16 @@ extern s16 D_801144D0;
  *    immediately after its SetDrawMode rather than after the SetSemiTrans
  *    if/else. 12 rows between them.
  *
- * 5. Both sprite counters are incremented *last* in their inner loop body,
- *    after the three pointer bumps, not before them. 7 rows. Only moving one
- *    of the two is worth less than moving both (83/19 and 84/15 against
- *    80/17), and moving them to the *front* of the body is worse than either.
+ * 5. Both sprite counters are incremented late in their inner loop body --
+ *    after the record pointer and the packet pointer are bumped, but *before*
+ *    `pairs += 2`. 8 rows. The dimension was swept twice: to the end of the
+ *    body first (7 rows, and only worth it for both counters together -- one
+ *    at a time measures 83/19 and 84/15 against 80/17), and then finely once
+ *    everything around it had settled. Against the seven-lever base, moving
+ *    each counter up one bump from the end is 55/14, up two bumps 62/12, up
+ *    two in layers 1+2 only 58/14, up two in layers 3+4 only 59/13, and at
+ *    the very front of the body much worse. Positions inside the field-store
+ *    run (after u0, v0 or clut) all measure 55/17.
  *
  * 6. `tpages++` is a statement of its own, not part of the SetDrawMode
  *    argument: `SetDrawMode(modes, 0, 1, tpages[0], NULL); tpages++;` at all
@@ -1101,8 +1107,10 @@ extern s16 D_801144D0;
  *
  * Also measured and rejected, all against the current base:
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
- *     and 4 (115 against 96) -- the target loads count with `lh` into a temp
- *     and copies it to $s3, which is still not reproduced here.
+ *     and 4 (115 against 96 then, and re-measured per layer against the
+ *     current base: layer 4 alone 76, layer 3 alone 75, against 55) -- the
+ * target loads count with `lh` into a temp and copies it to $s3, which is still
+ * not reproduced here.
  *   - `SetDrawMode(modes++, ...)` at the layer-1/3/4 sites (97 against 87
  *     before lever 6, 71 against 67 after it).
  *   - layer 2 written b0, r0, g0 (98 against 87).
@@ -1179,8 +1187,8 @@ void FieldBackgroundInitPackets(
                     sprt16->clut = tile1->clut;
                     tile1++;
                     sprt16++;
-                    pairs += 2;
                     spriteCount++;
+                    pairs += 2;
                 } while (--count != 0);
             }
         }
@@ -1222,8 +1230,8 @@ layer2:
                 pairs[1] = tile2->param;
                 tile2++;
                 sprt16++;
-                pairs += 2;
                 spriteCount++;
+                pairs += 2;
             } while (--count != 0);
         }
         run += 3;
@@ -1270,8 +1278,8 @@ layer3:
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
-                    pairs += 2;
                     sprite34Count++;
+                    pairs += 2;
                 } while (--count != 0);
             }
         }
@@ -1314,8 +1322,8 @@ layer4:
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
-                    pairs += 2;
                     sprite34Count++;
+                    pairs += 2;
                 } while (--count != 0);
             }
         }
