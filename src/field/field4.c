@@ -2076,114 +2076,100 @@ void UpdateFieldExitArrows(s32 arg0) {
     }
 }
 
-extern /*?*/ s32 D_800E48FC;
-extern /*?*/ s32 D_800E48FE;
-extern /*?*/ s32 D_800E4900;
-extern /*?*/ s32 D_800E4901;
-extern /*?*/ s32 D_800E4904;
-extern /*?*/ s32 D_800E4906;
-extern /*?*/ s32 D_800E4908;
-extern /*?*/ s32 D_800E4909;
-extern /*?*/ s32 D_800E490C;
-extern /*?*/ s32 D_800E490E;
-extern /*?*/ s32 D_800E4910;
-extern /*?*/ s32 D_800E4911;
-extern /*?*/ s32 D_800E4914;
-extern /*?*/ s32 D_800E4916;
-extern /*?*/ s32 D_800E4918;
-extern /*?*/ s32 D_800E4919;
+/* Draw the field-exit arrow: a single textured quad at the exit's projected
+ * screen position, double-buffered through D_80114490 so the packet being
+ * added is never the one the GPU is reading. The clamp keeps it on screen, and
+ * the two `if`s pick which corner of the 16x16 texture cell maps to which
+ * vertex -- the arrow flips horizontally past x = 0x123 and vertically above
+ * y = 0x11, so it always points inward from the edge it sits on.
+ *
+ * 255 rows and 5 insertions -> MATCH, from an m2c seed that addressed every
+ * packet field as `*(&D_800E4900 + slot * 0x28)`. Three things did it:
+ *   - the sixteen `D_800E49xx` placeholders are POLY_FT4 members of
+ *     `D_800E48F4[]`: +8/+0xA x0,y0, +0xC/+0xD u0,v0, +0x10/+0x12 x1,y1,
+ *     +0x14/+0x15 u1,v1, and so on. The externs are gone.
+ *   - every access is the full `D_800E48F4[D_80114490].<field>` expression.
+ *     Taking the obvious `POLY_FT4* arrow = &D_800E48F4[D_80114490];` once and
+ *     writing through it measures **300** rows -- worse than the m2c seed --
+ *     because the packet base then lives in one register across the whole
+ *     function where the target rebuilds it at every store. Same house rule as
+ *     the opcode handlers' `g_EntityToModel[g_CurrentEntity]`, and it is worth
+ *     286 rows here. The `addPrim` argument is the one place the index appears
+ *     without a member, and it is written inline, not through a local: a local
+ *     costs 4 rows because it makes gcc evaluate the index before the array
+ *     base.
+ *   - the y clamp is an `if`/`else`, the x clamp is not. `y = D_80114468; if
+ *     (D_80114468 >= 0xE1) y = 0xE0;` loads the global twice -- an `lhu` for
+ *     the s16 local and an `lh` for the comparison -- while
+ *     `if (D_80114468 >= 0xE1) { y = 0xE0; } else { y = D_80114468; }` assigns
+ *     the local *after* the comparison has already loaded it, so cse rewrites
+ *     the second load as `move a3,v1` and reorg puts the copy in a delay slot.
+ *     That is the documented three-spellings rule for an s16 local, and the
+ *     asymmetry is real: the x clamp wants the plain form and measures worse
+ *     as an if/else. */
+void DrawFieldExitArrow(s32* ot) {
+    s16 x;
+    s16 y;
 
-/* Draw the field-exit arrow sprite (a POLY_FT4) at the given OT slot, pulsing
- * its colour over time. m2c seed; residual is the packet-field store ordering.
- * Pinned pending a permuter pass. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", DrawFieldExitArrow);
-#else
-void DrawFieldExitArrow(s32* arg0) {
-    POLY_FT4* temp_v1_5;
-    s16 temp_v1;
-    s16 temp_v1_2;
-    s16 temp_v1_3;
-    s16 temp_v1_4;
-    s16 var_a2;
-    s16 var_a3;
-    s32 temp_v0;
-    s32 temp_v0_2;
-    s32 temp_v0_3;
-    s32 temp_v0_4;
-    s32 var_v0;
-
-    if ((g_FieldMovieOpcodeActive == 0) &&
-        ((D_80114464 != 0x7FFF) || (D_80114468 != D_80114464))) {
-        var_a2 = D_80114464;
+    if (g_FieldMovieOpcodeActive == 0 &&
+        (D_80114464 != 0x7FFF || D_80114468 != D_80114464)) {
+        x = D_80114464;
         if (D_80114464 >= 0x141) {
-            var_a2 = 0x140;
+            x = 0x140;
         }
         if (D_80114464 < 0) {
-            var_a2 = 0;
+            x = 0;
         }
-        var_a3 = D_80114468;
         if (D_80114468 >= 0xE1) {
-            var_a3 = 0xE0;
+            y = 0xE0;
+        } else {
+            y = D_80114468;
         }
         if (D_80114468 < 0) {
-            var_a3 = 0;
+            y = 0;
         }
         D_80114490 ^= 1;
-        if (var_a2 >= 0x123) {
-            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x8F;
-            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x7F;
-            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x8F;
-            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x7F;
-            temp_v0 = D_80114490 * 0x28;
-            temp_v1 = var_a2 - 0x10;
-            *(&D_800E48FC + temp_v0) = temp_v1;
-            *(&D_800E4904 + temp_v0) = var_a2;
-            *(&D_800E490C + temp_v0) = temp_v1;
-            *(&D_800E4914 + temp_v0) = var_a2;
-            var_v0 = var_a3 << 0x10;
+        if (x >= 0x123) {
+            D_800E48F4[D_80114490].u0 = 0x8F;
+            D_800E48F4[D_80114490].u1 = 0x7F;
+            D_800E48F4[D_80114490].u2 = 0x8F;
+            D_800E48F4[D_80114490].u3 = 0x7F;
+            D_800E48F4[D_80114490].x0 = x - 0x10;
+            D_800E48F4[D_80114490].x1 = x;
+            D_800E48F4[D_80114490].x2 = x - 0x10;
+            D_800E48F4[D_80114490].x3 = x;
         } else {
-            *(&D_800E4900 + (D_80114490 * 0x28)) = 0x80;
-            *(&D_800E4908 + (D_80114490 * 0x28)) = 0x90;
-            *(&D_800E4910 + (D_80114490 * 0x28)) = 0x80;
-            *(&D_800E4918 + (D_80114490 * 0x28)) = 0x90;
-            temp_v0_2 = D_80114490 * 0x28;
-            temp_v1_2 = var_a2 + 0x10;
-            *(&D_800E48FC + temp_v0_2) = var_a2;
-            *(&D_800E4904 + temp_v0_2) = temp_v1_2;
-            *(&D_800E490C + temp_v0_2) = var_a2;
-            *(&D_800E4914 + temp_v0_2) = temp_v1_2;
-            var_v0 = var_a3 << 0x10;
+            D_800E48F4[D_80114490].u0 = 0x80;
+            D_800E48F4[D_80114490].u1 = 0x90;
+            D_800E48F4[D_80114490].u2 = 0x80;
+            D_800E48F4[D_80114490].u3 = 0x90;
+            D_800E48F4[D_80114490].x0 = x;
+            D_800E48F4[D_80114490].x1 = x + 0x10;
+            D_800E48F4[D_80114490].x2 = x;
+            D_800E48F4[D_80114490].x3 = x + 0x10;
         }
-        if ((var_v0 >> 0x10) < 0x11) {
-            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x6F;
-            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x6F;
-            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x5F;
-            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x5F;
-            temp_v0_3 = D_80114490 * 0x28;
-            temp_v1_3 = var_a3 + 0x10;
-            *(&D_800E48FE + temp_v0_3) = var_a3;
-            *(&D_800E4906 + temp_v0_3) = var_a3;
-            *(&D_800E490E + temp_v0_3) = temp_v1_3;
-            *(&D_800E4916 + temp_v0_3) = temp_v1_3;
+        if (y < 0x11) {
+            D_800E48F4[D_80114490].v0 = 0x6F;
+            D_800E48F4[D_80114490].v1 = 0x6F;
+            D_800E48F4[D_80114490].v2 = 0x5F;
+            D_800E48F4[D_80114490].v3 = 0x5F;
+            D_800E48F4[D_80114490].y0 = y;
+            D_800E48F4[D_80114490].y1 = y;
+            D_800E48F4[D_80114490].y2 = y + 0x10;
+            D_800E48F4[D_80114490].y3 = y + 0x10;
         } else {
-            *(&D_800E4901 + (D_80114490 * 0x28)) = 0x60;
-            *(&D_800E4909 + (D_80114490 * 0x28)) = 0x60;
-            *(&D_800E4911 + (D_80114490 * 0x28)) = 0x70;
-            *(&D_800E4919 + (D_80114490 * 0x28)) = 0x70;
-            temp_v0_4 = D_80114490 * 0x28;
-            temp_v1_4 = var_a3 - 0x10;
-            *(&D_800E48FE + temp_v0_4) = temp_v1_4;
-            *(&D_800E4906 + temp_v0_4) = temp_v1_4;
-            *(&D_800E490E + temp_v0_4) = var_a3;
-            *(&D_800E4916 + temp_v0_4) = var_a3;
+            D_800E48F4[D_80114490].v0 = 0x60;
+            D_800E48F4[D_80114490].v1 = 0x60;
+            D_800E48F4[D_80114490].v2 = 0x70;
+            D_800E48F4[D_80114490].v3 = 0x70;
+            D_800E48F4[D_80114490].y0 = y - 0x10;
+            D_800E48F4[D_80114490].y1 = y - 0x10;
+            D_800E48F4[D_80114490].y2 = y;
+            D_800E48F4[D_80114490].y3 = y;
         }
-        temp_v1_5 = &D_800E48F4[D_80114490];
-        temp_v1_5->tag = (temp_v1_5->tag & 0xFF000000) | (*arg0 & 0xFFFFFF);
-        *arg0 = (*arg0 & 0xFF000000) | ((s32)temp_v1_5 & 0xFFFFFF);
+        addPrim(ot, &D_800E48F4[D_80114490]);
     }
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_event_debug.c

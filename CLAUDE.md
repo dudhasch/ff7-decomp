@@ -1214,6 +1214,15 @@ a near-miss, in rough order of frequency:
   Written as a `switch`, `expand_end_case` emits the same constant as part of
   its own compare chain and the slot fills. Same two arms, one row —
   `OpcodeFuncJump`.
+* **Repeat the whole indexed expression in a packet-filling function too, not
+  just in the opcode handlers.** `POLY_FT4* arrow = &D_800E48F4[D_80114490];`
+  written once and used for twenty-four member stores measures **300** rows
+  against 14 for `D_800E48F4[D_80114490].<field>` repeated at every store —
+  worse than the unmodified m2c seed. The cached pointer keeps the packet base
+  in one register across the whole function; the target rebuilds it at each
+  store. The exception is an argument that needs the address without a member,
+  where the inline `&D_800E48F4[D_80114490]` is right and a local costs 4 rows
+  by making gcc evaluate the index before the array base.
 * **A value that a call clobbers and a result that replaces it are one
   variable, not two.** `charId = party[n]; if (charId == 0xFF) ok = 1; else ok
   = f(map[charId], g(), h());` needs `charId` alive across `g()` and `h()`,
@@ -1616,6 +1625,15 @@ a near-miss, in rough order of frequency:
   the literals in that order; a ternary is byte-identical to the `if`/`else` if
   you prefer it. `OpcodeFuncTurnr` in `src/field/field4.c` needs turnl before
   turnr.
+* **A raw m2c seed that addresses a struct as `*(&D_800E4900 + i * 0x28)` is a
+  typing problem, not a codegen one, and it is the cheapest work in the file.**
+  Sixteen `extern /*?*/ s32 D_800E49xx;` placeholders eight bytes apart are one
+  `POLY_FT4[]`; resolving them against the PSY-Q layout and writing the members
+  took `DrawFieldExitArrow` in `src/field/field4.c` from 255 rows and 5
+  insertions to MATCH. Read the offsets against the header before assuming the
+  residue is scheduling: +8/+0xA are x0,y0, +0xC/+0xD u0,v0, +0x10/+0x12 x1,y1,
+  and so on. The same shape — a wall of `/*?*/` externs at a fixed stride —
+  marks every remaining m2c seed worth rewriting.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -2464,6 +2482,15 @@ state where the build is red.
 **Park, do not grind.** Three shaped attempts and one permuter run per function
 (step 0). A fourth attempt with no new hypothesis is not persistence, it is the
 same guess reseeded. Write the near-miss note and take the next function.
+
+**Read the park note before the first measurement, not after the third.** The
+notes in `src/field/*.c` are long because they are exhaustive: they list the
+rejected spellings with their row counts. Picking a parked function and
+starting from the diff re-derives them one build at a time. In the session that
+wrote this paragraph, a whole budget went into re-measuring `HandleKawaiDataInModel`'s
+`blinkOpen` local and another into `OpcodeFuncVwoft`'s duplicated `PC_INC`
+tail — both already written down, both to the row, including the 48/8 the
+duplication measures. The note is the first tool, ahead of `checkfn.py`.
 
 **Write the finding down the first time.** Every gcc idiom, every environment
 trap, every "this looked like a match but wasn't" belongs in this file or in
