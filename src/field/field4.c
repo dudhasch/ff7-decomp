@@ -393,6 +393,16 @@ extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
  * the three `faceSel[]` reads. Permuter food -- the length is already exact,
  * so this is `perm_ins_block` and `perm_temp_for_expr` territory rather than
  * anything readable off the target.
+ *
+ * One thing the note above asserts is now actually measured rather than
+ * inferred. It read the RECT's source order straight off the target's store
+ * order, which is the inference CLAUDE.md's `EscapeCaptureScreen` bullet warns
+ * against -- sched2 moves stores, so the emitted order is often one nobody
+ * wrote. Here it happens to be right: all six permutations of the four field
+ * assignments, applied to all three blocks, are worse than x, y, w, h --
+ * x,w,y,h and x,y,h,w 36, x,w,h,y 40, h,w,x,y and w,h,x,y 42, y,x,w,h 44,
+ * against 28. So the fill order is not the lever and the residue really is
+ * the scheduling knot the note describes.
  * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
