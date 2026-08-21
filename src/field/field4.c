@@ -89,6 +89,17 @@ extern u8 D_800DF114;
  * session. Grep the body for an assignment to every local before believing a
  * sweep.
  *
+ * 202 rows -> 169, from the lever that matched the sibling
+ * KawaiLightingApplyToPolyColor below: the *first* inner loop gets its own
+ * pair of cursor variables, so the shared pair's reference count drops by a
+ * loop and the allocation changes underneath. Both cursors have to be split
+ * -- giving loop 1 its own `c1` while it still shares `n` is exactly inert.
+ * Which loop is split does not matter and neither does splitting more of
+ * them: loops {1}, {1,2}, {1,4}, {2,3,4} and all four measure 169 to the
+ * row, so 169 is a plateau rather than a step. In the sibling the same
+ * change was worth the match outright; here it leaves the $t8 parameter copy
+ * and one instruction still unaccounted for.
+ *
  * What is left is register naming with the length within one, which is
  * decomp-permuter's job. Codegen pinned via MASPSX_OVERRIDE; the #else is the
  * verified C. */
@@ -102,6 +113,8 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     u8* pkt;
     u8* c;
     u8* n;
+    u8* c1;
+    u8* n1;
     u8* rgb;
     u8 code;
     u32 counts;
@@ -120,17 +133,17 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     count = counts & 0xFF;
     for (i = 0; i < count; i++, pkt += 0x34, poly += 0x18) {
         if (*(u32*)pkt != 0) {
-            c = poly;
-            n = poly;
+            c1 = poly;
+            n1 = poly;
             code = pkt[7];
             rgb = pkt + 4;
             for (k = 0; k < 4; k++) {
-                gte_ldv0(normals + n[7] * 8);
-                gte_ldrgb(&c[k * 4 + 4]);
+                gte_ldv0(normals + n1[7] * 8);
+                gte_ldrgb(&c1[k * 4 + 4]);
                 gte_nccs();
                 gte_strgb(rgb);
                 rgb += 0xC;
-                n += 4;
+                n1 += 4;
             }
             pkt[7] = code;
         }
