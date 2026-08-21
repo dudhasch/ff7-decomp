@@ -1184,6 +1184,16 @@ extern s16 D_801144D0;
  * want it, and they want it together -- one site alone is 53/8 either way,
  * both 51/6, neither 55/10.
  *
+ * Re-measured against the 51/6 base, since a note's negatives are only good
+ * for the state they were taken in and this body has moved twice: `run[1] =
+ * sprite34Count;` ahead of `count = run[2];` is 73/6 at layer 3, at layer 4 or
+ * at both; `count` assigned inside the arm behind `if (run[2] != 0)` is 77/10
+ * for both and 73/8 for layer 4 alone; `spriteCount++` moved between layer 2's
+ * two `pairs` stores is 54/6 and above `sprt16++` 54/6, where the same move in
+ * layer 1 is inert; `count = countCopy = run[2]` with an unused `u32`
+ * -- decomp-permuter's best find at 1767 against a base of 2157 -- is exactly
+ * inert at either site or both.
+ *
  * Also measured and rejected, all against the current base:
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
  *     and 4 (115 against 96 then, and re-measured per layer against the
