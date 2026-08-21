@@ -5613,9 +5613,22 @@ s32 OpcodeFuncAnimb(void) {
  * two animation stores is 40/4, above the whole animation block 43/4, modelIdx
  * read above the stores 37/3, and both together 48/8, against 14/0.
  *
- * That is the same wall `HandleKawaiDataInModel` is parked behind one pass
- * down in the allocator, and it is worth stating as a rule: neither term of
- * the priority is reachable from C without emitting something. Park it. */
+ * 14 -> 10, and the step is decomp-permuter's `perm_ins_block`: the whole
+ * animation-restart block duplicated into both arms of `if (g_EntityToModel)
+ * { ... } else { ... }`. The condition is the address of an array, so it is
+ * always true and pure; jump_optimize and flow delete the test and one copy,
+ * the length is unchanged, and what survives is a different block structure
+ * for `anims` -- whose two halves now land on the target's $a1/$a0. This is
+ * the `AddBackgroundToRender` dead-conditional idiom, and it is worth noting
+ * that the permuter's score moved only 85 -> 55 for it, so it would have been
+ * easy to discard: re-measure every output with variant_eval.
+ *
+ * The remaining 10 are the three-way rotation above, unchanged, and the
+ * allocno arithmetic in this note still applies to it: neither term of
+ * `QTY_CMP_PRI` is reachable from C without emitting an instruction. What the
+ * dead conditional shows is that the *block structure* around the lookup is
+ * reachable even when the expression is not, so that is where the next
+ * search should look. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
 #else
@@ -5654,15 +5667,25 @@ s32 OpcodeFuncMove(void) {
         }
         entity->activeAnimId = 1;
     }
-    g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
-    g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
-    modelIdx = g_EntityToModel[g_CurrentEntity];
-    model =
-        &g_FieldModelData
-             ->modelEntries[g_FieldModelLoaderData[modelIdx].modelEntryIndex];
-    anims = model->modelData + model->animationOffset;
-    g_FieldModels[modelIdx].animLastFrame =
-        *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+    if (g_EntityToModel) {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
+                                                    .modelEntryIndex];
+        anims = model->modelData + model->animationOffset;
+        g_FieldModels[modelIdx].animLastFrame =
+            *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+    } else {
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
+        g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
+        modelIdx = g_EntityToModel[g_CurrentEntity];
+        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
+                                                    .modelEntryIndex];
+        anims = model->modelData + model->animationOffset;
+        g_FieldModels[modelIdx].animLastFrame =
+            *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
+    }
 
 started:
     D_800756E8[g_EntityToModel[g_CurrentEntity]] = 1;
