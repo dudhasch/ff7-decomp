@@ -1823,28 +1823,34 @@ void FieldEntityGatewayMapLoad(FieldGateway* gateway) {
  * which is true and was the wrong place to look, because the mask comes from
  * the expression, not the declaration.
  *
- * The two rows left are the two `li v1,<const>` of the final test -- the 0x40
- * of `best != 0x40` and the 1 of `requestTalkScript = 1`. The target issues
- * each two instructions earlier than this build, into slots gcc fills with the
- * neighbouring shift pair instead; same instructions, same registers, one
- * permutation of the tail. Measured and rejected: `bestId` and `best`
- * initialised in the other order (no change); nesting the two conditions
- * instead of `&&` (no change); swapping the conditions to `best != 0x40 &&
- * bestId != g_PlayerModelId` (15 changed / 1 inserted -- it also swaps a2 and
- * a3 for the whole tail, so the `&&` order is load-bearing and correct as
- * written).
+ * One row left, and it is half of what this note used to describe. The two
+ * `li v1,<const>` of the final test -- the 1 of `requestTalkScript = 1` and
+ * the 0x40 of `best != 0x40` -- were each one instruction late. The first is
+ * fixed, and the lever is the chained-assignment rule read the other way
+ * round: `expand_assignment` computes the destination address before the
+ * value, so `g_FieldEntity[bestId].requestTalkScript = 1;` emits the index
+ * arithmetic ahead of the constant, while `talk = 1;` as its own statement
+ * emits the constant first and the store second. It has to be an `s16` local;
+ * an `s32` puts a widening node back into the halfword store. Two rows to one.
  *
- * Re-measured: it is a pure sched2 permutation, not a source-order one. The
- * two blocks hold the same four instructions and differ only in which one
- * reorg finds first in the fall-through thread -- target
- * `beq/ori v1,0x40/sll/sra`, ours `beq/sll/sra/li v1,0x40`. sched2 ranks by
- * longest path to the end of the block, and `sll -> sra -> beq` is one longer
- * than `ori -> beq`, so the shift always goes first. Nothing at the source
- * level reaches it: `0x40 != best`, `(s16)0x40 != best`, both operands
- * reversed (12/3), two early `return`s, and nested `if`s all measure exactly
- * 2 changed / 2 inserted, byte-identical to the body below. It needs a reason
- * for the 0x40 to have a longer dependence chain, or the sign extension a
- * shorter one. Codegen pinned via MASPSX_OVERRIDE. */
+ * The 0x40 is a pure sched2 permutation and stays. The two blocks hold the
+ * same four instructions and differ only in which one reorg finds first in
+ * the fall-through thread -- target `beq / ori v1,0x40 / sll / sra`, ours
+ * `beq / sll / sra / li v1,0x40`. sched2 ranks by longest path to the end of
+ * the block, and `sll -> sra -> beq` is one longer than `ori -> beq`, so the
+ * shift always goes first. Measured and byte-identical to the body below:
+ * `0x40 != best`, `(s16)0x40 != best`, nesting the two conditions instead of
+ * `&&`, `talk = 1;` hoisted next to `best = 0x40;`, and the loop bound as
+ * `g_FieldStateData.modelCount` rather than `D_8009AC1C` (28 aliases instead
+ * of 22, but the same rows -- the sibling idiom that makes
+ * FieldEntityCollisionCheck match does not apply here). Measured and worse:
+ * `g_PlayerModelId != bestId` for the first test (11), `talk = 1;`
+ * immediately above the `if` (11), and swapping the two conditions (15 -- it
+ * also swaps a2 and a3 for the whole tail, so the `&&` order is load-bearing
+ * and correct as written). It needs a reason for the 0x40 to have a longer
+ * dependence chain, or the sign extension a shorter one; that is
+ * decomp-permuter's perm_ins_block territory, not a reading exercise.
+ * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityCheckTalk);
 #else
@@ -1857,6 +1863,7 @@ void FieldEntityCheckTalk(void) {
     s16 best;
     u8 dirTo;
     s32 i;
+    s16 talk;
 
     if (!(g_FieldPad2State & 0x20) || (g_FieldPad2PrevState & 0x20)) {
         return;
@@ -1900,7 +1907,8 @@ void FieldEntityCheckTalk(void) {
         }
     }
     if (bestId != g_PlayerModelId && best != 0x40) {
-        g_FieldEntity[bestId].requestTalkScript = 1;
+        talk = 1;
+        g_FieldEntity[bestId].requestTalkScript = talk;
     }
 }
 #endif
