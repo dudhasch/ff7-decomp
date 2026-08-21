@@ -1352,6 +1352,17 @@ extern s16 D_801144D0;
  * layer-1/2 counter RMW landing before `addiu s7,s7,0xe` instead of after, and
  * the rest are branch offsets that follow from the length.
  *
+ * The barrier dimension is now covered rather than sampled. Inside the
+ * layer-3/4 bodies, one after `SetSprt`, after `SetShadeTex` or after
+ * `sprt->b0 = white` is exactly inert (a barrier next to a call boundary
+ * emits nothing and changes nothing), after `sprt->v0` is 28/13 and after
+ * `sprt->h` 36/15. And the layer-1/2 counter position was re-swept on this
+ * base: `spriteCount++` ahead of `tile1++`/`tile2++` is 31/13, between the
+ * tile and packet bumps 31/10, between the packet bump and `pairs += 2`
+ * 28/10, a barrier after it 36/12 and one before it 62/16 -- so the position
+ * lever 10 chose still wins, and the 28/10 spelling is the only near miss
+ * (one fewer insertion, two more rows).
+ *
  * Deleted from this note along with the levers they described: the pad-size
  * grid (none 64, 0x8 77, 0x10 55, 0x18 through 0x30 all 77), the grid of which
  * counters are address-taken, the eight-row `do { } while (0);` after layer
@@ -1821,6 +1832,14 @@ extern FieldBgOtSlot D_8009ACA2;
  * things" is not a rule that transfers -- there the three pointers really did
  * address three different objects, here `count` and `sprite` describe the
  * same walk four times over and merging them is correct.
+ *
+ * The `perm_ins_block` class does not touch this function at all, which is
+ * itself the confirmation that the residue is allocation and not scheduling:
+ * a `do { } while (0);` at the end of any one of the four inner loop bodies,
+ * or of all four, is exactly inert -- 65 rows either way -- where the same
+ * barrier is worth eight rows in FieldBackgroundInitPackets. A barrier emits
+ * nothing and adds no references, so it can move a schedule and cannot move
+ * an allocno's rank.
  *
  * The obvious way to change the rank -- a reference to one of the two
  * constants, added inside an inner loop where flow weights it double -- has
