@@ -531,6 +531,27 @@ a near-miss, in rough order of frequency:
   which is what the target has. Two rows and, here, the last insertion. The
   tell is a `nop` right after a global load with an unrelated short store
   sitting two slots above it.
+* **`addPrim`'s first argument is used twice, and the two uses can be spelled
+  differently.** `addPrim(ot, p)` expands to `setaddr(p, getaddr(ot)),
+  setaddr(ot, p)`, so an ordering-table slot read out of a global appears twice
+  in one statement — and routing only the *second* use through a pointer local
+  is a lever worth seven rows:
+
+  ```c
+  layer3Slot = &D_8009ACA2.layer3;      /* immediately above the layer3: label */
+  ...
+  setaddr(&buf->Bg2[sprite], getaddr(&buf->ot[D_8009ACA2.layer3]));
+  setaddr(&buf->ot[*layer3Slot], &buf->Bg2[sprite]);
+  ```
+
+  The macro cannot express that, so the expansion has to be written by hand;
+  writing it out *without* the pointer is exactly inert, which is the check
+  that says the pointer is doing the work rather than the expansion. Where the
+  pointer is assigned decides everything — immediately above the walk's entry
+  label it is 65 rows, at the top of the function 124/3. This is the same shape
+  as the "same packet reached two ways in one loop" idiom: when one object is
+  reached twice in one statement, the two spellings are independent knobs.
+  `AddBackgroundToRender` in `src/field/field.c` needs it.
 * **The same packet reached two ways in one loop is not untidiness.** In
   `FieldArrowsAddToRender` the target writes `u0`/`v0` through
   `((struct FieldRenderData*)(i * 0x10 + (s32)buf))->Arrows[K]` -- base
