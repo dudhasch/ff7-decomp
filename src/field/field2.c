@@ -1152,29 +1152,45 @@ extern FieldLine D_8007E7AC;
  *   - Snapshotting the step into a local before the call: the target loads
  *     0x3A twice, once for the call and once for the compare.
  *
- * Where the remaining instructions are, per pass (want/got):
- *     1: 44/44    2: 110/119  3: 209/215  4: 224/208
- *     5: 87/87    6: 293/278  7: 433/437  8: 441/447
- * Passes 1 and 5 are exact. Passes 2, 3, 7 and 8 are now slightly over and 4
- * and 6 are short; the totals nearly cancel, so the whole function is six
- * instructions under the target's 1855.
+ * Pass 4 was 16 instructions short, and all of it was one statement. The
+ * four arms that pick the walk/run speed each compute
+ * `g_PlayerModelId * 0x84` in the target and share only the
+ * `lui at / addiu at / addu at,at,v1 / sh v0,0(at)` tail -- which is
+ * cross-jumping merging four identical stores, not a store written once after
+ * the chain. m2c renders the merged tail as a store outside the chain and the
+ * per-arm index as a dead local, and written that way gcc computes the index
+ * once and the four `lh` of g_PlayerModelId collapse to one. Writing
+ * `g_FieldEntity[g_PlayerModelId].MoveSpeed = ... * N;` inside each arm is
+ * worth 14 instructions and 25 rows. Moving `var_v0_11 = 0xE0` inside the
+ * `arg0 & 0x2000` test that follows -- where the target has it, in the branch
+ * delay slot -- is three rows more. Spelling the `temp_s3` tests as explicit
+ * `goto`s to fix their branch polarity is exactly inert.
  *
- * sp10/sp14/sp18, sp20 and sp30/sp34 are three VECTORs, not six s32 locals.
- * PSY-Q's VECTOR is 16 bytes (vx, vy, vz, pad), so three of them land at
- * exactly the target's 0x10, 0x20 and 0x30 -- which is what the gaps in m2c's
- * slot names were telling us. The split is not cosmetic: only sp10, sp20 and
- * sp30 have their address taken, so the stores to sp14 and sp18 in passes 6,
- * 7 and 8 are dead and gcc deletes them, which is the two `sw` per pass this
- * body was short. Worth 26 rows.
+ * Pass 6 wanted one type change: `temp_a1_3`, which holds MoveSteps for the
+ * jump-arc divisor, must be `s32`. As `s16` the member is read `lhu` and
+ * sign-extended by hand where the target reads `lh` -- ten rows. `temp_a0_7`
+ * is inert either way and `temp_v1_4` is a row worse as `s32`.
  *
  * Where the remaining instructions are, per pass (want/got):
- *     1: 44/44    2: 110/119  3: 209/215  4: 224/208
- *     5: 87/87    6: 293/288  7: 433/440  8: 441/450
- * Passes 1 and 5 are exact; the function is now ten instructions *over*.
+ *     1: 44/44    2: 110/119  3: 209/215  4: 224/221
+ *     5: 87/87    6: 293/286  7: 433/440  8: 441/450
+ * Passes 1 and 5 are exact.
  *
  * The leads, in order of size:
- *   - Pass 4 (+16 short) has never been read against the target, and pass 2
- *     (-9) and pass 3 (-6) have not been looked at since the switches landed.
+ *   - Passes 4 and 6 are three and seven instructions short, and both are the
+ *     same shape: gcc folding a computation the target repeats. Pass 4 is two
+ *     `andi` short -- `arg0 & 0x2000` is tested in three arms and is
+ *     loop-invariant, we materialise it once and the target three times, and
+ *     since its uses all sit inside conditional arms move_movables should not
+ *     be lifting it. Pass 6 is two `lh` short, and they are the MoveStep
+ *     reloads: the target stores `MoveStep = step + 1` and immediately reloads
+ *     0x32 into $a3 for the call's fourth argument, then reloads it again for
+ *     the second call, where cse hands us the stored register and narrows it
+ *     with sll/sra. Measured and inert there: the `s16` local assigned inside
+ *     the `else` arm rather than before the `if`, which is what the target's
+ *     `move a3,v1` in the branch delay slot looks like it should need.
+ *   - Passes 2 (-9), 3 (-6), 7 (-7) and 8 (-9) are over and have not been
+ *     read since the switches and the arm split landed.
  *   - Passes 7 and 8 recompute `i * 0x84` twice more than the target does,
  *     near the end of the loop body, and their whole residue is that: pass 7
  *     is `sll` +4, `sra` +2, `addu` +1 and pass 8 one more of each.
@@ -1232,7 +1248,7 @@ void FieldEntityMovementUpdate(s32 arg0) {
     FieldModelEntry* temp_v0_5;
     FieldModelEntry* temp_v1;
     s16 temp_a0_7;
-    s16 temp_a1_3;
+    s32 temp_a1_3;
     s16 temp_v0_10;
     s32 temp_v0_11;
     s16 temp_v0_12;
@@ -1388,21 +1404,19 @@ void FieldEntityMovementUpdate(s32 arg0) {
                         g_FieldStateData.idleAnimId;
                     if (arg0 & 0x40) {
                         if (g_FieldStateData.backgroundMovieEnabled == 0) {
-                            var_v1_2 = g_PlayerModelId * 0x84;
-                            var_v0_10 = g_FieldStateData.currentFieldScale * 8;
+                            g_FieldEntity[g_PlayerModelId].MoveSpeed =
+                                g_FieldStateData.currentFieldScale * 8;
                         } else {
-                            var_v1_2 = g_PlayerModelId * 0x84;
-                            var_v0_10 =
+                            g_FieldEntity[g_PlayerModelId].MoveSpeed =
                                 g_FieldStateData.currentFieldScale * 0xC;
                         }
                     } else if (g_FieldStateData.backgroundMovieEnabled == 0) {
-                        var_v1_2 = g_PlayerModelId * 0x84;
-                        var_v0_10 = g_FieldStateData.currentFieldScale * 2;
+                        g_FieldEntity[g_PlayerModelId].MoveSpeed =
+                            g_FieldStateData.currentFieldScale * 2;
                     } else {
-                        var_v1_2 = g_PlayerModelId * 0x84;
-                        var_v0_10 = g_FieldStateData.currentFieldScale * 3;
+                        g_FieldEntity[g_PlayerModelId].MoveSpeed =
+                            g_FieldStateData.currentFieldScale * 3;
                     }
-                    g_FieldEntity[g_PlayerModelId].MoveSpeed = var_v0_10;
                     if (arg0 & 0xF000) {
                         if (arg0 & 0x1000) {
                             var_v1_3 = i * 0x84;
@@ -1410,8 +1424,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             if (temp_s3 != 0) {
                                 g_FieldEntity[i].MoveDir = 0x20;
                             }
-                            var_v0_11 = 0xE0;
                             if (arg0 & 0x2000) {
+                                var_v0_11 = 0xE0;
                                 goto block_61;
                             }
                         } else if (arg0 & 0x4000) {
@@ -1420,8 +1434,8 @@ void FieldEntityMovementUpdate(s32 arg0) {
                             if (temp_s3 != 0) {
                                 g_FieldEntity[i].MoveDir = 0x60;
                             }
-                            var_v0_11 = 0xA0;
                             if (arg0 & 0x2000) {
+                                var_v0_11 = 0xA0;
                                 goto block_61;
                             }
                         } else {
