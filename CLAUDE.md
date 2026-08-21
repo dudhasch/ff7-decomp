@@ -1673,6 +1673,47 @@ a near-miss, in rough order of frequency:
   flips the whole allocation. Use that as a *probe*, not a fix: read the
   target for where the increment really is before keeping the change.
 
+* **A second base register reached by a *negative* displacement is one biv plus
+  a combined giv, not two pointers.** `lh 0(a3)` for a record's first field and
+  `lh -0x10(a1)` for its second, with `a1 = a3 + 0x12` and both advanced by the
+  record stride, reads like two pointers held a fixed distance apart — and
+  writing it that way cannot match. It is one walking pointer with two
+  strength-reduced address expressions (`p[1]` and `p[9]`), which `combine_givs`
+  merges onto a *single* register based at the more-referenced offset, leaving
+  the other as a negative displacement from it. The tells are that the far
+  base's initialiser (`addiu a1,a1,0x12`) sits among the loop's hoisted
+  invariants rather than before them — a giv initialiser goes in the preheader,
+  an ordinary `p += 9;` statement goes before it — and that the near base is
+  read at offset 0, which is the biv itself. `PreloadNextFieldMap` in
+  `src/field/field.c` went 13 rows to 10 on this, and no arrangement of two
+  increments reaches it, because the target wants one of them bumped first
+  *and* holding the incoming argument register.
+* **A pointer global read through its symbol at every use keeps two address
+  computations that one cached local collapses.** The exact inverse of the
+  "cache a re-read global pointer" idiom above, and the target tells you which
+  it wants: two `addu`s of the same base and index, in *opposite operand
+  orders*, mean the two addresses were expanded from two separate loads of the
+  symbol. Through one `T* table = g_Sym;` local both are the same rtx on the
+  same pseudo and cse deletes the second. Nothing about the index spelling
+  reaches it — `(s32)table + i * 24 - 4` against `i * 24 + (s32)table`,
+  pointer-first against index-first, and either one alone are all
+  byte-identical to the plain subscript, because the operand order is decided
+  by which pseudo holds the base, not by the source. Worth 7 rows in
+  `PreloadNextFieldMap`. Reach for the local when the target *reloads* the
+  global; reach for the symbol when it computes the same address twice.
+* **A call written out in both arms of an `if`/`else` puts its shared argument
+  setup ahead of the branch.** With one call after the `if`, reorg fills the
+  conditional branch's delay slot from the fall-through thread, is left with
+  the call's remaining argument to place, drops it in the first arm's `j` slot
+  and duplicates it into the second arm — which reads as three rows of
+  scheduling noise. Duplicate the call and cross-jumping merges the two into
+  one tail; the argument setup they share ends up *before* the branch, where
+  `fill_simple_delay_slots` takes it on its first pass. That is what a target
+  with a materialised constant in a conditional branch's delay slot and a
+  `nop` in the following `j`'s slot is telling you. It closed
+  `PreloadNextFieldMap`; a named local for the constant assigned before the
+  `if` does not reach it, because cse folds the constant back to the call site.
+
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

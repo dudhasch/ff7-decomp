@@ -86,83 +86,60 @@ extern u32 g_WmPreSize;
  * two-bivs bullet in CLAUDE.md for the increment order: the one incremented
  * *last* keeps the incoming argument register, and this loop needs one bumped
  * first *and* holding it, which two plain increments cannot express. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", PreloadNextFieldMap);
-#else
-
 /* Pick the nearest gateway on this map and start streaming its MIM off the CD,
  * so a map transition does not have to wait for the read. The gateway table is
  * twelve 0x18-byte records; destFieldId == 0x7FFF marks an unused slot. The
  * distance is squared, in map units, from the player position stashed in the
  * scratchpad at 0x1F800000.
  *
- * 13 rows, down from 28 on one line: which of the two walking pointers is
- * incremented first. Written `i++, ptrPos += 12, gateway += 12` the parameter's
- * own register a1 stays with the *advanced* pointer and ptrPos takes a3, which
- * is what the target does; written the other way round the two swap and every
- * use of either follows -- 15 rows of pure renaming. The rule that fits every
- * spelling measured (both in the `for`, either one moved to the end of the
- * body, both moved there) is that the pointer incremented *last* keeps the
- * incoming argument register, while the emitted order of the two `addiu`s
- * follows the source. The target wants gateway to keep a1 *and* to be bumped
- * first, which no arrangement of two increments reaches; four of the thirteen
- * rows are that. Making ptrPos a giv (`ptrPos[i * 12]`, with gateway walking)
- * puts the increments in the right order but costs 26/5, and the mirror image
- * 31/3.
+ * Three things this needed that are not obvious from the asm.
  *
- * The other nine rows are outside the loop. The target computes the file-table
- * address twice, in opposite operand orders (`addu v1,s0,v0` for the sector at
- * -4 and `addu v0,v0,s0` for the size at 0) where cse merges ours into one; and
- * it materialises 0x801B0000 once, in the delay slot of the branch that picks
- * the arm, where ours emits it in both arms.
+ * One walking pointer, not two. The target reads the record base with
+ * `lh 0(a3)` and destFieldId with `lhu 0(a1)` where a1 = a3 + 0x12, and reads
+ * pos.y1 as `lh -0x10(a1)` -- off the *far* base, at an offset that only makes
+ * sense as a negative displacement from it. That reads like two pointers kept
+ * 9 halfwords apart, and it is not: it is one biv (`gateway`) plus one
+ * strength-reduced giv, with combine_givs merging the two constant offsets
+ * (+2 and +0x12) onto a single register based at +0x12 -- the more-referenced
+ * of the two. Written as two pointers with an explicit `gateway += 9;` the
+ * `addiu a1,a1,0x12` lands *before* the loop's hoisted invariants instead of
+ * among them (it is an ordinary statement, not a giv initialiser), and the two
+ * increments come out in the wrong order with the argument register on the
+ * wrong one -- 13 rows and 2 insertions, and no arrangement of two increments
+ * reaches it. `gateway[9]` with the parameter walking is 10.
  *
- * The `lui a2,0x801b` pair is reorg, not expand: there is only ever one
- * `(set a2 0x801B0000)` in the RTL, sitting at the call, and reorg's
- * fill_slots_from_thread steals it into the first arm's `j` delay slot and
- * advances the label -- which is what duplicates it. The target has the insn
- * *above* the `bnez` that picks the arm, so its delay slot is a `nop` and
- * there is nothing to steal. A `u_long* dest = (u_long*)0x801B0000;` local
- * assigned before the `if` does not put it there (byte-identical output), and
- * neither does the permuter's dead-counter variant; the constant is folded
- * back to the call site either way.
+ * Read g_FieldFileTable through the symbol at every use, not through a `u32*
+ * table` local. The target computes the record address twice, in opposite
+ * operand orders -- `addu v1,s0,v0` for the sector at -4 and `addu v0,v0,s0`
+ * for the size at 0. Through one local both accesses are the same rtx on the
+ * same pseudo and cse deletes the second; read through the symbol each time,
+ * expand emits two address computations before cse can relate the loads, and
+ * both survive. Worth 7 rows, and nothing about the *spelling* of the index
+ * reaches it: `(s32)table + id * 24 - 4` against `id * 24 + (s32)table`,
+ * pointer-first against index-first, and either one alone are all
+ * byte-identical to the plain subscript.
  *
- * The two `addu`s are cse's operand order, the same lever as the
- * OpcodeFuncStpls bullet: gcc 2.6.3 only canonicalises a *constant* to the
- * second operand of a commutative rtx, so `(plus s0 v0)` and `(plus v0 s0)` are
- * distinct expressions and both survive. Writing the size read as
- * `*(u32*)(D_80071A5C * 24 + (s32)table)` to get the offset first is
- * byte-identical to `table[D_80071A5C * 6]`, so fold canonicalises the tree
- * before expand sees it; something else has to make the two addresses differ.
- * Reading the first test through the symbol (`g_FieldFileTable[...]`) rather
- * than the `table` local is also byte-identical.
+ * Write the call out in both arms of the final if/else. With one call after
+ * the if, reorg fills the `bnez` delay slot from the fall-through thread
+ * (`sll v0,v1,0x1`), is left with the call's third argument to place, puts it
+ * in the first arm's `j` delay slot and duplicates it into the second arm --
+ * three rows and an insertion that read as scheduling noise. Duplicated,
+ * cross-jumping merges the two calls into one tail, the shared `lui a2,0x801b`
+ * ends up ahead of the branch, and fill_simple_delay_slots takes it for the
+ * `bnez` on its first pass, which is what the target has. A `u_long* dest`
+ * local assigned before the `if` does not reach it (byte-identical -- cse
+ * folds the constant back to the call site), and neither does inverting the
+ * branch (10/5) nor pre-assigning the world-map arm and overwriting it (12/3).
  *
- * Measured and rejected: making the second parameter `u16*` and advancing it in
- * place rather than deriving a third pointer (no change); swapping the two
- * pointer declarations (no change); assigning ptrPos inside the guard rather
- * than at the top (17/3); a `do/while` loop with the increments written out at
- * the bottom instead of a `for` with a comma increment (no change,
- * byte-identical output); indexing every access off one base with no second
- * pointer at all (36/1), which collapses the two givs the target keeps apart.
- *
- * Four things that WERE worth rows, all of them type errors rather than
- * codegen, and all of them now folded in (53 rows -> 28):
- *   - the m2c seed did its pointer arithmetic in FieldGateway units, so
- *     `gateway + 0x12` compiled to `+0x1b0`. The walk needs BYTE offsets: one
- *     s16* at the record base for pos.x1/pos.y1 and one u16* at +0x12 for
- *     destFieldId, with pos.y1 reached as `((s16*)gateway)[-8]` off the
- * *second* base -- which is what the target's `lh v0,-0x10(a1)` says gcc did.
- *   - g_FieldFileTable (0x800DA5C4) is not the head of the table: it is
- *     &g_FieldFileInfo[0].mimSize. The preload pulls the MIM, so the size is
- *     `table[id * 6]` and its sector is the word before it, `table[id * 6 -
- * 1]`. Typed as FieldFileInfo* and indexed `.datSize`, every offset is 4 out.
- *   - g_FieldMoviePlayed has to be `volatile u16`. Non-volatile, combine folds
- *     the (s16) conversion into the load and emits `lh`; the target loads `lhu`
- *     and sign-extends in two separate insns, which only survives if the MEM is
- *     volatile. The other users of the symbol only ever store constants to it,
- *     so the qualifier costs nothing elsewhere.
- *   - the (s16) cast on g_FieldPreloadMapId has to appear on the table index as
- *     well as on the comparison, or gcc reloads the global unsigned for the
- *     index and the two uses stop sharing a register. */
+ * Also load-bearing, from the earlier passes: g_FieldFileTable (0x800DA5C4) is
+ * &g_FieldFileInfo[0].mimSize, so the size is `table[id * 6]` and its sector is
+ * the word before it; g_FieldMoviePlayed has to be `volatile u16`, or combine
+ * folds the (s16) conversion into the load and emits `lh` where the target
+ * loads `lhu` and sign-extends separately; and the (s16) cast on
+ * g_FieldPreloadMapId has to appear on the table index as well as on the
+ * comparison, or gcc reloads the global unsigned and the two uses stop sharing
+ * a register. */
+
 // External Declarations
 extern u8 D_8009ABF5;
 extern u8 g_FieldAnimLock;
@@ -171,16 +148,13 @@ extern s16 D_80071A5C;
 // D_8009ABF5 = g_FieldState -> command
 
 void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
-    s16* ptrPos;
     s32* scratchpad;
     s32 minDist;
     s32 i;
     s32 diffX, diffY, dist;
-    u32* table;
     s32 sector;
     u32 size;
 
-    ptrPos = (s16*)gateway;
     minDist = 0x7FFFFFFF;
 
     scratchpad = (s32*)0x1F800000;
@@ -189,16 +163,14 @@ void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
     scratchpad[2] = Player->PosZ >> 12;
 
     if (g_FieldAnimLock == 0) {
-        gateway += 9;
-
-        for (i = 0; i < 12; i++, ptrPos += 12, gateway += 12) {
-            if (gateway[0] != 0x7FFF) {
-                diffX = ptrPos[0] - scratchpad[0];
-                diffY = ((s16*)gateway)[-8] - scratchpad[1];
+        for (i = 0; i < 12; i++, gateway += 12) {
+            if (gateway[9] != 0x7FFF) {
+                diffX = ((s16*)gateway)[0] - scratchpad[0];
+                diffY = ((s16*)gateway)[1] - scratchpad[1];
                 dist = diffX * diffX + diffY * diffY;
                 if (dist < minDist) {
                     minDist = dist;
-                    g_FieldPreloadMapId = gateway[0];
+                    g_FieldPreloadMapId = gateway[9];
                 }
             }
         }
@@ -213,8 +185,7 @@ void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
         return;
     }
 
-    table = g_FieldFileTable;
-    if (0x4DFFF < table[(s16)g_FieldPreloadMapId * 6]) {
+    if (0x4DFFF < g_FieldFileTable[(s16)g_FieldPreloadMapId * 6]) {
         return;
     }
 
@@ -222,18 +193,14 @@ void PreloadNextFieldMap(FieldEntity* Player, u16* gateway) {
     D_80071A5C = g_FieldPreloadMapId;
 
     if (D_80071A5C >= 0x41) {
-        sector = table[D_80071A5C * 6 - 1];
-        size = table[D_80071A5C * 6];
+        SystemLoadFileBySector(
+            g_FieldFileTable[D_80071A5C * 6 - 1],
+            g_FieldFileTable[D_80071A5C * 6], 0x801B0000, NULL);
     } else {
-        sector = g_WmPreSector;
-        size = g_WmPreSize;
+        SystemLoadFileBySector(g_WmPreSector, g_WmPreSize, 0x801B0000, NULL);
     }
-
-    SystemLoadFileBySector(sector, size, 0x801B0000, NULL);
     g_isFieldLoading = 1;
 }
-
-#endif
 
 extern DISPENV g_FieldDispEnv[2];
 extern DRAWENV g_FieldDrawEnv[2];
