@@ -1673,9 +1673,21 @@ a near-miss, in rough order of frequency:
   prints the compiled length whenever it differs, and that is the number to
   work on first: length is a hard invariant, so a body of the wrong size
   cannot match however few rows differ, and a "better" row count bought by
-  adding an instruction is a step backwards. Two metrics, and they disagree
-  often enough to matter — one `perm_ins_block` barrier took that function from
-  34 rows to 26 *and* from four instructions long to six.
+  adding an instruction is a step backwards.
+
+  The two metrics disagree often enough to reverse a day's work. Three levers
+  on `FieldBackgroundInitPackets` — a re-read loop guard, a moved counter and
+  two `do { } while (0);` barriers — took it from 43 rows to 26 and were
+  landed on that evidence; each of the three costs exactly two instructions,
+  so the "better" body is 401 against the target's 395, and the seventeen rows
+  are mostly the six: three `nop`s per barrier, the `--count` chain displaced
+  behind them, and eight branch offsets that shift because everything after
+  the first barrier moved by 0xc. All three were withdrawn. **A row count is
+  only comparable between two bodies of the same length** — across lengths it
+  measures how well the diff aligned, which is a property of where the
+  insertion happened rather than of how wrong the body is. Fit the length
+  first; treat a row count that improves while the length grows as evidence
+  against the change.
 
 * **A `do { } while (0);` is a free test for which pass you are fighting.** It
   emits nothing, so it cannot change an allocno's reference count or live
