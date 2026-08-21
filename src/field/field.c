@@ -1159,7 +1159,21 @@ extern s16 D_801144D0;
  *
  * That leaves `spriteCount` at 0x38 against 0x20 and a four-byte slot at 0x30
  * against 0x18 -- the same shape one pool down, and about ten of the remaining
- * rows.
+ * rows. The grid of pad size against which counters are address-taken has been
+ * measured and 0x10-with-only-sprite34Count is the corner: with both counters
+ * taken, pad none 108/12, 0x8 108/12, 0x10 107/12, 0x18 86/12; with only
+ * sprite34Count taken, pad 0x8 is 78/10 against 0x10's 55/10. Whatever holds
+ * the target's other two slots one pool lower is not reachable by taking more
+ * addresses.
+ *
+ * `sprite34Count++` goes between the two `pairs` stores, not after them.
+ * decomp-permuter found it once the scratch was honest, and it is the
+ * scheduling companion to the addressability lever: the counter's slot is a
+ * memory RMW, so sched2 hoists its load to the top of the block wherever the
+ * source puts the increment, and the only thing that decides where the RMW
+ * lands is which store it is written between. Both layer-3 and layer-4 sites
+ * want it, and they want it together -- one site alone is 53/8 either way,
+ * both 51/6, neither 55/10.
  *
  * Also measured and rejected, all against the current base:
  *   - `run[1] = sprite34Count;` moved ahead of `count = run[2];` in layers 3
@@ -1333,10 +1347,10 @@ layer3:
                     sprt->h = 0x20;
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
+                    sprite34Count++;
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
-                    sprite34Count++;
                     pairs += 2;
                 } while (--count != 0);
             }
@@ -1377,10 +1391,10 @@ layer4:
                     sprt->h = 0x20;
                     sprt->clut = D_8007EBD4->clut;
                     pairs[0] = D_8007EBD4->flags;
+                    sprite34Count++;
                     pairs[1] = D_8007EBD4->param;
                     D_8007EBD4++;
                     sprt++;
-                    sprite34Count++;
                     pairs += 2;
                 } while (--count != 0);
             }
@@ -1509,6 +1523,19 @@ extern FieldBgOtSlot D_8009ACA2;
  *      34 rows for the pair, and it has to be `otSlot` -- a fresh `s32 mask`
  *      local in its place is 99. One site alone is 159 (layer 3) or 184
  *      (layer 4).
+ *
+ *   3. a dead `else if` splitting the layer-4 wrapX4 subtraction:
+ *
+ *          } else if (buf->Bg2[sprite].x0) {
+ *              <the same subtraction>
+ *          } else {
+ *              <the same subtraction>
+ *          }
+ *
+ *      13 more rows, again with no insertion -- cross-jumping merges the two
+ *      arms and the test is deleted, and what is left is the reference it
+ *      added. Same class as lever 1, and also a decomp-permuter find; the two
+ *      together are what took this function from 193 to 83.
  *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
@@ -1690,6 +1717,10 @@ layer4:
                         if (buf->Bg2[sprite].x0 < D_80071A48[2].x - 0xA0) {
                             buf->Bg2[sprite].x0 =
                                 buf->Bg2[sprite].x0 +
+                                ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
+                        } else if (buf->Bg2[sprite].x0) {
+                            buf->Bg2[sprite].x0 =
+                                buf->Bg2[sprite].x0 -
                                 ((FieldBgWrap*)g_FieldTriggers)->wrapX4;
                         } else {
                             buf->Bg2[sprite].x0 =
