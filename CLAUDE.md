@@ -2089,6 +2089,15 @@ a near-miss, in rough order of frequency:
   above, is the one that works, and it was worth 48 rows plus the register
   allocation the same note called "the whole function" and had found no lever
   for. When a note rejects a lever, check it rejected *every* spelling of it.
+  A note's *rejected-spellings* list carries the same risk one level up: it
+  is only true of the program it was measured against. `FieldEntityLineCheck`
+  had all three of the levers that finished it written down as measured and
+  rejected -- all fields through the pointer, the parameter as the cursor, a
+  local for the read-back -- at 79, 91 and 96 rows. Every one of those numbers
+  was taken before four *semantic* corrections landed in the same function,
+  and against the corrected body the same three measure 24, 9 and 0. When a
+  note records a program fix and a codegen sweep in the same paragraph, the
+  sweep predates the fix and has to be re-run.
 * **Correct the program first, then hand it to the permuter.** These two are
   not alternatives and the order matters. `FieldModelBsxTdbModify` sat at
   44 changed / 7 inserted; a permuter run on that body is hill-climbing a
@@ -2355,6 +2364,43 @@ a near-miss, in rough order of frequency:
   `(s32, u8)` was `(s16, s16)`, worth 8 instructions and 25 rows; the four
   spellings measured 256 (s16,s16), 259 (s32,s16), 261 (s32,s32), 278
   (s16,u8), 281 (s32,u8).
+* **A walked record's fields all go through the pointer, and the pointer is
+  the parameter itself.** Two separate levers that both look like style. First,
+  mixing `p->field` for some accesses and `arr[i].field` for others gives the
+  loop a second address giv based at +0, where the target bases it at the
+  offset of the field group it actually walks -- every displacement in the body
+  then reads high by that constant and the diff looks like a wall of wrong
+  offsets. Route every field through the pointer and the base moves.
+  Second, `T* p = param;` walked with `p++` is not the same as walking `param`:
+  gcc merges the two pseudos and emits the copy where the *loop* starts, while
+  the parameter's own copy is emitted in the entry block -- so a target with
+  `move s2,a1` among the register saves is telling you the parameter is the
+  cursor. `FieldEntityLineCheck` in `src/field/field2.c` measured 40 rows
+  mixed, 24 all-through-the-pointer, 9 once the pointer was the parameter.
+* **A `u8`-returning call's result stored to a `u8` field is not reloaded when
+  you read the field back -- gcc trusts the callee's extension, so cse
+  substitutes the return register for free.** The target's `sb`/`lbu` pair at
+  the same address therefore cannot be reached by any spelling of the read:
+  `p->field`, a cast through `u8*`, and a `u8` local all give the same code,
+  because a `u8` local coalesces with the return value. Reading the field into
+  an `s16`/`s32` local is what defeats it -- substituting there would need an
+  `andi` to widen, which ties `lbu` on cost, and cse only substitutes when
+  strictly cheaper. This is the same cost rule as the `u8`-tested-through-a-
+  local bullet above, reached from the store side. Worth the last row *and*
+  the last instruction of `FieldEntityLineCheck`. A `volatile` cast at the use
+  reaches the reload too and costs a row elsewhere.
+* **A narrow value proved in range is masked only where the proof does not
+  reach, so split the statement that carries the proof.** `roll =
+  FieldGetNextRandomU8() >> 2;` lets combine see a `lbu`-normalised call result
+  shifted right by two, so every later `(u8)roll` folds into the `sltu` and the
+  target's `andi <r>,<r>,0xff` never appears. Nothing at the comparison reaches
+  it -- `(u8)roll`, `(roll & 0xFF)`, both operand orders and every width of
+  `roll` measure identically. Writing it as two statements, `roll =
+  FieldGetNextRandomU8(); roll >>= 2;`, stores the result into the `u8` pseudo
+  first, so the shift reads a QImode value whose bound gcc no longer carries
+  past the block, and the masks come back. 27 rows and the exact length in
+  `FieldBattleCheck`. The `u8` and the split are one lever: widening the
+  variable after the split loses the masks again.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
