@@ -361,89 +361,63 @@ extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
  * per-frame selection -- [0] and [1] index the mouth table, [2] the eye
  * table, [3] the VRAM slot.
  *
- * 23 rows / 5 insertions at exactly the target's 113 instructions. The length
- * is exact and the residue is register naming plus one scheduling choice, so
- * what is durable here is the set of things that are *not* wrong:
+ * Three things this needed, and none of them is readable off the target:
+ *   - `sel = faceSel[k];` into an **s32** local before each `src`. Written
+ *     inline, the byte the table is indexed by is loaded into whatever
+ *     register is free and the three sites disagree with the target's $a1;
+ *     a `u8` local is exactly inert (cse coalesces it with the load), an
+ *     `s32` one is worth 28 rows to 7. Same cost rule as the `u8`-through-a-
+ *     local bullet in CLAUDE.md: widening is what stops the substitution.
+ *   - the two divisions are written **inline at every use**, not carried in
+ *     `q` and `eyeQ` locals. Re-deriving `slot / 8` for the eye row rather
+ *     than reusing the local is the last row: with the local, gcc shifts it
+ *     in place (`sll v1,v1,5`, clobbering the quotient) and schedules the
+ *     result one slot early; re-derived, cse shares the division but gives
+ *     the shift its own destination, which is the target's `sll v0,v1,5`
+ *     after `addiu a0,sp,0x10`. Dropping `q` the same way is also exact.
+ *   - nothing else. Both divisions really are divisions (`>> 2`/`>> 3` is six
+ *     instructions short), rect.w and rect.h really are re-stored at all
+ *     three sites (setting them once is eight short), and the fill order
+ *     really is x, y, w, h -- all six permutations were measured worse.
  *
- *   - **The two divisions are divisions, not shifts.** `slot` is an `s32`
- *     assigned from a `u8`, and gcc will not prove it non-negative across the
- *     `if (slot < 0x21)`, so `slot / 4` emits the round-toward-zero
- *     `bgez`/`addiu 3`/`sra` triple. Spelling both as `>> 2` and `>> 3` is
- *     six instructions short (81 rows, -6), which is exactly the two fix-ups
- *     -- so the target divides.
- *   - **rect.w and rect.h are stored at every site.** They are the same 8 and
- *     0x20 all three times and the target keeps them in $s6 and $s5, but it
- *     re-stores them: setting them once before the three blocks is eight
- *     instructions short (55 rows, -8).
- *   - **A named local for the shared column is inert.** The target computes
- *     `(slot - q * 4) << 4` once and reaches both mouth halves off it
- *     (`addiu s0,s0,0x308` after the first), but gcc already shares it -- a
- *     `col` local measures byte-identical.
- *   - The RECT is filled in field order x, y, w, h, which is what the target
- *     stores (`sh` at 0x10, 0x12, 0x14, 0x16 in that order at all three
- *     sites).
- *   - `D_800DFCA0` is read three times in the target, once per site, because
- *     each LoadImage call invalidates it -- writing it inline at every use, as
- *     below, is what reproduces that. `D_800DFCA4` and `D_800DFD94` are each
- *     addressed once and hoisted.
- *
- * What is left: the target stores `rect.x` and only then computes `rect.y`,
- * filling the gap with `addiu a0,sp,0x10` (the `&rect` argument); ours
- * computes y first and stores both together. The rest is `a0`/`a1` naming on
- * the three `faceSel[]` reads. Permuter food -- the length is already exact,
- * so this is `perm_ins_block` and `perm_temp_for_expr` territory rather than
- * anything readable off the target.
- *
- * One thing the note above asserts is now actually measured rather than
- * inferred. It read the RECT's source order straight off the target's store
- * order, which is the inference CLAUDE.md's `EscapeCaptureScreen` bullet warns
- * against -- sched2 moves stores, so the emitted order is often one nobody
- * wrote. Here it happens to be right: all six permutations of the four field
- * assignments, applied to all three blocks, are worse than x, y, w, h --
- * x,w,y,h and x,y,h,w 36, x,w,h,y 40, h,w,x,y and w,h,x,y 42, y,x,w,h 44,
- * against 28. So the fill order is not the lever and the residue really is
- * the scheduling knot the note describes.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE(
-    "asm/us/field/nonmatchings/field4", KawaiLoadEyesMouthTexToVram);
-#else
+ * `D_800DFCA0` is read three times, once per site, because each LoadImage
+ * call invalidates it; writing it inline at every use is what reproduces
+ * that. `D_800DFCA4` and `D_800DFD94` are each addressed once and hoisted. */
 s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
     RECT rect;
     u_long* src;
     s32 slot;
-    s32 q;
-    s32 eyeQ;
+    s32 sel;
 
     slot = faceSel[3];
     if (slot < 0x21) {
+        sel = faceSel[0];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFCA4[model->textureFaceId][faceSel[0]] << 9));
-        q = slot / 4;
-        rect.x = ((slot - q * 4) << 4) + 0x300;
-        rect.y = (q << 5) + 0x100;
+                        (D_800DFCA4[model->textureFaceId][sel] << 9));
+        rect.x = ((slot - (slot / 4) * 4) << 4) + 0x300;
+        rect.y = ((slot / 4) << 5) + 0x100;
         rect.w = 8;
         rect.h = 0x20;
         LoadImage(&rect, src);
+        sel = faceSel[1];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFCA4[model->textureFaceId][faceSel[1]] << 9));
-        rect.x = ((slot - q * 4) << 4) + 0x308;
-        rect.y = (q << 5) + 0x100;
+                        (D_800DFCA4[model->textureFaceId][sel] << 9));
+        rect.x = ((slot - (slot / 4) * 4) << 4) + 0x308;
+        rect.y = ((slot / 4) << 5) + 0x100;
         rect.w = 8;
         rect.h = 0x20;
         LoadImage(&rect, src);
+        sel = faceSel[2];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFD94[model->textureFaceId][faceSel[2]] << 9));
-        eyeQ = slot / 8;
-        rect.x = ((slot - eyeQ * 8) << 3) + 0x300;
-        rect.y = (eyeQ << 5) + 0x1A0;
+                        (D_800DFD94[model->textureFaceId][sel] << 9));
+        rect.x = ((slot - (slot / 8) * 8) << 3) + 0x300;
+        rect.y = ((slot / 8) << 5) + 0x1A0;
         rect.w = 8;
         rect.h = 0x20;
         LoadImage(&rect, src);
     }
     return 1;
 }
-#endif
 
 INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
 
