@@ -1553,6 +1553,13 @@ extern FieldBgOtSlot D_8009ACA2;
  *      on BgDrenv4E 208/3, and on the layer-3 sprite addPrim exactly inert.
  *      193 -> 83 -> 74 on three inserted blocks, none of which survives to the
  *      object.
+ *   5. both mask tests written `g_FieldEntityBgTrigger[entity] & (otSlot =
+ *      ...)` rather than the other way round: gcc evaluates a comparison's
+ *      operands in source order, so the swap decides which of the two loads
+ *      goes first. One row per site and they are independent (73 either way,
+ *      72 for both). Nothing else of that kind pays -- `run[0] >
+ *      D_80071A48[0].y - 0x100` for either wrap test or both, and the same
+ *      rewrite of the layer-1 x tests, are all exactly inert.
  *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
@@ -1705,8 +1712,8 @@ layer3:
                     }
                     entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
                     if (entity == 0 ||
-                        ((otSlot = buf->BgAnim[sprite + D_801144C8].mask) &
-                         g_FieldEntityBgTrigger[entity])) {
+                        (g_FieldEntityBgTrigger[entity] &
+                         (otSlot = buf->BgAnim[sprite + D_801144C8].mask))) {
                         addPrim(&buf->ot[D_8009ACA2.layer3], &buf->Bg2[sprite]);
                     }
                     sprite++;
@@ -1763,8 +1770,9 @@ layer4:
                         buf->Bg2[sprite].x0 < D_80071A48[2].x) {
                         entity = buf->BgAnim[sprite + D_801144C8].entity & 0x3F;
                         if (entity == 0 ||
-                            ((otSlot = buf->BgAnim[sprite + D_801144C8].mask) &
-                             g_FieldEntityBgTrigger[entity])) {
+                            (g_FieldEntityBgTrigger[entity] &
+                             (otSlot =
+                                  buf->BgAnim[sprite + D_801144C8].mask))) {
                             addPrim(
                                 &buf->ot[D_8009ACA2.layer4], &buf->Bg2[sprite]);
                         }
