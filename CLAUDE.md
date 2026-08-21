@@ -3002,7 +3002,7 @@ better or worse in the build:
 | `FieldBackgroundInitPackets` | 1937 | 1547 | 43/4, i.e. *identical* to the body it started from |
 | `FieldModelCreatePktsForPart` | 6030 | 4660 | 232/22 against 218/29, and one instruction short |
 | `FieldMain` | 1780 | 1285 | semantically wrong (a truncated assignment) |
-| `FieldEventRunInit` | 395 | 150 | 15/0 against 16/0 -- one row |
+| `FieldEventRunInit` | 395 | 150 | 15/0 against 16/0 -- one row, from 221,676 candidates |
 
 A fifth to a quarter of the score, for nothing. The two scorers weight
 different things -- the permuter charges 100 per insertion and 5 per register

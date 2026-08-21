@@ -1629,9 +1629,11 @@ void FieldInitDefaultValues(void) {
  *
  * That run is also the sharpest instance yet of the warning in CLAUDE.md step
  * 4 about the permuter's score: it went from a base of 395 to 150 -- a 62%
- * drop, and the best of three improvements over 51,000 iterations -- for
- * exactly **one** row in the real build. Do not read a score that size as
- * progress; re-measure every output with variant_eval. */
+ * drop, the best of **26** improvements over **221,676** candidates, run to a
+ * wall-clock limit rather than to exhaustion -- for exactly **one** row in the
+ * real build. The other 25 outputs are between 160 and 390 and none of them is
+ * worth opening. Do not read a score that size as progress; re-measure every
+ * output with variant_eval. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
 #else
