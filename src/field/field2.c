@@ -369,7 +369,513 @@ void FieldBGScrollUpdate(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/field/nonmatchings/field2", FieldBGUpdateDrawenv);
+s32 FieldCalcEaseInOut(s16, s16, u8, u8);  // extern
+s32 FieldCalcLinearStep(s16, s16, u8, u8); // extern
+extern s32 FieldCalcPointOnLine(s32 t, s32* line);
+extern s16 D_80071A48;
+extern s16 D_80071A4A;
+extern s16 D_80071A4C;
+extern s16 D_80071A4E;
+extern s16 D_80071A50;
+extern s16 D_80071A52;
+extern /*?*/ s32 D_80074EB0;
+extern /*?*/ s32 D_80074EB4;
+extern /*?*/ s32 D_80074EB8;
+extern /*?*/ s32 D_80074EE4;
+extern /*?*/ s32 D_80074EEA;
+extern /*?*/ s32 D_80074EF0;
+extern s16 D_8009AC04;
+extern u8 D_8009AC06;
+extern u8 D_8009AC07;
+extern u8 D_8009AC08;
+extern s16 D_8009AC0C;
+extern s16 D_8009AC0E;
+extern u8 D_8009AC2E;
+extern u8 D_8009AC81;
+extern u8 D_8009AC8F;
+extern u16 D_8009AC9A;
+extern u16 D_8009AC9C;
+extern u16 D_8009AC9E;
+extern u16 D_8009ACA0;
+extern u16 D_800E48E4;
+extern u16 D_800E48E6;
+extern s32 D_800E48EC;
+extern DR_ENV D_80100860;
+extern s16 D_80113F34;
+extern s16 D_80113F36;
+extern s16 D_80113F90;
+extern s16 D_80113F92;
+extern s16 D_80113FEC;
+extern s16 D_80113FEE;
+extern s16 D_80114048;
+extern s16 D_8011404A;
+extern s16 D_801140A4;
+extern s16 D_801140A6;
+extern s16 D_80114100;
+extern s16 D_80114102;
+extern s16 D_8011415C;
+extern s16 D_8011415E;
+extern s16 D_801141B8;
+extern s16 D_801141BA;
+extern s16 D_80114214;
+extern s16 D_80114216;
+extern s16 D_80114270;
+extern s16 D_80114272;
+extern u16 g_FieldScreenCenterX;
+extern u16 g_FieldScreenCenterY;
+
+/* The trigger block carries the background-scroll parameters at +0x18: four
+ * layer extents in tiles, then two banks of four scroll offsets that wrap
+ * against them (`offset %% (extent * 0x10)`). Spelled as a struct rather than
+ * `*(u16*)(g_FieldTriggers + 0x20)` for the reason field.c's header records:
+ * a struct load does not alias a store to a plain extern, so gcc may hoist
+ * it. */
+typedef struct {
+    /* 0x00 */ u8 unk00[0x18];
+    /* 0x18 */ u16 unk18;
+    /* 0x1A */ u16 unk1A;
+    /* 0x1C */ u16 unk1C;
+    /* 0x1E */ u16 unk1E;
+    /* 0x20 */ u16 unk20;
+    /* 0x22 */ u16 unk22;
+    /* 0x24 */ u16 unk24;
+    /* 0x26 */ u16 unk26;
+    /* 0x28 */ u16 unk28;
+    /* 0x2A */ u16 unk2A;
+    /* 0x2C */ u16 unk2C;
+    /* 0x2E */ u16 unk2E;
+} FieldBgScroll;
+
+/* What D_80071E40 really points at: the view matrix the rest of the overlay
+ * passes around as a MATRIX*, followed by the projection the GTE needs.
+ * unk24 is the screen distance SetGeomScreen takes; unk20/unk22 shift the
+ * screen centre. */
+typedef struct {
+    /* 0x00 */ MATRIX view;
+    /* 0x20 */ s16 unk20;
+    /* 0x22 */ s16 unk22;
+    /* 0x24 */ s16 unk24;
+} FieldCamera;
+
+/* 677 changed / 134 inserted at 1293 instructions against 1266, from an m2c
+ * seed that did not compile. Parked with the types settled.
+ *
+ * Four things the seed could not know:
+ *
+ * 1. **`g_FieldTriggers` is an `s32` holding an address**, so m2c's
+ *    `g_FieldTriggers->unk20` is not C at all. The block at +0x18 is the
+ *    background-scroll parameters -- four layer extents in tiles at
+ *    0x18..0x1E, then two banks of four scroll offsets at 0x20..0x2E that
+ *    wrap against them, `offset %% (extent * 0x10)`. Reached through
+ *    `FieldBgScroll` rather than `*(u16*)(g_FieldTriggers + 0x20)` for the
+ *    reason field.c's own header records: a struct load does not alias a
+ *    store to a plain extern, so gcc may hoist it.
+ * 2. **`D_80071E40` is not a `MATRIX*`**, although the rest of the overlay
+ *    passes it around as one. Offsets 0x20/0x22/0x24 sit past the matrix:
+ *    `unk24` is the screen distance `SetGeomScreen` takes and `unk20`/`unk22`
+ *    shift the screen centre. `FieldCamera` here is a local cast so the
+ *    matching callers in field.c keep their `MATRIX*`.
+ * 3. **The entity reads are byte offsets against `s32`/`u16` externs**, so
+ *    every `*(&D_80074EB0 + modelId * 0x84)` in the seed was scaled a second
+ *    time -- four times over for the `s32`s. The target references those
+ *    interior labels directly (`%hi(D_80074EB0)`, and 181 of its 1266
+ *    instructions are `$at` expansions), so the byte-offset form is right:
+ *    `*(s32*)((u8*)&D_80074EB0 + off)`. The widths are read off the target,
+ *    `lw` at 0xC/0x10/0x14 and `lhu` at 0x40/0x46/0x4C.
+ * 4. `unksp1A` is the second half of the screen position
+ *    `FieldCalcWorldToScreenPos` writes, so the two stack objects are an
+ *    `SVECTOR` at 0x10 and a `DVECTOR` at 0x18. `DVECTOR` was missing from
+ *    `include/psxsdk/libgte.h` and is added there.
+ *
+ * Then two of the levers this file already records, worth five instructions
+ * each: `u8 unusedLocals[0x18]` for the frame (the target is -0x70 against
+ * our -0x58, with the same saved-register set), and one entity-offset
+ * variable computed once rather than m2c's two.
+ *
+ * What is left is a control-flow difference, not scheduling: the target has
+ * a `slti v0,v1,2` / `bnez` range test and an `addiu a0,sp,0x10` that this
+ * body does not emit at all, and four `lhu`/`ori` read-modify-writes that it
+ * does and the target does not. Read the dispatch against the target's
+ * branch structure before touching anything else -- CLAUDE.md's rule about a
+ * folded range test in front of a `switch` deleting the switch's own bounds
+ * check is the first thing to check here.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGUpdateDrawenv);
+#else
+void FieldBGUpdateDrawenv(s32 arg0) {
+    s32 temp_v1;
+
+    u8 unusedLocals[0x18];
+    SVECTOR pos;
+    DVECTOR screen;
+    u16 sp20;
+    u16 sp28;
+    u16 sp30;
+    DR_ENV* var_a0;
+    DR_ENV* var_a0_2;
+    DR_ENV* var_a0_3;
+    s16 temp_a2_2;
+    s16 temp_a3;
+    s16 var_v0_2;
+    s16* var_a1;
+    s16* var_a1_2;
+    s16* var_a1_3;
+    s32 temp_hi;
+    s32 temp_hi_2;
+    s32 temp_hi_3;
+    s32 temp_hi_4;
+    s32 temp_hi_5;
+    s32 temp_hi_6;
+    s32 temp_s3;
+    s32 temp_s5;
+    u8 var_v0;
+
+    ((FieldBgScroll*)g_FieldTriggers)->unk20 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk20 + D_8009AC9A);
+    ((FieldBgScroll*)g_FieldTriggers)->unk22 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk22 + D_8009AC9C);
+    ((FieldBgScroll*)g_FieldTriggers)->unk20 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk20 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk18 * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->unk22 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk22 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1A * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->unk24 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk24 + D_8009AC9E);
+    ((FieldBgScroll*)g_FieldTriggers)->unk26 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk26 + D_8009ACA0);
+    ((FieldBgScroll*)g_FieldTriggers)->unk24 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk24 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1C * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->unk26 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk26 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1E * 0x10));
+    SetGeomScreen((s32)((FieldCamera*)D_80071E40)->unk24);
+    if ((g_FieldMovieStreamActive == 0) || (D_8009AC2E != 0)) {
+        if (D_8009A100 == 0) {
+            switch (D_8009AC08) { // irregular
+            case 1:
+                g_FieldBGCameraHeightBias =
+                    FieldCalcLinearStep(
+                        D_8009AC0C, D_8009AC0E, D_8009AC06, D_8009AC07) &
+                    0xFF;
+                if (D_8009AC07 != D_8009AC06) {
+                    var_v0 = D_8009AC07 + 1;
+                block_12:
+                    D_8009AC07 = var_v0;
+                } else {
+                block_11:
+                    D_8009AC08 = 3;
+                }
+                break;
+            case 2:
+                g_FieldBGCameraHeightBias =
+                    FieldCalcEaseInOut(
+                        D_8009AC0C, D_8009AC0E, D_8009AC06, D_8009AC07) &
+                    0xFF;
+                var_v0 = D_8009AC07 + 1;
+                if (D_8009AC07 == D_8009AC06) {
+                    goto block_11;
+                }
+                goto block_12;
+            }
+            temp_v1 = g_PlayerModelId * 0x84;
+            pos.vx = ((s32) * (s32*)((u8*)&D_80074EB0 + temp_v1) >> 0xC) +
+                     *(u16*)((u8*)&D_80074EE4 + temp_v1);
+            pos.vy = ((s32) * (s32*)((u8*)&D_80074EB4 + temp_v1) >> 0xC) +
+                     *(u16*)((u8*)&D_80074EEA + temp_v1);
+            pos.vz =
+                ((s32) * (s32*)((u8*)&D_80074EB8 + temp_v1) >> 0xC) +
+                *(u16*)((u8*)&D_80074EF0 + temp_v1) + ((s16)D_8009AC04 >> 2);
+            FieldCalcWorldToScreenPos(&pos, &screen);
+            g_FieldExitArrowX = screen.vx + g_FieldScreenCenterX;
+            pos.vx = (s16)((s32) * (s32*)((u8*)&D_80074EB0 + temp_v1) >> 0xC);
+            g_FieldExitArrowY = screen.vy + g_FieldScreenCenterY;
+            pos.vy = (s16)((s32) * (s32*)((u8*)&D_80074EB4 + temp_v1) >> 0xC);
+            pos.vz = ((s32) * (s32*)((u8*)&D_80074EB8 + temp_v1) >> 0xC) +
+                     g_FieldBGCameraHeightBias;
+            D_800E48EC = FieldCalcWorldToScreenPos(&pos, &screen);
+            D_800E48E4 = screen.vx;
+            D_800E48E6 = screen.vy;
+            FieldBGClampPos((s16*)&screen);
+            FieldCalcPointOnLine(g_FieldTriggers, &screen);
+            temp_s5 = (s16)(((s32)((s16)screen.vx *
+                                   ((FieldBgScroll*)g_FieldTriggers)->unk28) >>
+                             8) +
+                            ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk20
+                                   << 0x10) >>
+                             0x14)) %
+                      (s16)((FieldBgScroll*)g_FieldTriggers)->unk18;
+            temp_hi = (s16)(((s32)(screen.vy *
+                                   ((FieldBgScroll*)g_FieldTriggers)->unk2A) >>
+                             8) +
+                            ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk22
+                                   << 0x10) >>
+                             0x14)) %
+                      (s16)((FieldBgScroll*)g_FieldTriggers)->unk1A;
+            temp_hi_2 =
+                (s16)(((s32)((s16)screen.vx *
+                             ((FieldBgScroll*)g_FieldTriggers)->unk2C) >>
+                       8) +
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk24
+                             << 0x10) >>
+                       0x14)) %
+                (s16)((FieldBgScroll*)g_FieldTriggers)->unk1C;
+            temp_hi_3 =
+                (s16)(((s32)(screen.vy *
+                             ((FieldBgScroll*)g_FieldTriggers)->unk2E) >>
+                       8) +
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk26
+                             << 0x10) >>
+                       0x14)) %
+                (s16)((FieldBgScroll*)g_FieldTriggers)->unk1E;
+            g_FieldExitArrowY = (u16)g_FieldExitArrowY - screen.vy;
+            g_FieldExitArrowX = (u16)g_FieldExitArrowX - screen.vx;
+            sp20 = (u16)temp_hi;
+            sp28 = (u16)temp_hi_2;
+            sp30 = (u16)temp_hi_3;
+            if (arg0 == g_FieldRenderData) {
+                D_80113F34 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_80113F36 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy);
+                SetDrawEnv(arg0 + 0x41D4, (DRAWENV*)(&D_80113F34 - 8));
+                D_8011415C =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_8011415E =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy);
+                SetDrawEnv(arg0 + 0x4294, (DRAWENV*)(&D_8011415C - 8));
+                D_80114214 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_80114216 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy);
+                SetDrawEnv(arg0 + 0x42D4, (DRAWENV*)(&D_80114214 - 8));
+                D_80113FEC = (s8)D_8009AC81 + (g_FieldScreenCenterX - temp_s5);
+                D_80113FEE = (s8)D_8009AC8F + (g_FieldScreenCenterY - temp_hi);
+                SetDrawEnv(arg0 + 0x4214, (DRAWENV*)(&D_80113FEC - 8));
+                var_a0 = arg0 + 0x4254;
+                D_801140A4 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - temp_hi_2);
+                D_801140A6 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - temp_hi_3);
+                var_a1 = &D_801140A4 - 8;
+            } else {
+                D_80113F90 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_80113F92 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy) + 0xE8;
+                SetDrawEnv(&D_80100860, (DRAWENV*)(&D_80113F90 - 8));
+                D_801141B8 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_801141BA =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy) + 0xE8;
+                SetDrawEnv(&D_80100860 + 0xC0, (DRAWENV*)(&D_801141B8 - 8));
+                D_80114270 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - screen.vx);
+                D_80114272 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - screen.vy) + 0xE8;
+                SetDrawEnv(&D_80100860 + 0x100, (DRAWENV*)(&D_80114270 - 8));
+                D_80114048 = (s8)D_8009AC81 + (g_FieldScreenCenterX - temp_s5);
+                D_8011404A =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - temp_hi) + 0xE8;
+                SetDrawEnv(&D_80100860 + 0x40, (DRAWENV*)(&D_80114048 - 8));
+                var_a0 = &D_80100860 + 0x80;
+                var_a1 = &D_80114100 - 8;
+                D_80114100 =
+                    (s8)D_8009AC81 + (g_FieldScreenCenterX - temp_hi_2);
+                D_80114102 =
+                    (s8)D_8009AC8F + (g_FieldScreenCenterY - temp_hi_3) + 0xE8;
+            }
+            SetDrawEnv(var_a0, (DRAWENV*)var_a1);
+            D_80071E38 = -(s16)screen.vx;
+            D_80071A48 =
+                ((screen.vx + 0x140) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+            D_80071A4C =
+                ((temp_s5 + 0x140) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+            D_80071E3C = -screen.vy;
+            D_80071A4E =
+                ((sp20 + 0xE8) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+            D_80071A4A =
+                ((screen.vy + 0xE8) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+            D_80071A50 =
+                ((sp28 + 0x140) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+            D_80071A52 =
+                ((sp30 + 0xE8) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+            return;
+        }
+        temp_a3 = -D_80071E38;
+        temp_a2_2 = -D_80071E3C;
+        temp_s3 =
+            (s16)(((s32)(temp_a3 * ((FieldBgScroll*)g_FieldTriggers)->unk28) >>
+                   8) +
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk20 << 0x10) >>
+                   0x14)) %
+            (s16)((FieldBgScroll*)g_FieldTriggers)->unk18;
+        temp_hi_4 =
+            (s16)(((s32)(temp_a2_2 *
+                         ((FieldBgScroll*)g_FieldTriggers)->unk2A) >>
+                   8) +
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk22 << 0x10) >>
+                   0x14)) %
+            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1A;
+        temp_hi_5 =
+            (s16)(((s32)(temp_a3 * ((FieldBgScroll*)g_FieldTriggers)->unk2C) >>
+                   8) +
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk24 << 0x10) >>
+                   0x14)) %
+            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1C;
+        temp_hi_6 =
+            (s16)(((s32)(temp_a2_2 *
+                         ((FieldBgScroll*)g_FieldTriggers)->unk2E) >>
+                   8) +
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk26 << 0x10) >>
+                   0x14)) %
+            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1E;
+        sp20 = (u16)temp_hi_4;
+        sp28 = (u16)temp_hi_5;
+        sp30 = (u16)temp_hi_6;
+        if (arg0 == g_FieldRenderData) {
+            D_80113F34 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 D_80071E38);
+            D_80113F36 = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + D_80071E3C);
+            SetDrawEnv(arg0 + 0x41D4, (DRAWENV*)(&D_80113F34 - 8));
+            D_8011415C =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 (u16)D_80071E38);
+            D_8011415E = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C);
+            SetDrawEnv(arg0 + 0x4294, (DRAWENV*)(&D_8011415C - 8));
+            D_80114214 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 (u16)D_80071E38);
+            D_80114216 = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C);
+            SetDrawEnv(arg0 + 0x42D4, (DRAWENV*)(&D_80114214 - 8));
+            D_80113FEC =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
+                 temp_s3);
+            D_80113FEE =
+                (s8)D_8009AC8F +
+                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
+                 temp_hi_4);
+            SetDrawEnv(arg0 + 0x4214, (DRAWENV*)(&D_80113FEC - 8));
+            var_a0_2 = arg0 + 0x4254;
+            D_801140A4 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
+                 temp_hi_5);
+            D_801140A6 =
+                (s8)D_8009AC8F +
+                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
+                 temp_hi_6);
+            var_a1_2 = &D_801140A4 - 8;
+        } else {
+            D_80113F90 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 D_80071E38);
+            D_80113F92 = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + D_80071E3C) +
+                         0xE8;
+            SetDrawEnv(&D_80100860, (DRAWENV*)(&D_80113F90 - 8));
+            D_801141B8 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 (u16)D_80071E38);
+            D_801141BA = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C) +
+                         0xE8;
+            SetDrawEnv(&D_80100860 + 0xC0, (DRAWENV*)(&D_801141B8 - 8));
+            D_80114270 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
+                 (u16)D_80071E38);
+            D_80114272 = (s8)D_8009AC8F +
+                         (g_FieldScreenCenterY +
+                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C) +
+                         0xE8;
+            SetDrawEnv(&D_80100860 + 0x100, (DRAWENV*)(&D_80114270 - 8));
+            D_80114048 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
+                 temp_s3);
+            D_8011404A =
+                (s8)D_8009AC8F +
+                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
+                 temp_hi_4) +
+                0xE8;
+            SetDrawEnv(&D_80100860 + 0x40, (DRAWENV*)(&D_80114048 - 8));
+            var_a0_2 = &D_80100860 + 0x80;
+            var_a1_2 = &D_80114100 - 8;
+            D_80114100 =
+                (s8)D_8009AC81 +
+                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
+                 temp_hi_5);
+            D_80114102 =
+                (s8)D_8009AC8F +
+                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
+                 temp_hi_6) +
+                0xE8;
+        }
+        SetDrawEnv(var_a0_2, (DRAWENV*)var_a1_2);
+        D_80071A48 =
+            ((0x140 - (u16)D_80071E38) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+        D_80071A4A =
+            ((0xE8 - (u16)D_80071E3C) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+        D_80071A4C =
+            ((temp_s3 + 0x140) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+        D_80071A4E = ((sp20 + 0xE8) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+        D_80071A50 = ((sp28 + 0x140) - g_FieldScreenCenterX) - (s8)D_8009AC81;
+        D_80071A52 = ((sp30 + 0xE8) - g_FieldScreenCenterY) - (s8)D_8009AC8F;
+        return;
+    }
+    if (g_FieldCameraMatrixSel == 1) {
+        var_a0_3 = arg0 + 0x41D4;
+        if (arg0 == g_FieldRenderData) {
+            D_80113F34 = g_FieldScreenCenterX + (u16)D_80071E38;
+            D_80113F36 = g_FieldScreenCenterY + (u16)D_80071E3C;
+            var_a1_3 = &D_80113F34 - 8;
+        } else {
+            var_a0_3 = &D_80100860;
+            var_a1_3 = &D_80113F90 - 8;
+            var_v0_2 = g_FieldScreenCenterY + (u16)D_80071E3C + 0xE8;
+            D_80113F90 = g_FieldScreenCenterX + (u16)D_80071E38;
+            goto block_29;
+        }
+    } else {
+        var_a0_3 = arg0 + 0x41D4;
+        if (arg0 == g_FieldRenderData) {
+            D_80113F34 =
+                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20;
+            D_80113F36 =
+                g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22;
+            var_a1_3 = &D_80113F34 - 8;
+        } else {
+            var_a0_3 = &D_80100860;
+            D_80113F90 =
+                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20;
+            var_a1_3 = &D_80113F90 - 8;
+            var_v0_2 =
+                g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22 + 0xE8;
+        block_29:
+            D_80113F92 = var_v0_2;
+        }
+    }
+    SetDrawEnv(var_a0_3, (DRAWENV*)var_a1_3);
+}
+#endif
 
 /////////////////////////////////////////////////
 // Begin of field_entity.c

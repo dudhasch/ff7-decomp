@@ -22,6 +22,10 @@ typedef struct {
 } SVECTOR;            // size = 0x8
 
 typedef struct {
+    short vx, vy; // Screen coordinates
+} DVECTOR;        // size = 0x4
+
+typedef struct {
     u_char r, g, b; // Color palette
     u_char cd;      // GPU code
 } CVECTOR;
