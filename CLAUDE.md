@@ -1635,6 +1635,19 @@ a near-miss, in rough order of frequency:
   `perm_temp_for_expr` finds; neither is reachable by reasoning about the
   target, because neither changes what the code does. When the residue is pure
   renaming, raise those two weights and let the search run.
+
+  The plain `do { } while (0);` form of the same pass pays on *scheduling*
+  residue too, and there the placement is equally arbitrary: one after the
+  layer-4 run walk's inner `do`/`while` in `FieldBackgroundInitPackets` -- inside
+  the zero-trip `if`, after the loop closes -- is worth eight rows, while the
+  same barrier after layer 2's inner loop is worth nothing, after layer 3's is
+  inert on top of it, and doubling the layer-4 one gives the whole eight rows
+  back. Three more in `AddBackgroundToRender`, each at one specific `addPrim`
+  and worth 9 to 56 rows, with the same behaviour at every neighbouring site.
+  Four of the six levers that took those two functions from 193/1 and 55/14 to
+  65/0 and 43/4 are inserted blocks, and not one of them is predictable from
+  the target -- the pass to raise is `perm_ins_block`, and the only way to
+  place one is to search.
 * **When two locals hold each other's register and nothing you write moves
   them, you are looking at `allocno_compare`, and only two of its three terms
   are reachable from C.** gcc 2.6.3 sorts global allocnos by
