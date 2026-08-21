@@ -2827,6 +2827,23 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
  * computing `poly` before the `if (pass != 0)` rather than after, to stop
  * `part->data` being reloaded at the join (225/29).
  *
+ * The arm-swap and flag-local dimensions are now closed *exhaustively*, not
+ * sampled. Both were written as `PERM_GENERAL` macros at all four textured
+ * loops and handed to decomp-permuter in enumerate mode: 256 candidates,
+ * every one compiled, forty seconds, and the search terminates by itself
+ * rather than walking forever. Re-measured with `checkfn.py`, every single
+ * combination other than the one here is longer -- each of the four
+ * single-site arm swaps is exactly +1 instruction (243/30, 237/30, 233/30,
+ * 227/30 at 728) and the ternary spelling of the clut is inert at every
+ * site. There is no asymmetry to find: all four loops want the same form.
+ *
+ * That run is also the clearest evidence for the rule CLAUDE.md now records
+ * about this project's permuter scores. The scorer ranked the candidates
+ * monotonically by how many sites were in the *longer* form -- 5570 for all
+ * four swapped, 5685 for three, 5800 for two, against 6030 for the body
+ * here, which is the shortest and the only one at 727. The score improves as
+ * the code gets further away.
+ *
  * What is left is three clusters. A rotation of `$s3`/`$s4`/`$s5`/`$s6` --
  * the target ranks `f` last of the four and we rank it first, with `poly`,
  * its `+0x14` giv and `out` all shifted one place -- which is
