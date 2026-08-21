@@ -454,7 +454,28 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiLightingApplyToModel);
  * two rows are the prologue: the target fills the delay slot of the part-data
  * load with the normal table's address, this build with a nop and the address
  * after; neither statement order reproduces it. A permuter candidate.
- */
+
+ *
+ * 34 rows / 2 insertions -> 32 / 0, on where the scratchpad pointer is set
+ * up. The target materialises `lui t1,0x1F80` in the *delay slot* of the
+ * early-return branch, i.e. it is the last thing the entry block computes;
+ * assigned first, as the seed had it, it goes ahead of the `lw` of
+ * part->data and the dependent `lw v0,0(v1)` then pays a nop. Four
+ * placements measured: after `normals` and before the `if` is 32/0, first
+ * is 34/2, between `data` and `normals` 34/2, and after the `if` -- which is
+ * where the delay slot suggests it belongs -- is 38/2.
+ *
+ * What is left is one register swap and nothing else: `count` and `c` hold
+ * each other's register ($t2/$t3), and every one of the 32 rows is that.
+ * Declaration order does not reach it -- all five orderings of the nine
+ * locals, including `c` first in the function and `c` either side of
+ * `count`, measure byte-identical, so the standing rule holds and the
+ * same-mode-live-together exception does not apply here. The length is
+ * exact and there are no insertions, which makes this the cleanest
+ * perm_ins_block target in the unit: what is needed is a dead conditional
+ * that changes one of the two allocnos' rank without emitting anything.
+ * Its sibling KawaiSetVertexColorFromLighting above shares the GTE idiom
+ * and the polygon strides exactly, so a find here should transfer. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiLightingApplyToPolyColor);
@@ -470,9 +491,9 @@ void KawaiLightingApplyToPolyColor(FieldModelPart* part, s32 redo) {
     u32 i;
     u32 k;
 
-    scratch = (u8*)0x1F800000;
     data = part->data;
     normals = (u8*)D_800DF520;
+    scratch = (u8*)0x1F800000;
     if ((*(u32*)data & 2) && redo == 0) {
         return;
     }
