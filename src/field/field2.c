@@ -2088,16 +2088,45 @@ extern u8 D_8009C6D8;
  *    run in the other direction - there a dead store before a call is what
  *    *buys* the callee-saved register.
  */
-/* Check for a random or scripted battle this frame: roll the encounter, pick
- * the battle from the field's encounter table, and kick off the transition if
- * one triggers. m2c seed; residual is the encounter-table regalloc and the
- * divide scheduling. Pinned pending a permuter pass. */
+/* Check for a random or scripted battle this frame. The field's encounter
+ * table is one of two 0x18-byte blocks (D_8009AC30 picks the second), holding
+ * four "special" formations with their own 6- or 5-bit rates, a fallback, and
+ * five ordinary formations. The step counter advances by the player's move
+ * speed over the table's divisor; when a roll against it succeeds, the four
+ * specials are tried in order against a cumulative rate, and failing those the
+ * five ordinary slots are walked twice -- once, and again if the first walk
+ * picked the same formation as last time.
+ *
+ * 83 changed / 4 inserted -> 62 / 1, on one line: the two five-slot walks are
+ * indexed off the counter, `((u16*)enc)[i + 1]`, not walked with a second
+ * pointer. The pointer form makes `p` a biv beside `i`, and the two then trade
+ * $a0 and $a1 -- with the pointer's initialising `move` scheduled next to the
+ * counter's instead of after the fallback read, which is where the target puts
+ * it. Neither the order of the two initialisers, nor the order of the two
+ * increments, nor all four combinations moves it; only removing the second biv
+ * does. Same lever as the `d[i * 8 + k]` bullet in CLAUDE.md, and worth 21
+ * rows plus 3 of the 4 insertions.
+ *
+ * What is left is one register: the target keeps `&D_8009ABF6` in $s2 from the
+ * `D_8009ABF6 != D_8007E774` test through the second walk -- `addiu s2,...` and
+ * then `lh v1,0(s2)` / `sh v0,0(s2)` -- where this build fuses the `%lo` into
+ * each access and rebuilds the address through the `$at` macro for the store.
+ * That is the one insertion, and the frame is 4 bytes smaller for it, so every
+ * saved-register offset and every branch displacement in the function reads
+ * wrong: 62 rows from one allocation. The address is referenced on both sides
+ * of a `FieldGetNextRandomU8` call, which is exactly the shape that should
+ * give it a callee-saved register, so what is missing is whatever makes cse
+ * relate the two references rather than fusing each one.
+ *
+ * Measured and inert, all 62/1: `roll` as s32, u32, u16 or s16 (the `(u8)`
+ * casts at the comparisons carry the masking either way). `u8 sum` is 61/1 --
+ * one row, and it makes the accumulator's width a semantic question for no
+ * structural gain, so it is not taken. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBattleCheck);
 #else
 void FieldBattleCheck(void) {
     FieldEncounterTable* enc;
-    u16* p;
     s32 i;
     s32 sum;
     s32 rate;
@@ -2176,8 +2205,8 @@ void FieldBattleCheck(void) {
                 sum = 0;
                 roll = FieldGetNextRandomU8() >> 2;
                 D_8009ABF6 = enc->fallback & 0x3FF;
-                for (i = 0, p = (u16*)enc; i < 5; i++, p++) {
-                    slot = p[1];
+                for (i = 0; i < 5; i++) {
+                    slot = ((u16*)enc)[i + 1];
                     sum += (s32)(slot << 16) >> 26;
                     if ((u8)roll < (u8)sum) {
                         D_8009ABF6 = slot & 0x3FF;
@@ -2191,8 +2220,8 @@ void FieldBattleCheck(void) {
                 sum = 0;
                 roll = FieldGetNextRandomU8() >> 2;
                 D_8009ABF6 = enc->fallback & 0x3FF;
-                for (i = 0, p = (u16*)enc; i < 5; i++, p++) {
-                    slot = p[1];
+                for (i = 0; i < 5; i++) {
+                    slot = ((u16*)enc)[i + 1];
                     sum += (s32)(slot << 16) >> 26;
                     if ((u8)roll < (u8)sum) {
                         D_8009ABF6 = slot & 0x3FF;
