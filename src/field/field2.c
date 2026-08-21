@@ -2934,69 +2934,52 @@ out:
  * entity crossed the line this frame and faces it within +/-64, push and
  * isOnLine), leaving arms touch-off.
  *
- * 91 rows -> 58. Three of the corrections are program, not codegen:
+ * Six corrections, four of them program rather than codegen:
  *   - the return value is only raised for a line whose `slipDisabled` byte is
  *     1, not for every line in range. The target reads +0x16 for that test and
- *     +0x0E (touch) for the touch-on test right after it; the old body read
- *     +0x0E for both and set `hit` unconditionally.
- *   - the four-way sign ladder is *not* negated. `across` is set when one of
- *     the four terms holds, and the target's first branch (`bltz crossFrom` to
- *     the second term, else `bltz crossTo` straight to the store) says so
- *     plainly. Worth 5 rows on its own.
- *   - the facing test needs an `s32` local: `(u8)(...) >= 0x80` inline gives
- *     `sltiu`, through a local `slti`, which is what the target has.
- * And the shape of the walk: `line` is a walking `FieldLine*` used for the
- * SqrDistToLine call and for `pos.x1`, while every other field is reached as
- * `lines[i].<field>`. That is not a scaffold -- it is what the target's two
- * base registers say. Writing all the `pos` fields through `line` measures 88,
- * all of them through `lines[i]` measures 79, and one pointer for everything
- * (either spelling) 91-96.
+ *     +0x0E (touch) for the touch-on test right after it.
+ *   - the four-way sign ladder is *not* negated; `across` is set when one of
+ *     the four terms holds, which the target's first branch says plainly.
+ *   - `to[0]`/`to[1]` are `dest->vx >> 12` and `dest->vy >> 12`, not the raw
+ *     members; mixing raw 20.12 coordinates into a buffer whose other four
+ *     words are already shifted was a bug.
+ *   - the `else { continue; }` on the from/nearest equality test is a
+ *     fallthrough into the two stores, not a skip: an entity standing exactly
+ *     on a line has to raise its push request.
+ *   - `from[k] != nearest[k]`, not the reverse -- gcc 2.6.3 evaluates a
+ *     comparison's operands in source order and the target loads `from` first.
+ *   - `(s32)(entity->SolidRange * entity->SolidRange)`: two `u16` operands
+ *     promote to *unsigned* int, so the compare came out `sltu` for `slt`.
  *
- * The 58 rows left are one fact with a long tail: the target's second base is
- * `lines + 0x0E` and it keeps the counter `i` alive beside it, where gcc bases
- * the giv at +0 and then eliminates `i` entirely, rewriting the exit test as a
- * pointer compare against `lines + 0x300`. Every field offset therefore reads
- * 0x0E high and the saved-register list is one short (the target uses s0..s8,
- * this uses s0..s7). Nothing tried moves it: `&lines[i]` for the call, the
- * flags through a separate `u8*`, indexing everything, walking everything.
- * Codegen pinned via MASPSX_OVERRIDE; the #else is the verified C.
+ * The last 40 rows were the shape of the walk, and the answer is the one the
+ * earlier notes here ruled out -- because they measured it against a body that
+ * was still the wrong program, and none of those numbers transferred:
  *
- * 58 rows / -3 instructions -> 40 / -1, and three of the four corrections are
- * *semantic* -- the parked body was not the same program:
- *
- *   - `to[0]` and `to[1]` are `dest->vx >> 12` and `dest->vy >> 12`, not the
- *     raw members. The target shifts them (`lw`/`sra 12`/`sw` into
- *     0x1F800010 and 0x1F800014) and so does the near-clone
- *     FieldEntityGatewayCheck a hundred lines below, which has the identical
- *     prologue. Mixing raw 20.12 coordinates into a buffer whose other four
- *     words are already shifted was simply a bug; it is +2 of the -3.
- *   - The `else { continue; }` on the from/nearest equality test is a
- *     **fallthrough into the two stores**, not a skip. The target's
- *     `beq $v1,$v0,.L800AA110` jumps *to* `requestPushScript`/`isOnLine`
- *     when both components are equal; the parked body skipped them, so an
- *     entity standing exactly on a line never raised its push request.
- *   - The proximity test reads `from[k] != nearest[k]`, not the reverse:
- *     gcc 2.6.3 evaluates a comparison's operands in source order, and the
- *     target loads `from` first at both halves.
- *   - `(s32)(entity->SolidRange * entity->SolidRange)` -- two `u16` operands
- *     promote to *unsigned* int in gcc 2.6.3, so the comparison came out
- *     `sltu` where the target has `slt`.
- *
- * The remaining 40 rows are still the biv elimination described above, now
- * measured against a body that is the right program and one instruction from
- * the right length. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityLineCheck);
-#else
+ *   - every field goes through the walking pointer, none through `lines[i]`.
+ *     The subscript form gives the second base a giv at +0 where the target
+ *     has `lines + 0x0E`, so every displacement in the loop reads 0x0E high;
+ *     40 rows to 24, and the whole loop body then matches to the byte.
+ *   - the walking pointer *is the parameter*. With a separate `FieldLine*
+ *     line = lines`, gcc merges the two and emits the copy where the loop
+ *     starts; using `lines` itself puts `move s2,a1` in the entry block where
+ *     the target has it, and the prologue's save order follows. 24 to 9.
+ *   - `angle = lines->proximityAngle;` into an `s32` local after the store,
+ *     read at the use. Written `delta = (u8)(lines->proximityAngle - ...)`,
+ *     cse substitutes the call's return register for the load -- gcc trusts a
+ *     `u8`-returning callee to have extended it, so the substitution is free
+ *     and the target's `lbu` disappears, which is also the one instruction
+ *     this was short. A `u8` local is inert (cse coalesces it with the return
+ *     value); `s16` and `s32` both match, and a `volatile` cast at the use
+ *     reaches 1 row. 9 to 0. */
 u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     s32* from;
     s32* to;
     s32* nearest;
-    FieldLine* line;
     s32 sqrDist;
     s32 crossFrom;
     s32 crossTo;
     u8 hit;
+    s32 angle;
     s32 delta;
     s32 i;
 
@@ -3010,53 +2993,53 @@ u8 FieldEntityLineCheck(FieldEntity* entity, FieldLine* lines, VECTOR* dest) {
     to[1] = dest->vy >> 12;
     to[2] = entity->PosZ >> 12;
     hit = 0;
-    for (i = 0, line = lines; i < 32; i++, line++) {
-        if (lines[i].isActive != 1) {
+    for (i = 0; i < 32; i++, lines++) {
+        if (lines->isActive != 1) {
             continue;
         }
-        lines[i].isOnLine = 0;
-        sqrDist = FieldEntitySqrDistToLine(line, from, nearest);
+        lines->isOnLine = 0;
+        sqrDist = FieldEntitySqrDistToLine(lines, from, nearest);
         if (sqrDist != -1 &&
             sqrDist < (s32)(entity->SolidRange * entity->SolidRange)) {
-            if (lines[i].slipDisabled == 1) {
+            if (lines->slipDisabled == 1) {
                 hit = 1;
             }
-            if (lines[i].touch == 0) {
-                lines[i].requestTouchOnScript = 1;
+            if (lines->touch == 0) {
+                lines->requestTouchOnScript = 1;
             }
-            lines[i].touch = 1;
+            lines->touch = 1;
             crossFrom =
-                (lines[i].pos.x2 - line->pos.x1) * (from[1] - lines[i].pos.y1) -
-                (from[0] - line->pos.x1) * (lines[i].pos.y2 - lines[i].pos.y1);
+                (lines->pos.x2 - lines->pos.x1) * (from[1] - lines->pos.y1) -
+                (from[0] - lines->pos.x1) * (lines->pos.y2 - lines->pos.y1);
             crossTo =
-                (lines[i].pos.x2 - line->pos.x1) * (to[1] - lines[i].pos.y1) -
-                (to[0] - line->pos.x1) * (lines[i].pos.y2 - lines[i].pos.y1);
+                (lines->pos.x2 - lines->pos.x1) * (to[1] - lines->pos.y1) -
+                (to[0] - lines->pos.x1) * (lines->pos.y2 - lines->pos.y1);
             if ((crossFrom >= 0 && crossTo < 0) ||
                 (crossTo >= 0 && crossFrom < 0) ||
                 (crossFrom > 0 && crossTo <= 0) ||
                 (crossTo > 0 && crossFrom <= 0)) {
-                lines[i].across = 1;
+                lines->across = 1;
             }
             if (from[0] != nearest[0] || from[1] != nearest[1]) {
-                lines[i].proximityAngle = FieldEntityDirByVec(
+                lines->proximityAngle = FieldEntityDirByVec(
                     (VECTOR*)from, (VECTOR*)nearest, &sqrDist);
-                delta = (u8)(lines[i].proximityAngle - entity->MoveDir + 0x40);
+                angle = lines->proximityAngle;
+                delta = (u8)(angle - entity->MoveDir + 0x40);
                 if (delta >= 0x80) {
                     continue;
                 }
             }
-            lines[i].requestPushScript = 1;
-            lines[i].isOnLine = 1;
+            lines->requestPushScript = 1;
+            lines->isOnLine = 1;
         } else {
-            if (lines[i].touch == 1) {
-                lines[i].requestTouchOffScript = 1;
+            if (lines->touch == 1) {
+                lines->requestTouchOffScript = 1;
             }
-            lines[i].touch = 0;
+            lines->touch = 0;
         }
     }
     return hit;
 }
-#endif
 
 /* Walk the 32 field lines against one entity: enter/leave each line's trigger
  * volume, and fire its on/off scripts. The `active = 1;` at the top of the loop
