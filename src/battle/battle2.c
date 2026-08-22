@@ -1534,9 +1534,36 @@ void func_800D7A88(s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4,
     p->unkA = arg5;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7B1C);
+// Queue a func_800D7888 effect on one of model arg1's sub-parts. The part is
+// picked by the byte at +0x31 and the angle comes from the halfword at +0x1A.
+//
+// The byte-offset addressing is what the target has: a scaled subscript
+// (`D_801518E4[arg1].member`) folds the symbol into one base register, where
+// an `off` local computed separately leaves `(plus (symbol) (reg))` in the
+// mem and the assembler expands it through $at at each access, which is the
+// three-instruction form here. `base` and `d` are named so the two sums keep
+// source order -- inline, fold ranks the multiply above them and computes
+// `(d + base) + off` instead of `(base + off) + d`.
+void func_800D7B1C(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
+    s32 off = arg1 * sizeof(BattleModel);
+    s32 n = *(u8*)((u8*)D_801518E4 + 0x31 + off);
+    s32 a = *(s16*)((u8*)D_801518E4 + 0x1A + off);
+    s32 base = (s32)((u8*)D_801518E4 + 0x174) + off;
+    s32 d = n * sizeof(BattleModelSub);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7BA4);
+    func_800D7A88(arg0, arg1, base + d, a, arg2, arg3);
+}
+
+// The same as func_800D7B1C one part along -- +0x32 and +0x1C.
+void func_800D7BA4(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
+    s32 off = arg1 * sizeof(BattleModel);
+    s32 n = *(u8*)((u8*)D_801518E4 + 0x32 + off);
+    s32 a = *(s16*)((u8*)D_801518E4 + 0x1C + off);
+    s32 base = (s32)((u8*)D_801518E4 + 0x174) + off;
+    s32 d = n * sizeof(BattleModelSub);
+
+    func_800D7A88(arg0, arg1, base + d, a, arg2, arg3);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7C2C);
 
