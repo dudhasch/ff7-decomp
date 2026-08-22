@@ -1368,57 +1368,82 @@ extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
  * Re-measured at 100 rows / +3, with the head's store grouping read against
  * the target rather than guessed. Two things are now settled:
  *   - the *order* of the 44 `g_FieldState->member = 0;` stores is already the
- *     target's. Read straight off the `.s` the sequence is eventCmd(0x1),
- *     eventCmdParam(0x2), movieCommandState(0x26), characterLock(0x32),
- *     walkAnimId(0x2e), pcModelId(0x2a), idleAnimId(0x2c), runAnimId(0x30),
- *     D_80081DC4, modelCount(0x28), suspendWalkAndAnim(0x33), and that is
- *     what the body below writes. What differs is only which stores share a
- *     base-register load, and since stores through one base are provably
- *     non-overlapping, sched2 reorders them freely -- so the grouping is not
- *     reachable from statement order here.
+ *     target's, read straight off the `.s`.
  *   - both globals really are re-read at every use. Caching `g_FieldScripts`
  *     in a local is **-17 instructions** (135 rows), caching `g_FieldState`
  *     is **-61** (211), and both together **-80** (238). Those numbers are
  *     the count of reloads the target has, so the repeated-expression form
  *     the body already uses is right and is not what the residue is about.
-
  *
- * **100 rows / +3 instructions -> 101 rows / the exact 484.** One row worse
- * and three instructions better, which by this file's own rule is the step
- * forward: a row count only compares within a length class.
+ * ---- 101 rows -> 87, and the histogram is now completely identical ----
  *
- * Two statements move, and both are what a person writing an init routine in
- * 1997 would have typed rather than what the seed had:
+ * At 101 rows the whole residue was nameable in five numbers:
+ * `addiu -2 / addu +1 / sll +1` and one `%hi` at `D_80095DFE` where the
+ * target has `D_80095DE0`. That is the palette clear and nothing else. Two
+ * statements fixed it and one of them is the reverse of the obvious move.
  *
- *   - **`g_FieldState->modelCount = g_FieldScripts->numModels;` is the FIRST
- *     statement of the function**, not buried thirty stores into the zeroing
- *     run. You read the counts out of the map header, then you clear
- *     everything. +3 -> +1 on its own.
- *   - **`D_80081DC4 = 0;` sits with `currentFieldScale`**, not in the middle
- *     of the `g_FieldState` run. It is the only store to a different symbol
- *     in that whole block, so it needs its own `lui`/`addiu` -- which is
- *     exactly the work sched2 puts in the load-delay slots. +1 -> exact.
+ *   - **The palette row is a subscript gcc reduces, not a pointer you walk.**
+ *     `cell = (s16*)&D_80095DE0[i * 0x20];` at the top of the outer body with
+ *     `cell[j] = 0;` inside (j counting down from 0xF) compiles
+ *     instruction-for-instruction to the target's loop: the outer address is
+ *     a giv `strength_reduce` turns into a walking pointer, incremented by
+ *     `addiu v1,v1,0x20` in the outer branch's delay slot, and `cell[j]` is
+ *     an inner giv whose preheader init is `addiu v0,v1,0x1e` and whose step
+ *     is `addiu v0,v0,-2`. The old body's `cell = (s16*)(&D_80095DE0[i *
+ *     0x20] + 0x1E)` with `cell--` folds the `+0x1E` into the `%lo`, so the
+ *     row is rebuilt with `sll`/`addu` at every iteration -- exactly the
+ *     three-opcode imbalance above.
  *
- * The three `nop`s the histogram used to show are gone with it. What is left
- * is `addiu -2 / addu +1 / sll +1` and nothing else: the target computes two
- * addresses by adding a constant where this body scales an index. The `%hi`
- * table is clean apart from symbol *names* at the same addresses.
+ *     Writing the walk by hand is worse, and in the other direction: with a
+ *     `u8* row` walked `row += 0x20`, `i` has no use left outside the exit
+ *     test, `check_dbra_loop` reverses it (`bgez` in place of
+ *     `slti`/`bnez`), and the `+0x1E` folds into `row`'s *initial* value so
+ *     the target's per-iteration `addiu v0,v1,0x1e` disappears -- **-2
+ *     instructions**, 105 rows, in all three spellings (`row + 0x1E` with
+ *     `cell--`, `row + j * 2`, and either increment order). The subscript
+ *     forms that keep `i` in the address are `+1` (`D_80095DE0[i * 0x20 + j *
+ *     2]`, `&D_80095DE0[i * 0x20] + j * 2`, `((s16*)&D_80095DE0[i *
+ *     0x20])[j]`, all 107 rows): they get the inner giv right and leave the
+ *     outer row unreduced. Only the hoisted-base form gets both.
+ *   - **`modelCount` is read into a local as the *second* statement and
+ *     stored ten statements later.** The target reads `lbu a1,3(v0)` at head
+ *     position 14 and stores `sh a1,0x28(v1)` at 26, between `runAnimId` and
+ *     `suspendWalkAndAnim`, so the value is carried in a register across the
+ *     whole opening run. Where the *read* goes is the whole lever and it is
+ *     sharp: first statement 100 rows, **after `eventCmd = 0` 87**, after
+ *     `eventCmdParam` 91, after `movieCommandState` 89 and +1, after
+ *     `characterLock` 97 and +2. The local's width is inert (`u8`, `s16`,
+ *     `u16`, `s32` all identical), and without the local -- the whole
+ *     statement moved down instead -- it is 92 rows and +1.
  *
- * The palette clear was re-swept at the new length, since the numbers in the
- * list above (85 / 83 / 82) were taken at +3 and a row count does not carry
- * across a length change. It is unchanged: the reversed inner loop with the
- * row base at `+0x1E` is right. Two counted `for` loops are 110 rows and +1,
- * a hoisted row base 100 and **-1**, a walked `*cell++` 102 and exact, one
- * flat 0x400-iteration loop 154 and -7, and the outer loop as a `for` with
- * the inner left reversed is 101 and exact -- i.e. identical to what is
- * there. So `check_dbra_loop` reversing the outer counter is not costing
- * anything measurable and the note's earlier reading of it was an artefact of
- * comparing across lengths.
+ * **The histogram is now identical: every opcode count and every `%hi`
+ * address, at the exact 484.** So the 87 rows left are one phenomenon and
+ * one only -- which `g_FieldState` load serves which store in the opening
+ * run, plus the register naming downstream of it. The target puts
+ * {0x2, 0x26, 0x32, 0x2e, 0x2a, 0x2c, 0x30, 0x28} on a single load; this
+ * build splits that run after 0x32 and reloads, and then has the two
+ * instructions the target spends on `D_80081DC4` free elsewhere, which is
+ * why the length still comes out exact.
+ *
+ * Measured against that and still open:
+ *   - `D_80081DC4 = 0;` moved up between `runAnimId` and `modelCount`, which
+ *     is where the target emits it, is **86 rows and +1 instruction** -- and
+ *     it was +1 on all three earlier bodies too, so it is a stable cost
+ *     rather than a base-dependent one. Something else has to be -1 first;
+ *     nothing measured yet is.
+ *   - a `do { } while (0);` after `eventCmd = 0` is **exactly inert** (87),
+ *     so by CLAUDE.md's probe the head residue is not sched2's and no
+ *     placement of anything will reach it. It is cse's grouping of the
+ *     pointer load, and the note's older claim that "the grouping is not
+ *     reachable from statement order" survives this pass.
+ *   - the same barrier one statement lower (after the `numModels` read) is
+ *     97 rows and +3.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
 #else
 void FieldInitDefaultValues(void) {
+    s32 numModels;
     s32 i;
     s32 j;
     s8* p;
@@ -1426,8 +1451,8 @@ void FieldInitDefaultValues(void) {
     s16* cell;
     s32 off;
 
-    g_FieldState->modelCount = g_FieldScripts->numModels;
     g_FieldState->eventCmd = 0;
+    numModels = g_FieldScripts->numModels;
     g_FieldState->eventCmdParam = 0;
     g_FieldState->movieCommandState = 0;
     g_FieldState->characterLock = 0;
@@ -1435,6 +1460,7 @@ void FieldInitDefaultValues(void) {
     g_FieldState->pcModelId = 0;
     g_FieldState->idleAnimId = 0;
     g_FieldState->runAnimId = 2;
+    g_FieldState->modelCount = numModels;
     g_FieldState->suspendWalkAndAnim = 0;
     g_FieldState->menuDisabled = 0;
     g_FieldState->unk35 = 0;
@@ -1561,11 +1587,10 @@ void FieldInitDefaultValues(void) {
     i = 0;
     do {
         j = 0xF;
-        cell = (s16*)(&D_80095DE0[i * 0x20] + 0x1E);
+        cell = (s16*)&D_80095DE0[i * 0x20];
         do {
-            *cell = 0;
+            cell[j] = 0;
             j--;
-            cell--;
         } while (j >= 0);
         i++;
     } while (i < 0x40);
