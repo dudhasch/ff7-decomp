@@ -459,7 +459,50 @@ void func_800DF7BC(void) {}
 
 void func_800DF7C4(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DF7CC);
+/* 16 changed / -4 instructions (69 against 73).  The residue is one fact: the
+ * target loads D_80062D7E *twice*, once per test, where this body loads it
+ * once and masks the same register twice.  gcc 2.7.2-s cse extends along the
+ * fall-through of a conditional jump only, so for the second test to reload,
+ * its block must not be on the fall-through path of the first -- i.e. the
+ * original-s control flow around the two pad tests is not this one.  Every
+ * arrangement tried here (early return, else-if, nested if) puts the 0x2040
+ * test on the same extended block.  The rest of the function, including the
+ * cross-jumped func_800D9F5C(2) tail the goto produces, is exact. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DF7CC);
+#else
+void func_800DF7CC(void) {
+    s32 canRun;
+    s32 setupType;
+
+    canRun = 1;
+    setupType = D_8016360C.setup.type;
+    if (setupType < 9) {
+        canRun = setupType < 3;
+    }
+    if ((D_800F3896 == 2) && (D_800F99E4 == 0)) {
+        if (D_80062D7E & 0x20) {
+            if (canRun != 0) {
+                func_800BB9B8(1);
+                D_800F99E4 = 1;
+                D_800F3896 = -1;
+                func_800A4350(D_800F38A0, D_800F389C, D_800F389E, D_801516F8);
+                func_800D9F5C(1);
+                goto advance;
+            }
+            func_800BB9B8(3);
+            return;
+        }
+        if (D_80062D7E & 0x2040) {
+            func_800BB9B8(4);
+            D_800F99E4 = 1;
+            D_800F3896 = 1;
+        advance:
+            func_800D9F5C(2);
+        }
+    }
+}
+#endif
 
 void func_800DF8F0(void) {}
 
