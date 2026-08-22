@@ -2261,7 +2261,11 @@ void func_800B64A0(void) { func_800B63F0(D_801159E0); }
 
 static s32 func_800B64C8(void) { return D_801159E0; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B64D8);
+void func_800B64D8(s32 arg0) {
+    *D_8009A000 = 0x30;
+    *D_8009A004 = arg0;
+    SystemAkaoExecute();
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B650C);
 
