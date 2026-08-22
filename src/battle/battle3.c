@@ -1081,7 +1081,61 @@ s32 func_800E5FB4(u32 arg0, s32 arg1) {
     return ret;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E6018);
+/* 10 changed / 3 inserted at the exact 56 instructions.  Structure, the two
+ * cursors, the signed pointer compare and the symbol/symbol+0x20 derivation
+ * are all in place; what is left is three insertions' worth of scheduling
+ * plus one copy direction:
+ *   - the target materialises `li s2,-1` as the *second* insn of the entry
+ *     block, right after `move s3,a1`; here it lands after the two cursors.
+ *     Spelling -1 as a named local (`none = -1;` as the first statement, used
+ *     at all four references) puts it there but costs the whole insn --
+ *     e6018-j measured 10 rows at *55* instructions, i.e. one short, because
+ *     the local coalesces with one of the stores.
+ *   - `move s0,s4` against our `move s4,s0`: base is referenced twice (its
+ *     def plus the loop bound) and hi six times, and the target gives the
+ *     six-reference value the *lower* register.  Neither declaration order
+ *     nor `hi = base = ...` (e6018-k, 10) moves it.
+ * Measured, all against the 56-insn target:
+ *   plain &D_8009C778[idx+8] first                       18/3
+ *   lo assigned first                                    16
+ *   &D_8009C778[8] + idx                                 16
+ *   arr local, arr+8+idx                                 15
+ *   arr local, arr8 = arr + 8 (two locals)               13
+ *   + off local for arg0 * 0x21, so the index is
+ *     computed before the symbol                         10   <- this body
+ *   + `none` local for -1                                10 but -1 instruction
+ *   + hi = base = ...                                    10
+ * The residue is allocno ranking plus entry-block scheduling; per CLAUDE.md
+ * that is a park, not a permuter target. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800E6018);
+#else
+void func_800E6018(s32 arg0, u32 arg1) {
+    s32* lo;
+    s32* hi;
+    s32* base;
+    s32* arr;
+    s32* arr8;
+    s32 off;
+
+    off = arg0 * 0x21;
+    arr = D_8009C778;
+    arr8 = arr + 8;
+    base = arr8 + off;
+    hi = base;
+    lo = arr + off;
+    do {
+        if ((*lo != -1) && (func_800E5FB4(arg1, func_8002603C(*lo)) != 0)) {
+            *lo = -1;
+        }
+        if ((*hi != -1) && (func_800E5FB4(arg1, func_8002603C(*hi)) != 0)) {
+            *hi = -1;
+        }
+        hi++;
+        lo++;
+    } while ((s32)hi < (s32)(base + 8));
+}
+#endif
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E60F8);
 
