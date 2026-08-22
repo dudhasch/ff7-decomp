@@ -501,16 +501,6 @@ void func_80014804(void) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800148A0);
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_800148B4);
-#else
-/* PARKED at 2 rows / +1 instruction, and the residue is the same %gp_rel
- * blocker as func_8001A384 -- see CLAUDE.md on -G8. The single differing
- * cluster is `sw $v0,%gp_rel(g_CurrentAction)($gp)` in the target against a
- * `lui $at,%hi` plus `sw %lo` here; g_CurrentAction is at 0x80063014 in main's
- * .bss, i.e. another object, so cc1 will not treat it as small data however it
- * is declared. Everything else is instruction-for-instruction. Unpark this the
- * day the .bss import lands; do not spend a codegen budget on it. */
 s32 func_800148B4(void) {
     func_800148A0();
     g_CurrentAction = (Unk800A8D04*)0x1F800000;
@@ -523,7 +513,6 @@ s32 func_800148B4(void) {
     func_800145BC(0);
     return 1;
 }
-#endif
 
 void func_80014934(void) {
     func_800148A0();
@@ -1024,46 +1013,13 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A280);
 
 // file cut between func_8001A384 to func_8001C0EC
 
-#ifndef NON_MATCHINGS
-void func_8001A384(u8 arg0, s32 arg1);
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A384);
-#else
-/* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
- * 5 rows, +2 instructions (2 insertions). The body is
- * instruction-for-instruction right; every differing row is
- * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn
- * each. cc1 emits a bare `op $r,SYM` and leaves the gp decision to the
- * assembler, which gets -G0 -- so only a symbol this object *defines* in .sdata
- * is gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live
- * in main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
- * object. Measured and rejected, all exactly 5 rows: `extern u8 SYM[1];`
- * indexed [0], a tentative definition `u8 SYM;` in this unit, and a volatile
- * cast at each access. The fix is a .bss import plus -G8 on the assembler, not
- * a spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A384(u8 arg0, s32 arg1) {
     func_8001AC9C(arg0, arg1);
     if (D_80063020) {
         D_80062FFC = 11;
     }
 }
-#endif
 
-#ifndef NON_MATCHINGS
-void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2);
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A3B8);
-#else
-/* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
- * 8 rows, +2 instructions (2 insertions). The body is
- * instruction-for-instruction right; every differing row is
- * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn
- * each. cc1 emits a bare `op $r,SYM` and leaves the gp decision to the
- * assembler, which gets -G0 -- so only a symbol this object *defines* in .sdata
- * is gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live
- * in main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
- * object. Measured and rejected, all exactly 8 rows: `extern u8 SYM[1];`
- * indexed [0], a tentative definition `u8 SYM;` in this unit, and a volatile
- * cast at each access. The fix is a .bss import plus -G8 on the assembler, not
- * a spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2) {
     u8 param;
     s32 i;
@@ -1086,7 +1042,6 @@ void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2) {
     }
     D_80062FFC = 8;
 }
-#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A440);
 
