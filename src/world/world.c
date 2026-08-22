@@ -397,7 +397,21 @@ s16 func_800A5970(void) {
     return count;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A59A0);
+void func_800A59A0(void) {
+    s16 i;
+    s32 off;
+    s32 last;
+
+    for (i = 0; i < 0x3F; i++) {
+        off = i * 8;
+        *(s32*)(D_800E582C + off) = off + (s32)(D_800E582C + 8);
+    }
+    last = i * 8;
+    *(s32*)(D_800E582C + last) = 0;
+    D_800E5A30 = D_800E582C;
+    D_800E5A2C = 0;
+    D_800E5A34 = 0;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5A20);
 
