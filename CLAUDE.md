@@ -229,6 +229,19 @@ Work in **file order** within a batch where you can: a function whose compiled
 size changes shifts every later function's branch targets, so a downstream
 verdict is only trustworthy once everything before it matches.
 
+**The symptom of that is a mismatch whose rows are *only* branch targets, all
+off by the same constant — and it means the function is finished.**
+`diff.py` renders a branch's destination as an absolute offset into the object,
+so a function sitting N bytes from where the target puts it reports every
+internal branch, every `j` and every loop back edge as a changed row while
+being byte-identical instruction for instruction. Landing 22 functions in one
+pass of `src/main/akao.c` produced eleven such verdicts at once, eight of them
+reading `1 changed`, and every one cleared with no source change when the one
+genuinely wrong function ahead of them was fixed. Read the *operands*: if the
+only difference on every row is the hex address after a `beqz`/`j`/`bnez` and
+the deltas all agree, do not touch the function — go fix whichever earlier
+function `checkfn` reports a length for.
+
 ### 2. Seed with m2c
 
 ```shell
@@ -1095,6 +1108,18 @@ a near-miss, in rough order of frequency:
   companion to the `FieldBackgroundInitPackets` bullet above, not a replacement
   — there the bodies were small and the rotation was the whole cost, so a
   backward goto won.
+  **The first test tells you which of the four shapes it is, and it does so
+  from one operand.** A `while` puts its zero-trip test in the *entry* block,
+  where cse still knows every value the preheader just set — so a loop
+  starting `bit = 1` comes out `andi v0,v1,0x1`, the constant folded into the
+  compare. Every other shape puts the first test at a label with two
+  predecessors, cse stops there, and the same test is `and v0,v1,a2` against
+  the register. So: a compare against a *register* whose value is a loop-entry
+  constant rules `while` out outright, before any row is read.
+  `func_80033128` in `src/main/akao.c` measures 19 rows as `while`, 19 as
+  `for (;;) { … break; }`, 10 as a backward `goto` and **0** as
+  `for (;;) { … goto done; }` with the label after the loop — and its target's
+  `and` against `$a2` said so from the start.
   The choice also decides register allocation, not just hoisting, and that is
   the larger half. `REG_N_REFS += loop_depth` in flow, so every reference in a
   walk that gcc recognises as a loop counts double — and `allocno_compare`
@@ -1837,6 +1862,20 @@ a near-miss, in rough order of frequency:
   `FieldMoveToEntityUpdate`, which are parked on a residue that looks
   identical, both levers measure to the row. Whatever those four need is a
   different thing that only looks like this one.
+* **A store through a *variable* offset invalidates the whole struct in cse,
+  so read an incremented field back with `++x` used as a value.**
+  `arr[i]++;` followed by `if (arr[i] == n)` looks like the store-and-read-back
+  idiom and is not: the store's address is `(plus (reg base) (reg idx))`, which
+  `memrefs_conflict_p` cannot disambiguate from anything, so cse drops every
+  entry for that object — the re-read reloads the *index* as well as the
+  element and costs four instructions. `if (++arr[i] == n)` uses the increment
+  as an expression, so the value stays in the register cse already has, and the
+  `andi <r>,<r>,0xffff` the target has immediately after its `sh` is that
+  register's `u16`-to-`int` promotion rather than anything to explain away.
+  `func_80033264` in `src/main/akao.c` is +2 instructions written the first way
+  and matches written the second; a `u16*` local for the element address does
+  not reach it either (11 rows), because the reload is about the store's
+  address form, not about how the address was spelled.
 * **A store to a symbol at a variable offset invalidates every scalar global in
   cse.** `*(u16*)(SYM + rbOff + charOff) = v;` is `(plus (symbol) (reg))`, which
   `memrefs_conflict_p` cannot disambiguate from anything, so every global read
@@ -2177,6 +2216,23 @@ a near-miss, in rough order of frequency:
   cse folds the temp away. Both `OpcodeFuncRtpal` and `OpcodeFuncRtpal2` needed
   this, and only in their second loop — the first, whose `for` counter is the
   store index, matched all along.
+* **A `nop` in a zero-trip guard's delay slot means the loop's setup is
+  written *inside* the guard.** In a `for`, the init list is emitted in the
+  entry block ahead of the test, so reorg finds it sitting on the fall-through
+  and steals it into the branch's delay slot — one instruction shorter than
+  the target, with the register assignment dragged along behind it. Written as
+  `p = base; if (n != 0) { bit = 1; do { … } while (n != 0); }` the `bit = 1`
+  is in the loop preheader, a block reorg does not reach back past, and the
+  target's `nop` survives. `func_8002A748` and `func_8002A798` in
+  `src/main/akao.c` need it, and the measurement is what makes it a rule
+  rather than a guess: **eleven** spellings — `for` with the init in the init
+  list, `while`, a backward `goto`, both increment orders, both declaration
+  orders, an index instead of a walking pointer, `s32` and `u32` for the bit,
+  and `x = x | 3` for `x |= 3` — all come out at exactly 10 rows and -1
+  instruction with the loop body byte-identical, and the twelfth matches
+  outright. This is the mirror of the bullet below: there the hand-written
+  guard is the wrong answer, here it is the only one, and the target's delay
+  slot is what separates them.
 * **A loop bound read from memory is not the same as a cached one, and a
   hand-written zero-trip guard is not the same as the `for`'s.**
   `count = hdr->count; if (count != 0) for (i = 0; i < count; i++)` looks like
@@ -4673,6 +4729,40 @@ change needs a finer split, derive it that way rather than by guessing.
 The tell is `tools/checkfn.py` reporting a `.rodata` offset rather than an
 instruction — `want: .rodata+0x294 / got: .rodata+0x298`. Every instruction can
 be byte-perfect and the function still fails the link check.
+
+#### `%gp_rel` in a target `.s` means a function this unit cannot compile
+
+`-G` is the second per-original-translation-unit setting that survives into the
+merged units, and unlike jump-table phase there is no `--phase` knob for it.
+The original build put small objects in `.sdata`/`.sbss` and addressed them off
+`$gp`; splat renders those as `%gp_rel(SYM)($gp)` — one instruction where a
+`-G0` build emits `lui`/`lo`, so a function that touches one can never match.
+
+The window is narrow and easy to spot: `main`'s `gp_value` is `0x80062D44`
+(`config/us.yaml`), so every symbol in roughly `0x80062D44 + 0x200` is a
+candidate and everything outside it uses `%hi`/`%lo` **in the same function**.
+That mixture is the giveaway that it is an addressing mode and not a symbol
+property — `D_80062FD8` is `%gp_rel` in `func_800294BC` and `%hi`/`%lo` in
+`func_8002C884`, because the two came from different original files.
+
+Whether maspsx emits the `$gp` form is decided by
+`sdata_entries`/`sbss_entries`, which it populates from `.sdata`/`.sbss`
+sections **in the compiler's own output** — i.e. only for objects the unit
+*defines*. Every one of these globals is an `extern` here (they live in main's
+`.bss` `.s`), so no `G=` on the `//!` line can reach them; the only route would
+be to move the data's definition into the `.c`, which relocates the whole
+small-data window and is not worth it for a handful of functions.
+
+Measure before believing it — one `variant_eval` run is enough, and it is
+unambiguous: `func_800293D0` in `src/main/akao.c` compiles to the target
+instruction for instruction and scores **+1 instruction, 1 changed row**,
+`sh zero,%gp_rel(D_80062E08)(gp)` against `lui at` + `sh zero,%lo(...)(at)`.
+Seven functions at the top of `akao.c` (`func_800293D0`, `func_800293F4`,
+`func_800294A4`, `func_800294BC`, `func_8002988C`, `func_80029998`,
+`func_800299C8`) are blocked this way and none of them is worth a budget;
+`grep -l gp_rel asm/us/<ovl>/nonmatchings/<unit>/*.s` lists them in one
+command, and that grep belongs in the triage before `worklist.py`'s ordering,
+not after three attempts on one of them.
 
 ### 4. Last-mile: decomp-permuter
 
