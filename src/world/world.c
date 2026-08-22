@@ -2191,7 +2191,14 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B338C);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B3418);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B37E0);
+void func_800B37E0(s32* arg0, s32* arg1) {
+    if (arg0 != NULL) {
+        *arg0 += D_8010CB18;
+    }
+    if (arg1 != NULL) {
+        *arg1 += D_8010CB1C;
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B3828);
 
