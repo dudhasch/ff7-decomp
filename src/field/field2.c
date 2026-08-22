@@ -106,7 +106,82 @@ typedef struct {
  * The type byte is re-read for the second test because the stores through
  * `pos` in the first arm may alias it.
  *
- * 76 -> 60 rows, and the length is now exact (137). Two levers, both of
+ * 60 -> 25 rows at the exact length, by *un*-splitting four of the per-arm
+ * locals. The previous note had read the register evidence one way only --
+ * "a value in different registers in the two arms cannot be one variable" --
+ * and split everything. The rule runs in both directions, and its other half
+ * is what was missed: `negu $t2` is the destination in *both* arms. Arm 1
+ * never touches $t1 at all, so a block-local quantity there would have been
+ * handed $t1 by `block_alloc` (which allocates $v0,$v1,$a0..$a3,$t0,$t1,...
+ * in order) long before it reached $t2. $t2 can therefore only belong to a
+ * pseudo that `local_alloc` refused -- one referenced in two basic blocks --
+ * so `num` is a *global* allocno spanning both arms, i.e. one variable.
+ *
+ * That third global is also the whole explanation for the 35 rows of
+ * `limits`/`pos` naming the old note attributed to a missing "block-local
+ * quantity". `global_alloc` runs after `local_alloc` and gives each allocno
+ * the lowest register not conflicting with the hard registers already used
+ * across its range. `num` conflicts with $v0..$t1 (arm 1 supplies $a0, $a2,
+ * $a3, $t0; arm 2 supplies $a1 and $t1) and so takes $t2; `limits` and `pos`
+ * are live everywhere, conflict with `num` too, and land on $t3/$t4. Ours
+ * had only two globals, so they sat one register low at $t2/$t3 and every
+ * reference to either read wrong.
+ *
+ * Measured, from the 60-row body: merging `num` alone is **64** -- worse,
+ * because in our arm 1 nothing occupies $a1 once the accumulator dies at the
+ * `negu`, so `num` takes $a1 and never displaces anything. `num`+`den` is
+ * **39**, and `num`+`den`+`by` is **25**. `maxY` on top is exactly inert and
+ * is merged only to retire a declaration that would otherwise be dead.
+ *
+ * `num` and `den` are one variable each on the target's own evidence: both
+ * hold the same register in both arms ($t2 and $a2), and $a2 is free across
+ * `den`'s range in each arm, so a global taking it is consistent. **`by` is
+ * not** -- the target has it in $v0 in arm 1 and $a1 in arm 2, so the
+ * original had two. Merging it is a codegen lever, not a reconstruction: it
+ * manufactures a fourth global that lands on $t2 and pushes `limits`/`pos`
+ * up, buying 14 rows while leaving `num` in $a1. Whatever the original wrote
+ * gets `num` itself to $t2, and that is the next thing to look for; a body
+ * that reaches it should be able to drop the `by` merge.
+ *
+ * What the remaining 25 rows are: six in arm 1 where `by`, now a global in
+ * $t2, is materialised ahead of `py` instead of reusing minY's $v0; three
+ * for `num` in $a1 rather than $t2; and the rest a permutation of arm 2's
+ * block-locals -- target dx2/dy2/maxY2/accum on $t0/$a1/$a2/$a3, ours on
+ * $a2/$t0/$a3/$a1. The one that matters is `dy2`: it is only because the
+ * target keeps `dy2` in $a1 that `num` is barred from $a1 and forced to $t2.
+ * So arm 2's block-local ranking is the whole residue, and `n_refs` over
+ * `live_length` on `dy2` is the term to move.
+ *
+ * Re-measured this pass and still inert, all at exactly 25 (the old note's
+ * numbers for these were taken against a body that has since moved, so they
+ * were re-run rather than trusted):
+ *   - arm-1 statement order and shape: 6 variants -- a `maxY` local for
+ *     symmetry with arm 2, that local hoisted to the top, `by` before `ay`,
+ *     an exact mirror of arm 2's order, and reading `limits->minY` twice
+ *     instead of naming it. All 25. Statement order being *provably* inert
+ *     is the evidence that the residue is allocation, not sched2.
+ *   - arm-2 statement order: 8 orderings of {py2, maxY, by, ay2, minY2,
+ *     dy2}. All 25 -- the old note's finding survives.
+ *   - declaration order: 10 permutations, including each merged global moved
+ *     to the front and to the back of the list, all three moved together,
+ *     and arm-1 locals before arm-2 locals. All 25.
+ *   - inner operand order of the products: `(dx2 * ax2)`, `(dy2 * ay2)`,
+ *     `(dy2 * (minY2 - maxY))`, and a named `mxy2` for `minY2 - maxY`. 25.
+ *
+ * Measured and worse, so the current spelling is pinned: swapping the two
+ * summands of `den` in arm 2 is 51 and of `num` 61 (both together 62);
+ * the same swaps in arm 1 are 27 and 71, all four 76 with 5 insertions.
+ * fold reassociates a sum of two multiplies, so these are real levers and
+ * they are already the right way round.
+ *
+ * Merging every local (one name set for both arms, the shape a copy-pasted
+ * pair would have) is **86** and one instruction short; the best drop-one
+ * from it is 78. The answer is a mixed set, not "all" and not "none".
+ * Full add-one sweeps over all 15 name pairs were run at three base sets
+ * ({num,den}, {num,den,by}, {num,den,by,maxY}); nothing beats 25, and the
+ * worst single addition is `fx` at 89.
+ *
+ * Superseded history -- 76 -> 60 rows came from two levers, both of
  * which the earlier note had reasoned past rather than measured:
  *
  *   - **One set of locals per arm.** The two `if`s share no variable in the
@@ -188,7 +263,23 @@ typedef struct {
  * `tools/width_sweep.py` scores all 150 alternatives for the 30 scalar
  * locals and every one measures **exactly 60 rows at the exact length**.
  * That is the same space `perm_randomize_internal_type` would search, and
- * it is flat. */
+ * it is flat.
+ *
+ * -- and every one of those five paragraphs is void, which is the lesson
+ * worth more than the fourteen rows. "Every enumerable axis is closed" was
+ * true only of the *program* it was measured against, and the number of
+ * globals was not one of the axes enumerated: the sweeps ranged over spelling
+ * with the variable set held fixed, and the variable set was the answer.
+ * Two of the conclusions were positively wrong. The conflict set was called
+ * "the one thing a target's `.s` cannot tell you" when the `.s` states it
+ * outright -- a destination register in both arms that `block_alloc` could
+ * not have reached names the globals, and the globals name the conflicts.
+ * And 200 measured points did not make any of it safe, because they all sat
+ * inside one wrong hypothesis; the 98-point barrier enumeration and the
+ * 150-point width sweep are simply flat over a body with two globals and say
+ * nothing about one with five. Re-run every sweep in this note before
+ * quoting it, and re-run the barrier and width sweeps in particular -- both
+ * are cheap, both are now stale, and neither has been repeated at 25. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
@@ -206,19 +297,15 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
     s32 fy;
     s32 minX2;
     s32 minY2;
-    s32 maxY2;
     s32 px2;
     s32 py2;
     s32 dx2;
     s32 dy2;
-    s32 num2;
-    s32 den2;
     s32 fx2;
     s32 fy2;
     s32 bx;
     s32 bx2;
     s32 by;
-    s32 by2;
     s32 ax;
     s32 ax2;
     s32 ay;
@@ -250,16 +337,16 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
         bx2 = minX2 + 0x140;
         dx2 = limits->maxX - bx2;
         py2 = pos[1] + 0x78;
-        maxY2 = limits->maxY;
-        by2 = maxY2 - 0xF0;
-        ay2 = maxY2 - py2;
+        maxY = limits->maxY;
+        by = maxY - 0xF0;
+        ay2 = maxY - py2;
         minY2 = limits->minY;
-        dy2 = minY2 - by2;
-        num2 = -((ax2 * dx2) + (ay2 * dy2));
-        den2 = ((dx2 * dx2) + ((minY2 - maxY2) * dy2)) >> 8;
-        fx2 = ((num2 * dx2 / den2) >> 8) + 0xA0;
+        dy2 = minY2 - by;
+        num = -((ax2 * dx2) + (ay2 * dy2));
+        den = ((dx2 * dx2) + ((minY2 - maxY) * dy2)) >> 8;
+        fx2 = ((num * dx2 / den) >> 8) + 0xA0;
         pos[0] = fx2 + minX2;
-        fy2 = ((num2 * dy2 / den2) >> 8) - 0x78;
+        fy2 = ((num * dy2 / den) >> 8) - 0x78;
         pos[1] = fy2 + (u16)limits->maxY;
     }
 }
