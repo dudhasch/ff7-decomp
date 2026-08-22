@@ -2632,12 +2632,37 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AEC10);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AEF68);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AF0C4);
+// End-of-turn housekeeping for combatant arg0: announce the turn unless the
+// combatant is in a state that suppresses it, and retire its queued priority
+// message if one is still outstanding.
+/* K&R: the two callers below pass three arguments and the function only ever
+ * reads the first.  An ANSI definition makes that a diagnostic, and gcc 2.6.3
+ * then substitutes and keeps going -- see CLAUDE.md. */
+void func_800AF0C4(arg0) s32 arg0;
+{
+    s32 off;
+
+    if (!(g_BattleState.combatant[arg0].status & 0x2804444)) {
+        func_800A7254(0, arg0, 6, 0);
+    }
+    if (!(g_BattleState.combatant[arg0].status & 0x2004404)) {
+        if (((s32)D_800F5F44.D_800F7DC2 >> arg0) & 1) {
+            /* The row offset has to be a local: written inline as
+             * `unkBF0[arg0 * 8]` the address is (plus symbol (mult reg 8)) and
+             * gcc folds the %hi/%lo into the scaled index, where the target
+             * leaves both accesses to the assembler's $at macro and builds a
+             * register only for the call argument. */
+            off = arg0 * 8;
+            if (D_800F5F44.unkBF0[off] != 0xFF) {
+                func_800A3D4C((Unk800A3D4C*)&D_800F5F44.unkBF0[off]);
+                D_800F5F44.unkBF0[off] = 0xFF;
+            }
+        }
+    }
+}
 
 void func_800A7254(s32, s32, s32, s32);
 void func_800AF1A8(s32 arg0) { func_800A7254(0, arg0, 8, 0); }
-
-void func_800AF0C4(s32, s32, s32);
 
 // skips (does nothing) while combatant[arg0].status has Berserk or Confusion
 void BATTLE_TryApplyHitEffect(s32 arg0, s32 arg1, s32 arg2) {
