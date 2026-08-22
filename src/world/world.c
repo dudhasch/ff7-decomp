@@ -1949,7 +1949,13 @@ void func_800AF24C(u32 arg0, u32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF2A4);
+void func_800AF2A4(u8 arg0, u8 arg1, u8 arg2) {
+    if (D_8010B3B8 != NULL) {
+        D_8010B3B8->unk10 = arg0;
+        D_8010B3B8->unk11 = arg1;
+        D_8010B3B8->unk12 = arg2;
+    }
+}
 
 static void func_800AF2E4(s32 arg0) {
     if (D_8010B3B8)
