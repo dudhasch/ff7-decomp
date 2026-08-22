@@ -1413,6 +1413,28 @@ a near-miss, in rough order of frequency:
   makes it `op0` regardless of how the sum is written, so the value has to be
   read into a local first (`v = arr[i]; arr[i] = delta + v;`) — two operands
   fold considers equal, source order stands. `func_800193F4` needed both.
+* **A row base walked in the `for` clause and the same base assigned from a
+  subscript inside the body are different givs, and the difference is which
+  offset the displacements are measured from.** Walked -- `p = (u8*)&arr[0].m;
+  for (i = 0; i < n; i++, p += sizeof(arr[0]))` -- `p` is a *biv*, the body's
+  `p + 0x28` and `p + 0x2C` are two givs, and `combine_givs` merges them onto
+  the later one: the base register comes out at `sym+0x16c` with displacements
+  `-4` and `0`. Assigned from the subscript at the top of the body --
+  `p = (u8*)&arr[i].m;` -- `p` is itself the giv, its add_val is `sym+0x140`,
+  and both accesses stay plain displacements `0x28`/`0x2c` off it. Same
+  instruction count, same increment, three rows apart, and it is what
+  `func_800D54EC` in `src/battle/battle2.c` needs.
+
+  This is the escape when the `combine_givs` bullet above cannot be applied.
+  That rule says to move the field at the target's base offset to the end of
+  the source block -- which is impossible when the target's base is an offset
+  *no field uses*, as here, where the target bases at `+0x140` and reads only
+  `+0x168` and `+0x16c`. A base that is not any of the referenced offsets is
+  the tell that the register is a biv or a subscript giv rather than a
+  combined one. Three other spellings of the walk (`BattleModel* b` with
+  `b++`, an `s16*` walked and indexed `p[0x14]`, a shared
+  `(SVECTOR*)(p + 0x28)`) all give the merged form and measure the same 3
+  rows, so this is not reachable by re-spelling the *accesses*.
 * **A pointer bumped once per outer iteration belongs in the `for` increment.**
   `for (i = 0; i < n; i++, p += stride)` emits `i++` ahead of `p += stride`;
   written as the body's last statement the two come out in the other order and

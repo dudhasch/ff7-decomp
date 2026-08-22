@@ -1296,7 +1296,55 @@ s32 func_800D54BC(s32 arg0) {
     return count;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D54EC);
+// Bounding box of the selected models' world positions, averaged into out.
+// arg0 is a bitmask of model slots.
+//
+// `p` has to be assigned from the subscript *inside* the loop body, not
+// walked in the `for` clause. Walked, `p` is a biv, the two accesses become
+// givs and `combine_givs` merges them onto the later offset -- the base
+// register comes out at `D_801518E4+0x16c` with displacements -4 and 0.
+// Assigned from `&D_801518E4[i].m`, `p` is itself the giv, its add_val is
+// `D_801518E4+0x140`, and both accesses stay plain displacements off it,
+// which is what the target has. `BattleModel* b` walked with `b++`, an
+// `s16*` walked and indexed `p[0x14]`, and a shared `(SVECTOR*)(p + 0x28)`
+// all give the merged form and measure 3 rows.
+s16* func_800D54EC(s32 arg0, s16* out) {
+    s32 i;
+    s32 minX;
+    s32 minY;
+    s32 maxX;
+    s32 maxY;
+    s32 v;
+    u8* p;
+
+    minX = 0x7FFF;
+    minY = 0x7FFF;
+    maxX = -0x8000;
+    maxY = -0x8000;
+    for (i = 0; i < 10; i++) {
+        p = (u8*)&D_801518E4[i].m;
+        if ((arg0 >> i) & 1) {
+            v = *(s16*)(p + 0x28);
+            if (v < minX) {
+                minX = v;
+            }
+            if (maxX < v) {
+                maxX = v;
+            }
+            v = *(s16*)(p + 0x2C);
+            if (v < minY) {
+                minY = v;
+            }
+            if (maxY < v) {
+                maxY = v;
+            }
+        }
+    }
+    out[0] = (minX + maxX) / 2;
+    out[2] = (minY + maxY) / 2;
+    out[1] = 0;
+    return out;
+}
 
 s32 func_800D55A4(s32 arg0) {
     return (D_801518E4[arg0].unk12 * 0x10) * D_801518E4[arg0].D_801518EA >> 0xC;
