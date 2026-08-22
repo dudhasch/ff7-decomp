@@ -1115,15 +1115,12 @@ void func_800D3994(s32 arg0, s32 arg1, void* arg2) {
     MATRIX sp10;
     s32 off = arg1 * sizeof(BattleModelSub) + arg0 * sizeof(BattleModel);
 
-    ((SVECTOR*)arg2)->vx =
-        (s16)(*(u16*)((u8*)D_801518E4 + 0x188 + off) -
-              *(u16*)&D_800FA63C.m.t[0]);
-    ((SVECTOR*)arg2)->vy =
-        (s16)(*(u16*)((u8*)D_801518E4 + 0x18C + off) -
-              *(u16*)&D_800FA63C.m.t[1]);
-    ((SVECTOR*)arg2)->vz =
-        (s16)(*(u16*)((u8*)D_801518E4 + 0x190 + off) -
-              *(u16*)&D_800FA63C.m.t[2]);
+    ((SVECTOR*)arg2)->vx = (s16)(*(u16*)((u8*)D_801518E4 + 0x188 + off) -
+                                 *(u16*)&D_800FA63C.m.t[0]);
+    ((SVECTOR*)arg2)->vy = (s16)(*(u16*)((u8*)D_801518E4 + 0x18C + off) -
+                                 *(u16*)&D_800FA63C.m.t[1]);
+    ((SVECTOR*)arg2)->vz = (s16)(*(u16*)((u8*)D_801518E4 + 0x190 + off) -
+                                 *(u16*)&D_800FA63C.m.t[2]);
     TransposeMatrix(&D_800FA63C.m, &sp10);
     ApplyMatrixSV(&sp10, (SVECTOR*)arg2, (SVECTOR*)arg2);
 }
@@ -1387,9 +1384,8 @@ void func_800D508C(void) {
             }
         }
     }
-    D_80163C74 = (DR_MODE*)func_800C4FC8(*(u8*)((u8*)e + 5),
-                                        *(u8*)((u8*)e + 5),
-                                        *(u8*)((u8*)e + 5));
+    D_80163C74 = (DR_MODE*)func_800C4FC8(
+        *(u8*)((u8*)e + 5), *(u8*)((u8*)e + 5), *(u8*)((u8*)e + 5));
 }
 
 // Reset the fixed-point ramp: zero the accumulator (0x04) and seed the
@@ -1750,7 +1746,7 @@ void func_800D70C0(void) {
         return;
     }
     if ((p->D_801621F2 & 3) == 0) {
-        q = &D_801621F0[func_800BC04C(*(void (**)())&p->unk1C)];
+        q = &D_801621F0[func_800BC04C(*(void (**)()) & p->unk1C)];
         *(SVECTOR*)&q->D_801621F4 = *(SVECTOR*)&p->D_801621F4;
     }
     p->D_801621F2++;
@@ -1800,8 +1796,7 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7888);
 // Claim a slot running func_800D7888. Six parameters, so arg4 and arg5 come
 // off the caller's stack; the store order 0x4, 0x6, 0x1C, 0x1A, 0x8, 0xA is
 // the source order, since gcc keeps struct stores where they were written.
-void func_800D7A88(s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4,
-                   s32 arg5) {
+void func_800D7A88(s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4, s32 arg5) {
     Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D7888)];
 
     p->D_801621F4 = arg0;
