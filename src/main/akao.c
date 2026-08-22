@@ -163,7 +163,8 @@ typedef struct {
 typedef struct {
     u8 pad0[0x3C];
     s32 unk3C;
-    u8 pad1[0x1A];
+    s32 unk40;
+    u8 pad1[0x16];
     s16 unk5A;
     u8 pad2[0x2];
     s16 unk5E;
@@ -171,7 +172,9 @@ typedef struct {
     s16 unk62;
     u8 pad3[0x62];
     s16 unkC6;
-    u8 pad4[0x18];
+    s16 unkC8;
+    s16 unkCA;
+    u8 pad4[0x14];
     s32 unkE0;
     u8 pad5[0x24];
 } Unk80099788Half; // size 0x108
@@ -248,6 +251,9 @@ extern s32 D_80062FD8;
 extern s32 g_AkaoPitchMulMusic;
 extern s32 g_AkaoTempoMulMusic;
 extern s32 D_80062FF8;
+extern s32 D_80062F08;
+extern s32 D_80062FE0;
+extern s32 D_80063000;
 extern s32 D_80063004;
 extern s32 D_80063010; // sound message queue count
 extern u8 g_FieldMovieLock;
@@ -302,6 +308,8 @@ extern s32 D_8009A118;
 extern s32 D_8009A128;
 extern s32 D_8009A12C;
 extern s32 D_8009A130;
+extern s32 D_8009A168;
+extern s32 D_8009A174;
 extern s32 D_8009A134;
 extern s32 D_8009A138;
 extern s32 D_8009A13C;
