@@ -549,6 +549,30 @@ extern u8 D_80166F68;
 
 void func_800A4350(s16, s16, s16, u16);
 void func_800A4F60(s32, s32);
+void func_800A4844(s32);
+void func_800BB9FC(s32);
+void func_800D9BF4(s16);
+/* 1255C.c defines func_80026B5C as taking no arguments, but every battle3
+   caller passes one, so it cannot go in game.h alongside that definition. */
+void func_80026A34(s32, s32, s32, s32);
+void func_80026B5C(s32);
+
+/* Argument record func_800E1AC0 builds on the stack; 0x13 bytes rounded to
+   0x14 by the s16 members. */
+typedef struct {
+    /* 0x00 */ s16 unk0;
+    /* 0x02 */ s16 unk2;
+    /* 0x04 */ s16 unk4;
+    /* 0x06 */ s16 unk6;
+    /* 0x08 */ s16 unk8;
+    /* 0x0A */ u16 unkA;
+    /* 0x0C */ s16 unkC;
+    /* 0x0E */ s16 unkE;
+    /* 0x10 */ u8 unk10;
+    /* 0x11 */ u8 unk11;
+    /* 0x12 */ u8 unk12;
+} Unk80027408; // size: 0x14
+void func_80027408(Unk80027408*);
 void func_800A8E84(s32);
 void func_800AA950(Unk800FA9D0*);
 void func_800AB308(void);
@@ -687,21 +711,36 @@ s32 func_8002603C(s32);
 extern s32 D_8009C778[];
 extern u8 D_8009C84E;
 extern u16 D_8009C862;
+extern u8 D_8009D86D[];
+extern u8 D_8009D8FE[];
+extern s16 D_800F1EF0;
+extern s16 D_800F1F02;
+extern s16 D_800F2C9A;
+extern s16 D_800F2CAC;
+extern u8 D_800F3163[];
+extern u8 D_800F3168[];
 extern u8 D_800F33B0[][0x10];
 extern s32 D_800F5778[];
-extern s16 D_800F92E2;
-extern s16 D_800F92E4;
-extern s16 D_800F92E6;
-extern s16 D_800F92E8;
-extern s16 D_800F92EA;
-extern u8 D_800F92EC;
-extern u8 D_800F92ED;
-extern u8 D_800F92EE;
-extern u8 D_800F92EF;
-extern u8 D_800F92F0;
-extern u8 D_800F92F1;
-extern u8 D_800F92F2;
-extern u8 D_800F92F3;
+extern BattleMenuWidget D_800F910E[];
+/* The 0x12 bytes at 0x800F92E2 are one Unk80026448 -- every field width and
+   offset lines up, func_800DE46C hands &D_800F92E2 straight to
+   func_800264A8(Unk80026448*), and func_800DE3CC initialises all thirteen
+   members. */
+extern Unk80026448 D_800F92E2;
 extern u8 D_800F977C;
+extern u8 D_80158CFC;
+extern u16 D_80162970;
 extern u8 D_80163778[];
 extern u8 D_80163B70[];
+
+/* One 6-byte record per selectable entry; 16 of them per 0x60-byte row,
+   indexed by D_80158CFC. */
+typedef struct {
+    /* 0x0 */ u8 unk0;
+    /* 0x1 */ u8 unk1;
+    /* 0x2 */ u8 unk2;
+    /* 0x3 */ u8 flags;
+    /* 0x4 */ u8 unk4;
+    /* 0x5 */ u8 unk5;
+} Unk80166F78; // size: 0x6
+extern Unk80166F78 D_80166F78[][0x10];

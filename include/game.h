@@ -908,6 +908,7 @@ void func_800262D8();
 void func_80026448(Unk80026448* arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4,
                    s32 arg5, s32 arg6, s32 arg7, s32 arg8, s32 arg9, s32 arg10,
                    s32 arg11, s32 arg12, u16 arg13);
+void func_800264A8(Unk80026448* arg0);
 void func_800269C0(void* poly);
 s32 func_80026B70(unsigned char* str);
 void func_80026F44(s32 x, s32 y, const char*, s32 color); // print FF7 string

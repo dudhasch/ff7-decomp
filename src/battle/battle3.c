@@ -224,7 +224,49 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDE90);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDFEC);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DE2B4);
+/* 35 changed / 4 inserted at the exact 70 instructions.  Every load, store and
+ * both calls are the target-s; the six caller-saved registers holding the
+ * *new* values are permuted, and the target issues all six of those loads
+ * before the prologue where this body issues one and then the six saves.
+ * The register map is v0=D_800F5634, v1=D_800F5638 in both, and a0/a1/a2/a3
+ * differ: target 5630/563C/314E/562C against 314E/562C/563C/5630 here.  All
+ * six quantities have exactly two references (def + use), so QTY_CMP_PRI
+ * separates them only by GET_MODE_SIZE and live length, and neither is
+ * reachable without changing the statement list.  Park per CLAUDE.md-s
+ * allocno rule. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DE2B4);
+#else
+void func_800DE2B4(void) {
+    u16 saveWindowW;
+    u16 saveWindowX;
+    u16 saveWindowY;
+    u8 save38A6;
+    u8 save38A7;
+    u8 save151698;
+
+    saveWindowX = D_800F389E;
+    saveWindowY = D_800FAFD4;
+    save38A6 = D_800F38A6;
+    saveWindowW = D_801516F8;
+    save38A7 = D_800F38A7;
+    save151698 = D_80151698;
+    D_800F38A6 = D_800F5630;
+    D_801516F8 = D_800F5634;
+    D_800F38A7 = D_800F5638;
+    D_800F389E = D_800F314E;
+    D_800FAFD4 = D_800F562C;
+    D_80151698 = D_800F563C;
+    func_800DDFEC();
+    D_800F38A6 = save38A6;
+    D_801516F8 = saveWindowW;
+    D_800F38A7 = save38A7;
+    D_800F389E = saveWindowX;
+    D_800FAFD4 = saveWindowY;
+    D_80151698 = save151698;
+    func_800DDFEC();
+}
+#endif
 
 /* 3 changed / 1 inserted at the exact 40 instructions: every one of the 17
  * stores is in the target's position and only the four constant
