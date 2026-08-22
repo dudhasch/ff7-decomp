@@ -3198,6 +3198,33 @@ a near-miss, in rough order of frequency:
   is the *same* tell as the `SetSemiTrans` bullet above; read whether the
   shared argument is loaded inside the arms (duplicate the call) or before the
   branch (hoist it).
+* **The converse tell is a call whose arguments the target *rematerialises*:
+  that call is written once, after the whole `if`/`else` chain, and the join
+  is what empties cse's table.** A block with more than one predecessor
+  starts with nothing known, so an address that any arm already had in a
+  register is rebuilt with `lui`/`addiu` there, and a `short` parameter is
+  re-extended with its own `sll`/`sra` rather than read out of the
+  callee-saved register an arm parked it in. Both of those are visible in the
+  `.s` and neither can happen if the call sits inside the arms.
+
+  The second-order effect is what pays. Nested inside each arm, the call's
+  `(s16)arg` has a *later* use in the same arm and so is live across the
+  preceding call: it takes a callee-saved register and every argument setup
+  becomes `sll`/`sra`/`move a0,s0`. Hoisted, the extension dies at the call
+  in each arm and goes straight into `$a0`, which is one instruction per arm.
+  `DebugUpdateActor` in `src/field/field4.c` had m2c's nest of three
+  `if (guard) { SetDebugStrRowColor(...); if (guard) { SetStrToDebugRow(...,
+  g_DebugText); } }` arms; lifting the inner call out to a single
+  `if (guard) SetStrToDebugRow(..., g_DebugText);` after the chain took it
+  from **144 rows and +2 instructions to 0**. The duplicated inner guard is
+  the give-away that m2c reconstructed a nest from a CFG that was not one.
+
+  Read the two rules together as one question -- *does the target build this
+  argument in the arm or at the join?* -- and note that one function can want
+  both: the same `DebugUpdateActor` wants its row-7 clear **duplicated** into
+  the two paths that reach it, because there the two `a0` setups differ
+  (`move a0,s0` on one path, `sll`/`sra` on the other) and cross-jumping
+  merges only the `a2`/`a1`/`jal` suffix behind them.
 * **A pre-scaled byte offset only defeats the folded base if it is a local.**
   Sharpening the `$at` rematerialisation bullet above: what `associate` takes
   apart is a `PLUS` whose operands are a symbolic constant and a `MULT`, and an

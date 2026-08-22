@@ -2255,15 +2255,13 @@ extern u8 D_8009D392;
 extern u8 D_8009D393;
 extern u16 D_8009D78A;
 extern s16* D_800E4274;
-extern char D_800A02B8[];
 
 /* The per-actor debug readout: twenty rows of entity, model, line, walkmesh
  * and memory state, built up in g_DebugText and pushed to a debug page or the
  * field window.
  *
- * 148 rows / 4 insertions at 2104 instructions against 2102, from a raw m2c
- * seed that did not compile.  What the rewrite established, in the order it
- * was worth instructions:
+ * Rewritten from a raw m2c seed that did not compile.  What it needed, in the
+ * order it was worth instructions:
  *
  *   - **Every if/else that feeds a call has the call written out in both
  *     arms.**  The target's arms each carry the *whole* argument setup --
@@ -2273,9 +2271,22 @@ extern char D_800A02B8[];
  *     emits the setup once and is 11 instructions short per site.  There are
  *     36 such arms (the eleven `D_8009D78A` flag characters, the three
  *     transparency markers, the two field-state markers) and they were worth
- *     119 instructions.  The colour ladders are the same lever: each arm of
- *     `SetDebugStrRowColor(arg0, 0x12, N)`'s seven-way chain re-does the
- *     `(s16)arg0` sign-extension and materialises its own constant.
+ *     119 instructions.
+ *   - **But the row-2 `SetStrToDebugRow` is the exception, and it is the one
+ *     that finished the function.**  m2c nests it inside each of the three
+ *     "Abst"/"line="/"man=" arms, under a second copy of the same guard; the
+ *     original has it *once*, after the whole if/else chain.  With three
+ *     predecessors cse's table is empty at that block, so `(s16)arg0` and
+ *     `g_DebugText`'s address are both rematerialised there -- which is what
+ *     the target does (`sll a0,s4,16/sra a0,a0,16` and `lui a2/addiu a2` at
+ *     the shared row-2 call) -- and, more to the point, each arm's
+ *     `SetDebugStrRowColor` then has the sign-extension die at the call, so
+ *     it goes straight into `$a0` instead of into a callee-saved register
+ *     with a `move`.  Nested it is 144 rows and +2 instructions, three of
+ *     them `move a0,s0`; hoisted it is **0**.  The same shape one level down
+ *     -- the row-7 clear reached by `goto block_91` -- wants the opposite,
+ *     the call *duplicated* into both paths, because there the two a0 setups
+ *     differ and cross-jumping merges only the `a2`/`a1`/`jal` suffix.
  *   - **The " Tg=" dispatch is a `switch`, not m2c's nest of ifs.**
  *     `ori v0,1/beq` then `slti v0,v1,2/beqz` then `beqz v1` is
  *     `expand_end_case`'s compare chain, and the arms are laid out 0, 1, 2,
@@ -2285,9 +2296,8 @@ extern char D_800A02B8[];
  *     instructions.
  *   - **Both parameters are `s16`.**  The prologue copies each argument
  *     register with a plain `addu` and re-does `sll 16/sra 16` at every use;
- *     a `u8` parameter would mask on entry.  m2c's `u8 actorId` cost 8
- *     instructions.  Measured: (s16,s16) 256 rows, (s32,s16) 259, (s32,s32)
- *     261, (s16,u8) 278, (s32,u8) 281.
+ *     a `u8` parameter would mask on entry.  Measured: (s16,s16) 256 rows,
+ *     (s32,s16) 259, (s32,s32) 261, (s16,u8) 278, (s32,u8) 281.
  *   - **The FieldLine fields want a pre-scaled byte offset in a local,
  *     re-derived at every access.**  `*(s16*)((u8*)&D_8007E7AC + 0x4 +
  *     D_8007078C[actorId] * 0x18)` hands gcc a MULT, `associate` lifts the
@@ -2295,55 +2305,33 @@ extern char D_800A02B8[];
  *     serves all six fields from a callee-saved register.  Assigning
  *     `lineOff = D_8007078C[actorId] * 0x18;` immediately above each access
  *     gives `(plus (symbol) (reg))`, which stays in the mem and comes out as
- *     the assembler's `lui at/addiu at/addu at` per field -- which is what
- *     the target has, and what the already-matching FieldInitDefaultValues in
- *     this unit uses.  35 rows.  Hoisting one `lineOff` for the whole block
- *     instead deletes the re-derivations and measures -42 instructions.
- *     Spelling the interior address as `&D_8007E7AC.pos.z1` is exactly inert.
+ *     the assembler's `lui at/addiu at/addu at` per field.  35 rows.
+ *     Hoisting one `lineOff` for the whole block is -42 instructions.
  *   - **`&D_8009AC1E` is a named `s16*` local, assigned at the top of the
  *     block that uses it.**  The target sets `$s3` once and reads `lh 0(s3)`
  *     nine times; direct reads rematerialise `lui %hi` at each one, eight
  *     instructions.  `volatile` also reaches the register form and is wrong
- *     here -- it turns every `lh` into `lhu`/`sll`/`sra` and measures 204
- *     rows / +27.  Assigning the pointer at the top of the *function* instead
- *     of at the top of the block is 179/+4 against 148/+2.
- *   - m2c's `var = x << 0x10; ... temp = var >> 0x10;` pairs are gcc
- *     re-extending a short parameter; with the parameters typed they are pure
- *     stack slots and the frame is 0x10 too large.
+ *     here -- it turns every `lh` into `lhu`/`sll`/`sra`, 204 rows and +27.
+ *   - **Two loads are declaration facts.**  `*D_8009D288 | (D_8009D289 << 8)`
+ *     reads a *byte* at D_8009D288 (the `u16` type it carries for world.c
+ *     gives `lhu`, and OR-ing a halfword with a byte shifted left 8 is a
+ *     different value as well), and the "DP" row prints the two halves of
+ *     `g_FieldModelBufferTop` -- D_80075E12 then
+ * `*(u16*)&g_FieldModelBufferTop`
+ *     -- where the `u32` read gives `lw`.  One row each.
  *   - g_FieldModels is a `FieldEntity*` and every one of m2c's eighteen
  *     `unkNN` is a named member -- PosX/PosY/PosZ at 0xC/0x10/0x14, Dir 0x38,
  *     TalkOff/visible/activeAnimId at 0x5B/0x5C/0x5E, animSpeed/
  *     animCurrentFrame/animLastFrame at 0x60/0x62/0x64, SolidRange/TalkRange/
- *     MoveSpeed/PosI at 0x6C/0x6E/0x70/0x72.  The printed labels confirm each
- *     one ("X=", "am", "MS", "AS", ":TR", ".SR", " I=").
+ *     MoveSpeed/PosI at 0x6C/0x6E/0x70/0x72.
  *   - The three "B-R"/"R-G"/"G-B" rows are the walkmesh triangle
  *     `g_FieldEntity[*camTri].PosI` selects: three vertices, three s16 each,
- *     12 halfwords apart off `D_800E4274`, the spelling field2.c already
- *     matches with.
- *   - `D_800A0238`/`023C`/`0240`/`02C0`/`02C4` are one-character strings
- *     (".", "V", "T", "*", "B") and `D_800A0270` is "".  m2c renders them as
- *     `static s8` objects, which is a second definition of bytes the .s
- *     already owns.
+ *     12 halfwords apart off `D_800E4274`.
  *
- * What is left is register allocation, in two shapes and nothing else.  The
- * target keeps g_DebugText's address in $s1 and (s16)actorId in $s2; we get
- * them the other way round, and that single swap is most of the 148 rows.
- * The four insertions are all `move a0,s0` in the row-clearing block, where
- * the target sign-extends arg0 straight into $a0 at each of the five calls
- * and we materialise it into $s0 and copy.  Both are `allocno_compare`
- * outcomes on a program that is now two instructions from the target's
- * length, which is where CLAUDE.md says to stop reading and let
- * decomp-permuter search -- raise perm_temp_for_expr and perm_ins_block.
- *
- * When it lands: this function OWNS D_800A0270 ("") and D_800A02B8 ("/"),
- * which FieldDebugRenderPage and FieldEventRequest borrow by name.  Both
- * become local labels the moment it becomes C, so they need lines in
- * config/sym_extern.us.txt -- see the LENDS recipe in CLAUDE.md.  m2c's
- * `s8 D_800A02B8[4] = {0x2F,...}` is a *definition* and has to stay an
- * `extern` while this is pinned. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", DebugUpdateActor);
-#else
+ * This function owns the "" at 0x800A0270 and the "/" at 0x800A02B8 that
+ * FieldEventRequest used to borrow by name; now that both are C in this unit
+ * gcc folds the identical literals, so both are written as literals again and
+ * the two `extern`s are gone. */
 void DebugUpdateActor(s16 arg0, s16 actorId) {
     s16* camTri;
     s32 lineOff;
@@ -2407,9 +2395,6 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
                 FieldDebugStringCopy(g_DebugText, "Abst");
                 if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
                     SetDebugStrRowColor(arg0, 2, 6);
-                    if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
-                        SetStrToDebugRow(arg0, 2, g_DebugText);
-                    }
                 }
             } else {
                 FieldDebugStringCopy(g_DebugText, "line=");
@@ -2424,9 +2409,6 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
                 }
                 if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
                     SetDebugStrRowColor(arg0, 2, 3);
-                    if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
-                        SetStrToDebugRow(arg0, 2, g_DebugText);
-                    }
                 }
             }
         } else {
@@ -2441,10 +2423,10 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
             if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
                 SetDebugStrRowColor(arg0, 2, 2);
-                if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
-                    SetStrToDebugRow(arg0, 2, g_DebugText);
-                }
             }
+        }
+        if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
+            SetStrToDebugRow(arg0, 2, g_DebugText);
         }
         if (g_FieldScriptDebugFlags & 2) {
             DebugPrintToFieldWindow(g_DebugText);
@@ -2617,14 +2599,12 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
                 if (g_FieldScriptDebugFlags & 2) {
                     DebugPrintToFieldWindow(g_DebugText);
                 }
-                goto block_91;
-            }
-            if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
+                SetStrToDebugRow(arg0, 7, "");
+            } else if (((u8)D_8009FE8C | (g_FieldScriptDebugFlags & 1)) != 0) {
                 SetStrToDebugRow(arg0, 3, "");
                 SetStrToDebugRow(arg0, 4, "");
                 SetStrToDebugRow(arg0, 5, "");
                 SetStrToDebugRow(arg0, 6, "");
-            block_91:
                 SetStrToDebugRow(arg0, 7, "");
             }
         }
@@ -2759,7 +2739,7 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             }
             FieldDebugStringCopy(g_DebugText, "SF");
             FieldDebugStringU32hex(
-                *D_8009D288 | (D_8009D289 << 8), g_DebugMessageBuffer);
+                *(u8*)D_8009D288 | (D_8009D289 << 8), g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
             if (g_FieldState->characterLock != 0) {
                 if (D_80081DC4 != 0) {
@@ -2796,7 +2776,7 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, " ");
             FieldDebugStringU32hex(
-                (s32)g_FieldModelBufferTop, g_DebugMessageBuffer);
+                *(u16*)&g_FieldModelBufferTop, g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
             if (g_FieldMusicLock != 0) {
                 FieldDebugStringConcat(g_DebugText, "M");
@@ -2900,7 +2880,6 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
         }
     }
 }
-#endif
 
 /* Traces one field-script opcode to debug page 3 and/or the on-screen window:
  * the mnemonic first, then one "arg<n>=<byte>" line per operand read straight
@@ -2959,7 +2938,7 @@ void FieldDebugAddParseValueToPage2(const char* str, s32 val, s32 kind) {
                 val, g_DebugMessageBuffer); // to four hex digits
             break;
         default:
-            FieldDebugStringCopy(g_DebugMessageBuffer, D_800A0270);
+            FieldDebugStringCopy(g_DebugMessageBuffer, "");
             break;
         }
         FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
@@ -4345,7 +4324,7 @@ s32 FieldEventRequest(s16 type, u8 target, u8 priority, u8 scriptId) {
         FieldDebugStringConcat(
             g_DebugMessageBuffer, (char*)((s32)g_FieldScripts) +
                                       sizeof(FieldScriptHeader) + (target * 8));
-        FieldDebugStringConcat(g_DebugMessageBuffer, D_800A02B8);
+        FieldDebugStringConcat(g_DebugMessageBuffer, "/");
         FieldDebugAddParseValueToPage2(g_DebugMessageBuffer, scriptId, 2);
     }
 

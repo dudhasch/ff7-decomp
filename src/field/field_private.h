@@ -86,7 +86,6 @@ typedef struct FieldRenderData {
 extern struct FieldRenderData g_FieldRenderData[2]; // double buffered
 
 extern char g_FieldDebugDigits[16]; // '0' to 'F' for hex digits
-extern char D_800A0270[4];
 extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
 extern s8 g_FieldDebugWordLabel;
