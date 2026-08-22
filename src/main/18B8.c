@@ -478,19 +478,18 @@ s32 func_80014BA8(s32 arg0) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014BE4);
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80014C44);
-#else
-// func_80014C44 needs to be in a different file than D_80062E10
+/* The eight bytes at D_80062E10 are one object -- func_80014B70 walks them the
+ * same way. Indexing through the cast keeps the `%hi`/`%lo` addressing the
+ * target has, where a walked `u8*` local turns both bases into givs and costs
+ * an instruction; see CLAUDE.md on -G8 and %gp_rel. */
 void func_80014C44(s32 arg0) {
     s32 i;
     for (i = 0; i < 8; i++) {
-        D_80062E10[i] = arg0;
+        ((u8*)&D_80062E10)[i] = arg0;
         arg0 >>= 1;
     }
     D_80062E18 = 0;
 }
-#endif
 
 void func_80014C70() {
     D_80062E1C = 0;

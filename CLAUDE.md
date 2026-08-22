@@ -1681,6 +1681,30 @@ a near-miss, in rough order of frequency:
   local.** An `s32` has no widening node and emits nothing; the mask is the
   declaration. `FieldDebugInitBuffers`' `tpage` is the case, and reading it as
   noise costs the whole tail of the function.
+* **In a `-G` unit, `%gp_rel` against your `%hi`/`%lo` is a *size* fact about
+  the object, and the escape is to index through a cast.** `src/main/18B8.c`
+  carries `//! G=8`, so gcc 2.6.3's `ENCODE_SECTION_INFO` marks every object it
+  can see whose size is 1..8 bytes as small data and addresses it in one
+  instruction off `$gp`. Anything larger, and anything whose size it does *not*
+  know — an `extern T x[];` with no bound — keeps the ordinary `lui`/`%lo`
+  pair. So a target that reaches two neighbouring globals two different ways
+  (`sb $a0,%lo(D_80062E10)($at)` for one, `sw $zero,%gp_rel(D_80062E18)($gp)`
+  for the next word along) is telling you the original compiled them in
+  *different translation units*, with the `%hi`/`%lo` one declared `extern` and
+  unsized. splat has merged those units into one `.c`, so the definition is now
+  visible and gcc small-datas it.
+
+  Indexing through a cast is what gets the addressing back without moving the
+  definition: `((u8*)&D_80062E10)[i] = x;` on an `s32 D_80062E10 = 0;` emits
+  `lui at,%hi / addu at,at,<i> / sb %lo(at)`, exactly the target's form, where
+  a walked `u8* p = (u8*)&D_80062E10;` makes `p` and the bound both givs and
+  costs an instruction (`slt` against a computed end pointer instead of
+  `slti 8`). `func_80014C44` measured 0 rows through the cast and 7 rows /
+  +1 instruction through the pointer; the park note beside it had said the
+  function "needs to be in a different file than D_80062E10", which was the
+  right diagnosis and the wrong conclusion. Note the size rule is a *ceiling*,
+  not a floor: declaring the same eight bytes as `u8 D_80062E10[8]` would still
+  be small data, because 8 is `<= G`.
 * **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency
