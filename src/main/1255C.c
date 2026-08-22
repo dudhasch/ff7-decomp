@@ -319,7 +319,7 @@ void SystemMenuAddMpByPartyId(s32 partyId, s32 amount) {
 }
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuRemovePartyGold);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/1255C", SystemMenuRemovePartyGold);
 #else
 /* PARKED — 6 changed, 2 inserted. Semantics exact; only codegen shape differs.
  * Target walks a cached `u32*` to D_8009D260 in $a1 (lui/addiu, all lw/sw via
@@ -355,7 +355,7 @@ u32 SystemMenuRemovePartyGold(u32 arg0) {
 #endif
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", SystemMenuAddPartyGold);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/1255C", SystemMenuAddPartyGold);
 #else
 /* PARKED — 7 changed, 3 inserted. Semantics are exact; only codegen shape
  * differs. Target walks a cached `u32*` to D_8009D260 in $a1 (lui/addiu, then

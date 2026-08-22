@@ -370,7 +370,7 @@ void func_80014658(s32 file_no, void (*cb)(void)) {
 }
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800146A4);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_800146A4);
 #else
 void func_800146A4(void) {
     s32 var_s0 = -1;
@@ -480,7 +480,7 @@ s32 func_80014BA8(s32 arg0) {
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014BE4);
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014C44);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80014C44);
 #else
 // func_80014C44 needs to be in a different file than D_80062E10
 void func_80014C44(s32 arg0) {
@@ -620,7 +620,7 @@ s32 func_80015B88(void) {
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015BC0);
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015C3C);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80015C3C);
 #else
 // load kernel module by its ID
 // https://wiki.ffrtt.ru/index.php/FF7/Kernel/Low_level_libraries#BIN-GZIP_Type_Archives
@@ -797,7 +797,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A280);
 #ifndef NON_MATCHINGS
 // needs BSS import for %gp regs
 void func_8001A384(u8 arg0, s32 arg1);
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A384);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A384);
 #else
 extern s8 D_80062FFC = 0;
 extern u8 D_80063020 = 0;
@@ -812,7 +812,7 @@ void func_8001A384(u8 arg0, s32 arg1) {
 #ifndef NON_MATCHINGS
 // needs BSS import for %gp regs
 void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2);
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A3B8);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A3B8);
 #else
 extern s8 D_80062FFC = 0;
 extern u8 D_80063020 = 0;
@@ -885,7 +885,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001AB1C);
 #ifndef NON_MATCHINGS
 // matching with GCC 2.6.3
 s32 func_8001AC9C(u8, s32);
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001AC9C);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001AC9C);
 #else
 extern Unk80062F7C* D_80062F7C = NULL; // %gp
 extern s32 D_80062F10 = 0;             // %gp
@@ -1162,7 +1162,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001DE70);
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001DEB0);
 
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001DEF0);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001DEF0);
 #else
 // only matches with --aspsx-version=2.21
 // sets the menu color with a quadruplet of RGB values

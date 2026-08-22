@@ -3626,6 +3626,27 @@ noticed. Measuring a parked body means unparking it first — `checkfn.py` now
 refuses to give a verdict while the name still appears in a `MASPSX_OVERRIDE`
 in that `.c`, with the same multiline-aware match the rename check uses.
 
+**And a park can be spelled the other way, which defeats every tool at once.**
+`#ifndef NON_MATCHINGS / INCLUDE_ASM(...) / #else / <body> / #endif` pins the
+bytes exactly as `MASPSX_OVERRIDE` does, but nothing named `MASPSX_OVERRIDE`
+appears — so `checkfn.py` compared the target to itself and printed **MATCH
+with exit 0**, `parked_queue.py` reported "no `MASPSX_OVERRIDE` bodies found",
+`variant_eval.py`'s `unpark()` scored the pinned build, and `worklist.py`
+counted the function as *unstarted work*. A near-miss body with a long park
+note is invisible to the whole toolchain and reads as a match to the one tool
+anybody runs. **Thirteen functions across `src/` were parked this way** — one
+in `src/magic/escape.c`, two in `src/main/1255C.c`, seven in `src/main/18B8.c`,
+one in `src/menu/cnfgmenu.c`, two in `src/menu/savemenu.c` — and the
+`cnfgmenu` one had an exhaustive note recording roughly 1700 measured variants
+and 1.5M permuter iterations that no tool could see.
+
+Both halves are fixed. `checkfn.py`'s guard now also matches an `INCLUDE_ASM`
+inside a `#ifndef NON_MATCHINGS` arm that has an `#else`, and refuses with the
+same message; verified both ways, since a guard that over-triggers would
+refuse every real match. And all thirteen are converted to `MASPSX_OVERRIDE`,
+which is byte-neutral — the build stays green because both macros assemble the
+same `.s`. **Spell a park `MASPSX_OVERRIDE` and nothing else.**
+
 **A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
 truncates silently: on a longer function the tail simply never enters the
 comparison, so it can differ freely while the visible rows look perfect.

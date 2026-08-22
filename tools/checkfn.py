@@ -282,6 +282,21 @@ def calibrate_sections(rows, syms):
 OVERRIDE_RE = re.compile(
     r'MASPSX_OVERRIDE\(\s*"[^"]*"\s*,\s*(\w+)\s*\)', re.S)
 
+# The other way to spell a park, and the dangerous one: an INCLUDE_ASM inside
+# a `#ifndef NON_MATCHINGS` whose `#else` arm holds the C body. It pins the
+# bytes exactly as MASPSX_OVERRIDE does, so the verdict is again the target
+# against itself -- but nothing named MASPSX_OVERRIDE appears, so this guard
+# used to wave it through and print MATCH with exit 0 for a body that has
+# never been compiled. `parked_queue.py` also reports "no MASPSX_OVERRIDE
+# bodies found", `variant_eval.py`'s unpark() scores the pinned build, and
+# `worklist.py` counts the function as unstarted. Thirteen functions across
+# src/ were parked this way; see CLAUDE.md's "ways a clean-looking diff lies".
+IFNDEF_PARK_RE = re.compile(
+    r'#if(?:ndef\s+NON_MATCHINGS|\s+!\s*defined\s*\(\s*NON_MATCHINGS\s*\))'
+    r'(.*?)#else', re.S)
+INCLUDE_ASM_RE = re.compile(
+    r'INCLUDE_ASM\(\s*"[^"]*"\s*,\s*(\w+)\s*\)', re.S)
+
 
 def compiled_insn_count(source, func):
     """How long the function we just built actually is, in instructions.
@@ -311,13 +326,19 @@ def compiled_insn_count(source, func):
 
 def pinned_functions(source):
     with open(os.path.join(REPO, source), errors="replace") as fh:
-        return set(OVERRIDE_RE.findall(fh.read()))
+        text = fh.read()
+    pinned = set(OVERRIDE_RE.findall(text))
+    for arm in IFNDEF_PARK_RE.findall(text):
+        pinned.update(INCLUDE_ASM_RE.findall(arm))
+    return pinned
 
 
 def check(source, func, syms, show_rows=False, pinned=()):
     if func in pinned:
-        die("%s is still pinned with MASPSX_OVERRIDE in %s.\n"
-            "         The macro assembles the reference .s into the "
+        die("%s is still pinned in %s -- by MASPSX_OVERRIDE, or by an\n"
+            "         INCLUDE_ASM inside a #ifndef NON_MATCHINGS whose "
+            "#else holds the body.\n"
+            "         Either way the reference .s is assembled into the "
             "object, so the C beside\n"
             "         it is never compiled and the verdict would be the "
             "target against itself --\n"
