@@ -618,13 +618,13 @@ s32 func_80015B88(void) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015BC0);
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80015C3C);
-#else
 // load kernel module by its ID
 // https://wiki.ffrtt.ru/index.php/FF7/Kernel/Low_level_libraries#BIN-GZIP_Type_Archives
 s32 func_80015C3C(u8* src, void* dst, s32 id) {
-    s32 len;
+    /* `len` is u16, not s32: the target ORs into one register and copies the
+     * result into `len`'s own (`or v1,v1,v0` / `move a3,v1`), which is an
+     * HImode pseudo refusing to coalesce with the SImode OR. */
+    u16 len;
     s32 cur_id;
     s32 ret;
 
@@ -639,7 +639,6 @@ s32 func_80015C3C(u8* src, void* dst, s32 id) {
     }
     return ret;
 }
-#endif
 
 void func_80015CA0(GzHeader* src, s32* dst) {
     s32 i;
