@@ -679,7 +679,43 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5AC8);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5BC8);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5E0C);
+// Copy a message string, expanding its escapes: 0xF9 takes one literal byte
+// with it, and the eight codes 0xEA..0xF1 take a two-byte operand, which is
+// replaced by the next entry of `words` when it reads 0xFF 0xFF. Returns the
+// number of source bytes consumed.
+s32 func_800A5E0C(u8* dst, u8* src, u16* words) {
+    s32 n;
+    u8 c;
+    u8 hi;
+    s32 lo;
+
+    n = 0;
+    for (;;) {
+        c = *src++;
+        n++;
+        *dst++ = c;
+        if (c == 0xFF) {
+            goto done;
+        }
+        if (c == 0xF9) {
+            c = *src++;
+            n++;
+            *dst++ = c;
+        } else if ((u8)(c + 0x16) < 8) {
+            hi = *src++;
+            lo = *src++;
+            if (hi == 0xFF && lo == hi) {
+                hi = *words >> 8;
+                lo = *words++;
+            }
+            *dst++ = hi;
+            *dst++ = lo;
+            n += 2;
+        }
+    }
+done:
+    return n;
+}
 
 s32 func_800A5EB0(s32, s16*);
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5EB0);
