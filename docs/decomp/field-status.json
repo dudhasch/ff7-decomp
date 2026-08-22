@@ -163,12 +163,6 @@
    "length_delta": 0
   },
   {
-   "name": "FieldDebugRenderString",
-   "rows": 66,
-   "ins": 6,
-   "length_delta": 0
-  },
-  {
    "name": "KawaiSetVertexColorFromLighting",
    "rows": 187,
    "ins": 8,
@@ -193,16 +187,16 @@
    "length_delta": 21
   },
   {
-   "name": "FieldDebugRenderPage",
-   "rows": 806,
-   "ins": 95,
-   "length_delta": -4
+   "name": "FieldBGUpdateDrawenv",
+   "rows": 536,
+   "ins": 51,
+   "length_delta": -1
   },
   {
-   "name": "FieldBGUpdateDrawenv",
-   "rows": 811,
-   "ins": 134,
-   "length_delta": 27
+   "name": "FieldDebugRenderPage",
+   "rows": 754,
+   "ins": 101,
+   "length_delta": 0
   }
  ],
  "queue_measured": true,

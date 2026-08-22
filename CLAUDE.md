@@ -4764,6 +4764,41 @@ Seven functions at the top of `akao.c` (`func_800293D0`, `func_800293F4`,
 command, and that grep belongs in the triage before `worklist.py`'s ordering,
 not after three attempts on one of them.
 
+**Correction, from the same session: the route the paragraph above dismisses
+is the one that works, and it has already landed 23 functions.**
+`src/main/1255C.c` carries `G=8` on its `//!` line *and* spells nine of its
+globals as tentative definitions (`s32 D_80062DF8;`) rather than `extern`s —
+which is exactly what puts them in the compiler's own `.sdata`/`.sbss` and so
+into maspsx's `sdata_entries`. Its object emits **269** gp-relative accesses
+against the 37 target `.s` files that want them, and 37 of that unit's 52
+remaining functions went from unmatchable to ordinary work. The other half of
+the fix is in `tools/ninja/gen.py`, which now passes `-G<n>` to **maspsx** as
+well as cc1; cc1 does not choose the addressing form, it emits `lw $2,<sym>`
+and leaves the expansion to the assembler, and maspsx's `sdata_limit`
+defaulted to 0.
+
+So the cost is not "relocating the whole small-data window" — it is declaring
+the handful of globals that unit *owns*, and `make build`'s SHA-1 is the
+arbiter. What is genuinely true is the narrower claim: an `extern` can never
+get the `$gp` form, so the definition has to move into the `.c`.
+
+For `akao.c` specifically the change is bounded, because the affected
+functions are one original translation unit rather than a scatter. The seven
+`%gp_rel` functions run `0x800293D0` to `0x800299C8` starting at the very
+first function in the file, and the two that sit inside that range with no
+`%gp_rel` at all — `func_800297A4` and `func_80029818`, both parked at 3 rows
+on a `QTY_CMP_PRI` counter — are in the same block and were compiled with the
+same `-G`, which is a live hypothesis for their residue too. `0x80029C48`
+onward is a different original unit and must keep `-G0`. That is the same
+shape as the `field.c` five-way split: one merged unit carrying two
+incompatible per-unit settings, where the fix is a split at the boundary the
+addressing mode reveals, not a header change applied to the whole file.
+
+The general rule: **`grep -l gp_rel` first, then check whether the hits
+cluster.** A contiguous run means an original translation unit and a bounded
+fix; a scatter through the file means something else is going on and the
+paragraph above applies.
+
 ### 4. Last-mile: decomp-permuter
 
 If step 3 stalls — zero diff rows are out of reach by hand, or you're stuck
