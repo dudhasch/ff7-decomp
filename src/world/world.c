@@ -1925,7 +1925,17 @@ void func_800AF1A8(u32 arg0, s32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF1E8);
+void func_800AF1E8(u32 arg0, u32 arg1) {
+    Unk8010B3B8* p;
+
+    p = D_8010B3B8;
+    if (p != NULL && arg0 < 0x24 && arg1 < 0x1C) {
+        p->unk0.vx &= 0x1FFF;
+        p->unk0.vz &= 0x1FFF;
+        p->unk0.vx |= arg0 << 13;
+        p->unk0.vz |= arg1 << 13;
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF24C);
 
