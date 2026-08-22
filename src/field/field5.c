@@ -2805,109 +2805,61 @@ extern u8 D_800E1036[];
  * switch is the jump table at .rodata+0x3D8; the default arm maps digits,
  * upper case and lower case by three additive ranges.
  *
- * **66 changed / 0 inserted, at the exact 191, and `insn_histogram.py` reports
- * the opcode table *identical*** -- every remaining row is register naming
- * cascading off two hoist placements, stated as loop.c arithmetic at the end.
- * Down from 96 rows on three changes, of which the first is the whole story.
+ * Four spellings carry this function and none of them is optional. The whole
+ * residue was two `move_movables` decisions plus a `block_alloc` tie, and
+ * cc1's `-dL` and `-dl` dumps name both -- see CLAUDE.md's "read the hoist
+ * decisions" and "size in QTY_CMP_PRI" bullets, both of which this function
+ * is the worked example for.
  *
- * Settled, each measured against every alternative that was tried:
+ *   - **`colOff`, `colBase` and `rowIdx` split the colour lookup into three
+ *     statements.** Written as one address expression, `D_800E08A8 + page *
+ *     378 + row` is expanded with EXPAND_SUM: every leaf is emitted first and
+ *     `force_operand` emits the arithmetic afterwards, so the symbol's set
+ *     lands *above* the multiply chain, its movable is earlier in the list
+ *     than the multiply's, and the two `plus` insns ride the multiply out of
+ *     the loop instead of forcing the symbol. fold also drives the symbolic
+ *     constant to the end of any flat sum, so no association reaches the
+ *     target's `(page*378 + base) + row` -- seven spellings measured exactly
+ *     66. A plain assignment expands in tree order instead, so with the
+ *     multiply and then the symbol in statements of their own the symbol's
+ *     movable comes last, is not desirable (savings 2 x life 3), and both
+ *     adds stay in the loop as "not safe". That also stops `colOff + rowIdx`
+ *     being hoisted as one invariant and keeps the symbol in a register
+ *     rather than in an `$at` macro expansion. 66 -> 16 rows.
+ *   - **`rowIdx = row;` sits with the packet stores, not at the top of the
+ *     loop.** Its live range has to be long enough for the sign-extension to
+ *     be worth hoisting (the target has it in `$s8`'s place, `t8`), and its
+ *     position in the loop body is the order `move_movables` emits the
+ *     preheader in. At the loop top it is emitted first and the preheader
+ *     comes out in the wrong order (16 rows); anywhere from `rb =
+ *     g_FieldDebugRb;` down to the colour store is 9, all eight placements
+ *     identical.
+ *   - **`addPrim`'s second argument is `rbOff + (s32)D_800E1028 + charOff`.**
+ *     `charOff + base + rbOff` associates the other way (9 rows) and every
+ *     subscript form, including `(u8*)sprite`, is 93 rows and two
+ *     instructions short.
+ *   - **`chars` is `s16`.** The last eight rows were a straight `$t0`/`$t1`
+ *     swap with `charOff`, which is `block_alloc`: both quantities have 6
+ *     references, lives 30 and 31, and `QTY_CMP_PRI = floor_log2(n_refs) *
+ *     n_refs * size / (death - birth)` scores them 1.600 against 1.548. The
+ *     only reachable term is `size` -- HImode halves it, `chars` drops to
+ *     0.800 and `charOff` takes `$t0`. `width_sweep.py` finds it in one run;
+ *     no other width of any of the ten locals moves the count.
  *
- *   - **`addPrim`'s second argument is a separate address computation, built
- *     offset-first as an integer sum**, and *not* the `sprite` pointer:
- *     `(u8*)(charOff + (s32)D_800E1028 + rbOff)`. The macro uses the pointer
- *     twice, as an address for `setaddr(p, ...)` and as a *value* for
- *     `setaddr(ot, p)`, and the target computes the two differently --
- *     `a2 = (rbOff + charOff) + base` for the stores, `a1 = rbOff + (charOff +
- *     base)` for the value. Written as `&D_800E1028[rbOff + charOff]` the two
- *     are one expression, cse shares them, and the target's two extra `addu`
- *     have nowhere to come from. **96 -> 63 rows.** Measured: the
- *     `&(D_800E1028 + charOff)[rbOff]` subscript form is identical at 63;
- *     `(u8*)(rbOff + (charOff + (s32)D_800E1028))` and
- *     `(u8*)(rbOff + ((s32)D_800E1028 + charOff))` are both 81.
- *   - **`charOff` is `s32`.** The note this replaces landed `s16` because it
- *     reached the exact length on the *old* body; with the addPrim change it
- *     is +1 instruction, the `sll 20`/`sra 16` pair that a plain `sll 4`
- *     replaces. `width_sweep.py` re-run after every change now plateaus at 66
- *     over all 35 variants, and only `ch u32`, `charOff u32`, `chars u32`,
- *     `off u32`, `rb s16`/`u32` and `rbOff u32` hold both the rows and the
- *     length -- i.e. the widths are closed and none of them is the residue.
- *   - **`page * 378` is written inline at the colour lookup**, not taken from
- *     the `off` local. With `off` the `%hi/%lo(D_800E08A8)` movable wins a
- *     *callee-saved* register, which is `sw s0` in the prologue and `lw s0` in
- *     the epilogue plus a nop: **63 rows but +3 instructions**. Inline it is
- *     66 and exact, and the length is the arbiter (a row count only compares
- *     between bodies of the same length).
- *
- * Everything below was measured against the finished body above, and each
- * sweep varied exactly one dimension with the other two held at the values
- * that landed. Re-derive them if any of the three changes moves.
- *
- *   - *address spelling of the colour lookup*, seven forms -- subscript,
- *     pointer arithmetic, `(s32)` integer sum with the base first, in the
- *     middle and last, and `(page * 378 + row) + (s32)D_800E08A8`. The result
- *     is binary and nothing sits between the two values: every form written
- *     with the `off` local is 63/+3, every form with `page * 378` inline is
- *     66/exact. The spelling does not reach the hoist.
- *   - *naming the colour index or the colour pointer*, at the top of the loop
- *     body and immediately above the store: `idx = off + row` 86/+6 and 95/+5,
- *     `colors = D_800E08A8 + off` 88/+10 and 94/+7. All far worse.
- *   - *loop shape*: `while (*str != 0)`, `for (;;)` with a leading `break`,
- *     the two guards as `goto done`, and the two guards as `return` are
- *     **exactly 66, all four**. `off = page * 378;` hoisted above the loop is
- *     68/+8. Loop shape is not a lever here, which is worth knowing because it
- *     is the obvious explanation for a hoist that fires in one body and not
- *     the other.
- *   - *`addPrim` written out by hand as two `setaddr`s*, with the
- *     `g_FieldDebugRChars` store between the halves, with `x += 8` between
- *     them, with both, and with the store moved after the call: **exactly 66
- *     in every arrangement**, and the plain expansion with nothing moved is
- *     also exactly 66 -- so the expansion itself is inert and statement order
- *     inside it buys nothing.
- *
- * The residue is two `move_movables` decisions, and cc1 prints both. Dump it
- * with `-dL` (see CLAUDE.md; write the dump to a container path or it comes
- * out 0 bytes) and the loop's header reads `Loop from 22 to 524: 185 real
- * insns`, then one line per movable. A movable is hoisted iff
- * `threshold * savings * life >= insn_count`:
- *
- *   - `(set (reg) (const_int 16777215))` -- the 0x00FFFFFF half of `setaddr`'s
- *     bitfield read-modify-write -- is `life 10, savings 1, not desirable`.
- *     The target hoists it: `lui t4,0xff / ori t4,t4,0xffff` is the last pair
- *     in its preheader and we materialise it inside the loop.
- *   - `(set (reg) (symbol_ref "D_800E08A8"))` is `life 8, savings 2, moved`,
- *     and drags the two `plus` insns after it (`cond forces`). The target does
- *     the opposite -- `lui/addiu/addu/addu` inside the loop, every iteration.
- *
- * Every other movable in the list agrees with the target. The moved/not-moved
- * pairs bound the threshold: savings 2 x life 8 is moved and savings 1 x life
- * 12 is not, so **11.6 <= threshold < 15.5**. That prices both fixes exactly.
- * The mask needs `life >= 13` (and at most 16); putting the
- * `g_FieldDebugRChars` store between the two `setaddr` halves raises it from
- * 10 to 12 -- measured in a second `-dL` dump -- and there is nothing else
- * left in the loop body to put there. The symbol needs `life <= 7` (and at
- * least 5) against its current 8, which means its load has to be emitted
- * *after* the `page * 378` recomputation that feeds the same address, and no
- * association of the sum moves it there: expand emits the sign-extension of
- * `row`, then the symbol, then the multiply, whichever way the operands are
- * written.
- *
- * So both halves are threshold misses of one to four insns of lifetime in
- * loop.c, in opposite directions, and neither term is reachable from C without
- * emitting an instruction -- which by CLAUDE.md's own rule makes this a park
- * rather than a permuter target. Codegen pinned via MASPSX_OVERRIDE. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderString);
-#else
+ * The frame then needs no `unusedLocals` reservation: the three added locals
+ * supply the 8 bytes the target has. */
 void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
     s32 off;
+    s32 rowIdx;
+    s32 colOff;
+    s32 colBase;
     s32 rb;
-    s32 chars;
+    s16 chars;
     s32 rbOff;
     s32 charOff;
     s16 glyph;
     u8 ch;
     SPRT_16* sprite;
-    u8 unusedLocals[4];
 
     while (*str != 0) {
         off = page * 378;
@@ -2980,15 +2932,17 @@ void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
         sprite = (SPRT_16*)&D_800E1028[rbOff + charOff];
         sprite->x0 = x;
         sprite->y0 = y;
+        rowIdx = row;
+        colOff = page * 378;
+        colBase = (s32)D_800E08A8;
         *(u16*)(D_800E1036 + rbOff + charOff) =
-            D_800E4200[*(D_800E08A8 + page * 378 + row)];
+            D_800E4200[*(u8*)(colOff + colBase + rowIdx)];
         g_FieldDebugRChars = chars + 1;
         addPrim(
-            &D_800E41C8[rb][page], (u8*)(charOff + (s32)D_800E1028 + rbOff));
+            &D_800E41C8[rb][page], (u8*)(rbOff + (s32)D_800E1028 + charOff));
         x += 8;
     }
 }
-#endif
 
 /* The debug pages are a 378-byte record: a 0x10-byte header whose fields have
  * their own splat symbols (D_800E0748 = x, 074A = y, 074C = w, 074E = h,

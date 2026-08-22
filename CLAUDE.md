@@ -2670,6 +2670,60 @@ a near-miss, in rough order of frequency:
   residue turns on which of two invariants got hoisted; it is far better than
   permuting the loop body and guessing from the outcome.
 
+  **Do not stop at the threshold arithmetic, though — the dump has a second
+  column and it is the one that matters.** Besides `moved`/`not desirable` a
+  line can read `cond forces I` or `done matches I`, and those two bypass the
+  formula entirely: a movable rides out of the loop when the movable it
+  *forces* is already `done` (`m->forces && m->forces->done`), and a movable
+  that `matches` an earlier identical one is deleted rather than judged. So an
+  invariant address the target computes *inside* its loop is almost never a
+  threshold miss — it is a `forces` link pointing at the wrong operand.
+  `FieldDebugRenderString`'s park note had spent a session bracketing the
+  threshold and concluded "neither term is reachable from C"; the answer was
+  that its two `plus` insns forced the multiply chain instead of the symbol.
+  `tools/loop_movables.py` prints the whole list with each insn named by its
+  `SET_SRC` from the `.cse` dump, which is what makes the links readable.
+
+  **Which operand a `plus` forces is decided by insn order, and *that* is
+  reachable from C: an address expression emits its leaves first, a plain
+  assignment emits in tree order.** `expand_expr` reaches an address with
+  `EXPAND_SUM`, so the whole sum is built symbolically, every leaf (a
+  sign-extension, a `symbol_ref`) is emitted as it is met, and `force_operand`
+  emits the arithmetic afterwards. A symbol that is a leaf of the sum is
+  therefore always *earlier* than the multiply chain it is added to — and
+  `scan_loop` sets `m1->forces = m` for the **last** movable in list order
+  whose single use is `m1`, so the multiply wins, the adds ride it out, and
+  the symbol goes with them. Assign the same value in a statement of its own
+  and the operands are expanded in tree order instead, so the symbol's
+  movable comes last, the adds force *it*, and if it is not desirable they
+  are reported `not safe` and stay:
+
+  ```c
+  colOff = page * 378;              /* still inline, so it still matches   */
+  colBase = (s32)D_800E08A8;        /* now the later movable of the two    */
+  v = D_800E4200[*(u8*)(colOff + colBase + rowIdx)];
+  ```
+
+  Note what each half is for. The multiply has to stay spelled out rather
+  than reusing the loop's existing `off`, or it stops *matching* the loop's
+  own copy, its savings halves and half the chain stops being hoisted (`off`
+  measured +3 instructions). And `colBase` has to be a **variable**, because
+  `fold` drives a symbolic constant to the end of any flat sum — seven
+  spellings of the association, `(s32)` casts included, measured *exactly*
+  the same 66 rows. Splitting the sum also stops `colOff + rowIdx` being
+  hoisted as one invariant and keeps the symbol in a register instead of an
+  `$at` macro expansion. 66 rows to 16 on that one change.
+
+  **A local widened for a long live range is also a preheader-ordering knob,
+  so sweep where it is assigned.** `move_movables` emits the hoists in
+  movable-list order, i.e. insn order in the loop body, so `rowIdx = row;`
+  written at the top of the loop puts the sign-extension first in the
+  preheader where the target has it third. Moved down among the packet
+  stores it is still hoisted (the live range is what matters, not the
+  position) and the preheader comes out in the target's order: 16 rows to 9,
+  with all eight placements between `rb = g_FieldDebugRb;` and the colour
+  store identical.
+
   What you get per function is
   `Register 73 used 47 times across 538 insns; ...; pointer.` -- `n_refs` and
   `live_length` -- and `;; N regs to allocate: ...` at the top of the `.greg`
@@ -2719,6 +2773,18 @@ a near-miss, in rough order of frequency:
   (3 rows) and cannot emit the `sll 18` / `sra 16` the target has, so they
   are a coincidence, where `s32` carrying the `(s16)` cast is the same
   arithmetic *and* the same ranking.
+
+  `FieldDebugRenderString` is the second worked example and the cheapest one:
+  its last eight rows were a straight `$t0`/`$t1` swap between `chars` and
+  `charOff`, two quantities with **six references each** and lives of 30 and
+  31 — 1.600 against 1.548, a 3% gap that no reference-count change can
+  reach. `s16 chars` halves its `size`, drops it to 0.800, and the swap goes.
+  `tools/qty_pri.py` prints `pri`, `n_refs`, `live_length`, `size` and the
+  hard register each pseudo actually got, in one table sorted by priority, so
+  the gap is a number before any edit is made; `width_sweep.py` then finds
+  the fix in one run. Both were run *after* the body was already at 8 rows —
+  a width sweep on the parked body had plateaued and the note recorded the
+  widths as closed, which was true of that body and of no later one.
 
 * **A value the target keeps in a *global* allocno's register has to be
   assigned to that variable at every step, not computed by one expression.**
@@ -4841,6 +4907,8 @@ resolve to the same address, and the overlay SHA-1s are the proof.
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/affected_overlays.py` | Changed files → the overlays CI has to rebuild |
 | `tools/width_sweep.py` | Every alternative width for every scalar local of one function, scored |
+| `tools/loop_movables.py` | `move_movables`' hoist decision per candidate, each insn named by its RTL |
+| `tools/qty_pri.py` | `local_alloc`'s `pri`/`n_refs`/`live_length`/`size` and the register each pseudo got |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
 | `tools/permuter_scratch.sh` | Build a permuter scratch and prove it is scoreable before searching |
 | `tools/unpark.py` | Make one `MASPSX_OVERRIDE`'d body the live one, for import or measurement |
