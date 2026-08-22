@@ -1314,7 +1314,21 @@ void func_800D5230(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D52A0);
+// Start a fixed-point ramp from the current D_800F5B74 to arg0 over arg1
+// ticks, unless one is already running.
+void func_800D52A0(s32 arg0, s32 arg1) {
+    Unk80162978* e;
+    s32 from;
+
+    if (D_800F10E4 == 0) {
+        e = &D_80162978[func_800BBEAC(func_800D5230)];
+        from = D_800F5B74 << 16;
+        D_800F10E4 = (s32)e;
+        *(s32*)&e->unk8 = arg1;
+        *(s32*)&e->D_8016297C = from;
+        *(s32*)&e->D_80162980 = ((arg0 << 16) - from) / arg1;
+    }
+}
 
 void func_800D5350();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D5350);
@@ -1507,9 +1521,22 @@ static s32 func_800D5AC0(s32 arg0, s32 arg1) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D5B6C);
 
+void func_800D5D28();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D5D28);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D61AC);
+// Claim a slot running func_800D5D28. arg2's top byte is the slot kind and
+// its low 24 bits are re-tagged 0x3A before being stored.
+void func_800D61AC(s32 arg0, s32 arg1, u32 arg2, s32 arg3, s32 arg4) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D5D28)];
+
+    p->D_801621F0 = arg2 >> 24;
+    *(s32*)&p->D_801621F4 = arg0;
+    *(s16*)&p->unk14 = -arg1;
+    *(s32*)&p->unk8 = 0;
+    *(s32*)&p->unkC = (arg2 & 0xFFFFFF) | 0x3A000000;
+    *(s32*)&p->unk10 = func_800D5AC0(arg2, arg3);
+    ((s16*)&p->unk14)[1] = arg4;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D6260);
 
