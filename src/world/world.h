@@ -26,6 +26,12 @@ typedef struct {
     /* 0x06 */ s16 z;
 } WorldStoredTriangle; // size
 
+// a chunk plus one of its triangles
+typedef struct WorldChunkTri {
+    /* 0x00 */ struct WorldChunkHeader* chunk;
+    /* 0x04 */ WorldTriangle* tri;
+} WorldChunkTri; // size: 0x8
+
 typedef struct WorldChunkHeader {
     /* 0x00 */ struct WorldChunkHeader* next;
     /* 0x04 */ WorldTriangle* tris;
@@ -52,7 +58,7 @@ typedef struct WorldActor {
     /* 0x2C */ WorldScriptFrame scriptStack[3]; // may be [4]?
     /* 0x38 */ s32 unk38;
     /* 0x3C */ u16 unk3C;
-    /* 0x3E */ u16 unk3E;
+    /* 0x3E */ s16 unk3E;
     /* 0x40 */ s16 direction;
     /* 0x42 */ s16 unk42;
     /* 0x44 */ s16 yOffset;
@@ -225,7 +231,7 @@ void func_800B0D98(WorldChunkHeader*);
 void func_800B1C80(WorldChunkHeader*);
 void func_800B5274();
 void func_800B5C7C(WorldActor*);
-void func_800B624C(u16, s32);
+void func_800B624C(s16, s32);
 void func_800B63F0(s32);
 void func_800B65E0(s32);
 void func_800B6B28(s16);
@@ -479,6 +485,11 @@ extern u8 D_800C6940;
 extern u8 D_800C6A10[];
 extern u8 D_800E56DC[];
 extern u8 D_8010B434[];
+extern s32 D_800E5614;
+extern s32 D_800E5660;
+extern u8 D_8010ADA4[0x40];
+extern s16 D_8010ADF0;
+extern s8 D_80115A11[];
 extern MATRIX D_800C6808;
 extern MATRIX D_800C6828;
 extern MATRIX D_800C6848;
