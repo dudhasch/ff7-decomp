@@ -1183,7 +1183,15 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001DEB0);
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001DEF0);
 #else
-// only matches with --aspsx-version=2.21
+/* PARKED at 3 rows / -2 instructions, and no C reaches it: both sides use the
+ * assembler's $at macro for the indexed store, they just expand it differently.
+ * maspsx turns on `nop_at_expansion` and `addiu_at` for aspsx < 2.30, which is
+ * exactly the target's extra `nop` after the `lbu` and its
+ * `addiu at,at,%lo(...)` before the `addu` -- the two instructions we are short.
+ * This unit is built at 2.34 (//! G=8 -> the default) and 72 of its functions
+ * match there, so the version cannot simply be changed; 18B8.c is a splat merge
+ * of several original translation units (see the `file cut` comments) and this
+ * one came from a differently-assembled module. The body below is correct. */
 // sets the menu color with a quadruplet of RGB values
 void func_8001DEF0(u8* menu_colors) {
     s32 i;

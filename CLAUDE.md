@@ -1726,6 +1726,19 @@ a near-miss, in rough order of frequency:
   its 154 remaining functions reach a `.bss` symbol this way** —
   `grep -rho '%gp_rel([A-Za-z0-9_]*)' asm/<ovl>/nonmatchings/<unit>/*.s` against
   the unit's `.sdata` symbol list is the one command that sizes it.
+* **Two extra instructions around an indexed-symbol store — an `addiu at,at,%lo`
+  before the `addu` and a `nop` after the load — are maspsx's aspsx-version
+  switch, not your C.** Both sides reach the same `$at` macro; `maspsx.py` sets
+  `nop_at_expansion` and `addiu_at` for `--aspsx-version` **below 2.30**, so the
+  target's `lui at / addiu at,at,%lo / addu at,at,<idx> / sb 0(at)` and your
+  `lui at,%hi / addu at,at,<idx> / sb %lo(at)` are the same pseudo-instruction
+  through two assemblers. Nothing in C changes which macro gcc emits, so this is
+  a park with a one-line diagnosis rather than a search. Check the version knob
+  before assuming the unit is simply mis-declared, though: `//!` sets one
+  assembler for the whole translation unit, and a splat-merged unit (the `file
+  cut between ...` comments in `src/main/18B8.c`) can legitimately contain
+  functions from modules assembled at different versions — `func_8001DEF0`
+  wants < 2.30 while 72 of its neighbours match at 2.34.
 * **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency
