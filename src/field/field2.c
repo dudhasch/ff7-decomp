@@ -584,6 +584,17 @@ typedef struct {
  * separately, so they are ten objects and indexing them would be wrong. And
  * the `lh`/`lhu` gap is not a declaration error: the two symbols above are
  * read both ways *within the target itself*.
+
+ *
+ * The width dimension was swept (80 variants over 16 scalar locals) and
+ * nothing clearly safe improves it. `copyY2` as `s16` reads +27 -> +21
+ * instructions at 840 rows against 811, i.e. better by length and worse by
+ * rows; it holds a scroll offset that is a `%` result and so can legitimately
+ * be negative, which makes the signed form arguably the more correct
+ * declaration -- but on a body 800 rows out that is a program-correction
+ * question rather than a codegen one, and CLAUDE.md's order is to fix the
+ * program first. Left as it is, recorded so the next pass does not re-derive
+ * it.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldBGUpdateDrawenv);
@@ -1381,6 +1392,16 @@ extern FieldLine D_8007E7AC;
  *   - `g_FieldEntity` itself 3 against 4.
  * Those are single-figure differences in how often a member is re-read, not an
  * addressing form, and they are what to chase next.
+
+ *
+ * The width dimension was swept (310 variants over 62 scalar locals) and
+ * **nothing safe improves it**. Two candidates score better and are both a
+ * different program, which is the warning worth keeping: `dy4`/`dy5` as `u8`
+ * reads +21 -> +7 instructions, but those are `MoveEndY - MoveStartY` in
+ * 20.12 fixed point and a byte truncates them; `frameB5` as `u16` reads 500
+ * -> 498, and the very next statement is `if (frameB5 < 0)`, which an
+ * unsigned type makes dead. `width_sweep.py` measures, it does not check
+ * semantics -- read the value's range and its tests before taking a row.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMovementUpdate);
@@ -2705,6 +2726,24 @@ extern u8 g_FieldLineCheckResult;
  * 243 materialisations of `g_FieldEntity` against 4, with `D_80074ED6`
  * (+0x32, `MoveStep`) 22 times and `D_80074F06` (+0x62, `animCurrentFrame`)
  * 18 -- so the same transformation is the next thing to do to it.
+
+ *
+ * **357 rows / +6 instructions -> 352 changed / 33 inserted, at the exact
+ * 296.** Two local widths, from `tools/width_sweep.py`, applied one at a time
+ * because the sweep is stale after each:
+ *
+ *   - **`ent` is `u16`, not `s16`** -- the entity-id copy. +6 -> -1
+ *     instructions and 357 -> 353 rows, a seven-instruction swing from one
+ *     word: every use was sign-extending where the target zero-extends. The
+ *     id is bounded by `modelCount`, so the value is identical.
+ *   - **`blockMove` is `s16`, not `s32`** -- the final
+ *     `FieldEntityWalkmechCross` result. -1 -> **exact** and 352 rows.
+ *     That function returns 0 or +/-8, so `s16` (and even `s8`, which scores
+ *     the same) holds it.
+ *
+ * After both, all 220 variants over the 44 scalar locals plateau at 352, so
+ * the width dimension is closed. What is left is 352 rows at the right length
+ * on a body that is still an m2c seed in shape.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMove);
@@ -2714,10 +2753,10 @@ s32 FieldEntityMove(s16 entityId) {
     s32 id = entityId;
     s32 off;
     u16 triId;
-    s16 ent;
+    u16 ent;
     s32 blockPlus;
     s32 pushPlus;
-    s32 blockMove;
+    s16 blockMove;
     s32 absSlopeX;
     s32 absSlopeY;
 

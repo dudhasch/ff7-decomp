@@ -2347,6 +2347,19 @@ extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
  * share is legible: `*(g_FieldDebugPageY + page * 0x17A)` is the y of one
  * page, and the `page * 189` / `page * 378` strides in the setters are the
  * same table seen as s16 and u8.
+
+ *
+ * **964 rows / +1 instruction -> 955 changed, at the exact 1341.** Two local
+ * widths from `tools/width_sweep.py`, and the first of them is the length:
+ * `nextRect1` (`g_FieldDebugRRect + 1`, bounded by 24) is `u16` not `s16`,
+ * worth 964/+1 -> 959 and exact; then `lastRowY` (`lastRow * 0xA`) is `s16`
+ * not `s32`, 959 -> 955. `pktOff4` as `u16` is one row further and was left,
+ * since single rows on a 955-row body are below the noise the note's real
+ * residue sits in.
+ *
+ * That residue is unchanged in kind and is the trade this note already
+ * describes: `nop +14 / addu -12 / lui +8 / sll -7`, the target re-expanding
+ * `page * 0x17A` and getting its load-delay slots filled for it.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
@@ -2358,7 +2371,7 @@ void FieldDebugRenderPage(s16 page) {
     s16 row;
     s32 y;
     u8* rowText;
-    s16 nextRect1;
+    u16 nextRect1;
     s16 nextRect2;
     s16 headRowId;
     s16 lastRow;
@@ -2369,7 +2382,7 @@ void FieldDebugRenderPage(s16 page) {
     s32 pktOff8;
     s32 pktOff2;
     s32 bufOff3;
-    s32 lastRowY;
+    s16 lastRowY;
     s32 bufOff4;
     s32 pktOff6;
     s32 bufOff1;
@@ -2767,10 +2780,10 @@ extern u8 D_800E1036[];
  * here: `charOff` only became visible once nothing else moved, and `glyph`
  * only after `charOff` landed. After both, all 35 variants plateau at 96.
  *
- * `insn_histogram.py` states the remainder exactly and it is worth having written
- * down, because it is two facts rather than a hundred rows: every opcode
- * count matches except **addu 22 against 24** and **nop 13 against 12**, so
- * the body needs two more `addu` and one fewer `nop` and nothing else. The
+ * `insn_histogram.py` states the remainder exactly and it is worth having
+ * written down, because it is two facts rather than a hundred rows: every
+ * opcode count matches except **addu 22 against 24** and **nop 13 against 12**,
+ * so the body needs two more `addu` and one fewer `nop` and nothing else. The
  * `%hi` table is clean apart from our jump table being a local `.rodata`
  * label where the target names `jtbl_800A12E8`, which `checkfn` aliases.
  *

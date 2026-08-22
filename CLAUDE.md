@@ -2079,6 +2079,18 @@ a near-miss, in rough order of frequency:
   `FieldCalcPointOnLine`'s 150 variants over 30 locals come back flat in
   about a minute, which closes a whole dimension that
   `perm_randomize_internal_type` would otherwise spend a search on.
+
+  Two things make it pay much more than one run suggests. **Re-run it after
+  every change it finds** -- the sweep is stale the moment one width lands,
+  and the wins compound: `FieldDebugRenderString` went 100 rows and -1
+  instruction -> 98 and exact on `charOff`, then 98 -> 96 on `glyph`, which
+  was invisible until `charOff` had moved. And **read the value's range and
+  its tests before taking a row**, because the tool measures and does not
+  check semantics. `FieldEntityMovementUpdate`'s best two candidates are
+  `dy4` as `u8` (+21 -> +7 instructions, and it is a 20.12 fixed-point delta
+  a byte truncates) and `frameB5` as `u16` (500 -> 498 rows, with
+  `if (frameB5 < 0)` on the next line, which unsigned makes dead). Both would
+  have looked like the find of the session.
 * **A park note's numbers are only true of the body they were measured on,
   and the body moves.** This file already says to re-check a note's
   *diagnosis*; the stronger version is that its **rejected-spellings list
