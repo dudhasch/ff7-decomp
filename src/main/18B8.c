@@ -16,6 +16,10 @@ extern u8 D_800694C4[];
 extern u8 D_800694D4[];
 extern u8 D_80063048[];
 extern void* D_800707C0;
+extern u8 D_80082274[];
+extern volatile u8 D_8009AC2C[];
+extern volatile u16 D_8009AC42;
+extern u16 D_8009AC44;
 void func_80014804(void);
 /* main's .bss, addressed `%gp_rel(<sym>)($gp)` by the target. These are
  * *tentative definitions*, not `extern` declarations, and the difference is
@@ -369,9 +373,38 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800131B8);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800134F4);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80013564);
+void func_80013564(void) {
+    D_8009AC2C[0] = 0;
+    D_8009AC42 = D_8009AC42 + D_8009AC44;
+    if ((s16)D_8009AC42 >= 0x100) {
+        D_8009AC42 = 0xFF;
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800135C0);
+#ifndef NON_MATCHINGS
+s16 func_800135C0(s16 from, s16 to, s16 step, s16 steps);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_800135C0);
+#else
+/* PARKED at 2 rows, length exact (25). The body is
+ * instruction-for-instruction right and the only difference is which register
+ * the division's quotient lands in: the target has `mflo v0` / `addu a0,a0,v0`
+ * and this gets `mflo a3` / `addu a0,a0,a3`. Both `$v0` (which held the
+ * product, dead after the `div`) and `$a3` (which held `steps`, likewise) are
+ * free, so this is `block_alloc` handing the quantity the lowest-numbered
+ * register it thinks is available -- a QTY_CMP_PRI tie, which CLAUDE.md
+ * records as a park rather than a search.
+ *
+ * Measured, all exactly 2 rows: a named `s32 q` for the quotient, a named
+ * `s32 t` for the product with `t / steps` at the return, one variable
+ * carrying both (`t = ...; t = t / steps;`), `q /= steps` as a compound
+ * assignment, `(s32)steps` at the division, `s16 d = to - from;` as its own
+ * statement, and `(...) / steps + from` with the addition's operands swapped.
+ * Worse: `s32 steps` (4 rows -- the target sign-extends it), `step * (s16)(to
+ * - from)` with the multiply's operands swapped (9). */
+s16 func_800135C0(s16 from, s16 to, s16 step, s16 steps) {
+    return from + (s16)(to - from) * step / steps;
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80013624);
 
@@ -499,7 +532,10 @@ void func_80014804(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800148A0);
+void func_800148A0(void) {
+    D_80062F88 = 0;
+    g_BattleMode = 0;
+}
 
 s32 func_800148B4(void) {
     func_800148A0();
@@ -722,7 +758,7 @@ s32 func_8001521C(s32 arg0) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015248);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800155A4);
+void func_800155A4(s32 arg0) { D_80062F14 = arg0; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800155B0);
 
@@ -736,7 +772,22 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015668);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800159B0);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015AFC);
+s32 func_80015AFC(u32 arg0, s32 arg1) {
+    /* The frame is 0x30 with no saved register and nothing stored to it --
+     * a local this function no longer uses. Its identity is not recoverable. */
+    u8 unusedLocals[0x30];
+    s32 ret;
+    u8* row;
+
+    ret = 0x7F;
+    if (arg0 < 9) {
+        row = &D_80082274[arg0 * 56];
+        /* `arg1 + (s32)row`, not `row[arg1]`: fold canonicalises a pointer
+         * PLUS so the pointer is op0, and the target adds the index first. */
+        ret = *(u8*)(arg1 + (s32)row) - 0x80;
+    }
+    return ret;
+}
 
 void func_80015B44(s32 arg0) { D_80062E30 = arg0; }
 
@@ -892,7 +943,53 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018934);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018A04);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018AB0);
+#ifndef NON_MATCHINGS
+void func_80018AB0(u8 arg0);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80018AB0);
+#else
+/* PARKED at 2 rows, length exact (25). The whole residue is the order of two
+ * entry-block insns: the target is `move t0,zero` / `andi a0,a0,0xff` /
+ * `li a3,0x1c0` and this is `move t0,zero` / `li a3,0x1c0` / `andi a0,a0,0xff`
+ * -- i.e. `off`'s initialiser has to be emitted after the `u8` parameter's
+ * promotion mask, and nothing tried moves it. Everything else, including the
+ * `0x10f(a2)` displacement and the `addiu a3,a3,8` in the mid-loop branch's
+ * delay slot, is instruction-for-instruction.
+ *
+ * Measured, all against a base of 8 rows unless noted:
+ *   - the `p` pointer local (`p[0x10F]` rather than
+ *     `*(u8*)(D_80062E60 + off + 0x10F)`) is what gets the displacement and
+ *     the base register right: 25 rows without it, 8 with. Written as one
+ *     expression gcc folds 0x1C0 + 0x10F and the `li a3,0x1c0` disappears.
+ *   - `off += 8` moved out of the `for` increment into the loop body is the
+ *     other half: 8 -> 2, because reorg can then steal it into the delay slot
+ *     of the `lvl >= 6` branch. All three placements inside the body (after
+ *     `p =`, after `cur =`, after `lvl =`) measure exactly 2.
+ *   - inert at 2: declaring `off` before `i`, splitting the `for` init into
+ *     two statements, `s32 arg0` with `arg0 & 0xFF` hoisted to a loop-top
+ *     local.
+ *   - worse: `i * 8 + 0x1C0` as a giv with no `off` at all (14), the same
+ *     with the folded 0x2CF displacement (14), `off += 8` before `i++` in
+ *     the `for` increment list (12), `off = 0x1C0` hoisted above the `for`
+ *     with the increment in the body (9). */
+void func_80018AB0(u8 arg0) {
+    s32 i;
+    s32 off;
+    u8 cur;
+    s32 lvl;
+    u8* p;
+
+    for (i = 0, off = 0x1C0; i < 0x10; i++) {
+        p = (u8*)(D_80062E60 + off);
+        off += 8;
+        cur = p[0x10F];
+        lvl = (cur >> 5) + arg0;
+        if (lvl >= 6) {
+            lvl = 5;
+        }
+        p[0x10F] = (cur & 0x1F) | ((lvl & 7) << 5);
+    }
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018B14);
 
@@ -988,7 +1085,13 @@ void func_80019D74(u8 arg0, u8 arg1) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019DA0);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019E4C);
+void func_80019E4C(void) {
+    if (D_80063020 == 0) {
+        *(u8*)(D_80062E60 + 0x23) |= 4;
+    } else {
+        D_80062FFC = 0x12;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019E84);
 

@@ -899,7 +899,7 @@ s32 func_80014B70(void);
 s32 func_80014BA8(s32 arg0);
 s32 func_8001521C(s32);
 const char* func_80015248(s32 arg0, s32 arg1, s32 arg2);
-void func_800155A4(s32, ...);
+void func_800155A4();
 void func_8001726C(s16, u16);
 s32 func_8001C8D4();
 void func_80021044(DRAWENV* draw_env, DISPENV* disp_env);

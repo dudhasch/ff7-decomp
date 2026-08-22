@@ -1794,6 +1794,36 @@ a near-miss, in rough order of frequency:
   at least one gp-addressed symbol**, so until the flag and the spelling are
   both right none of them can match, and every one of them reads as an
   ordinary `%hi`/`%lo` addressing residue.
+* **`lui r/addiu r/op 0(r)` also comes from an address with *two* register
+  addends, and that is the one spelling of it you can ask for.** The two
+  routes this file already records -- a second reference, and `volatile` --
+  are both about cse; there is a third that is purely a legality question.
+  `(plus (plus (symbol) (reg)) (reg))` is not a valid MIPS address and neither
+  is `(plus (symbol) (reg))`, so gcc materialises the symbol with an explicit
+  `la` and adds both registers. Written as one subscript the two addends fold
+  into a single register and you get the assembler's `$at` macro instead:
+  `D_80082274[arg0 * 56 + arg1]` gives `lui at,%hi / addu at,at,<idx> /
+  lbu %lo(at)` where the target has `lui v1,%hi / addiu v1,v1,%lo /
+  addu v0,v0,v1 / addu v0,a1,v0 / lbu 0(v0)`. Splitting the index into a
+  pointer local -- `row = &D_80082274[arg0 * 56]; ... row[arg1]` -- keeps them
+  apart and is worth 7 rows to 1 on `func_80015AFC` in `src/main/18B8.c`; the
+  last row is the `p + n` operand order, fixed by `*(u8*)(arg1 + (s32)row)`.
+  Every spelling that keeps one index expression measures identically
+  (`[][56]` two-dimensional, `(&D_80082274[i])[j]` inline, a `u8*` local for
+  the base alone, `volatile` on the array), because none of them changes the
+  number of registers in the address.
+* **A `volatile` *array* gets the `la` form where a `volatile` scalar does
+  not.** `extern volatile u8 SYM;` written `SYM = 0;` still comes out as the
+  `$at` macro; `extern volatile u8 SYM[];` written `SYM[0] = 0;` comes out as
+  `lui v0,%hi / addiu v0,v0,%lo / sb zero,0(v0)`, which is what a target that
+  reaches a one-byte flag through a register base is telling you. The
+  non-volatile array, the sized array, a struct with a byte at offset 0, a
+  `*(u8*)&SYM` cast and a `volatile u8*` local were all measured on
+  `func_80013564` in `src/main/18B8.c` and are 6, 6, 6, 6 and 4 rows against
+  the volatile array's **0**. Note the two halves are independent and both
+  needed there: the `volatile` is what stops cse folding the function's three
+  reads of a neighbouring `u16` into one, and the array is what moves the
+  address into a register.
 * **A scaled subscript folds the symbol into the address register; a
   pre-scaled byte offset does not.** This is the whole of the "`$at`
   rematerialisation wall" that a dozen park notes in `src/field/` describe.
