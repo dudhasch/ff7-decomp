@@ -1298,7 +1298,13 @@ u8 func_80031A70(u8** arg0) {
     return opcode == expected ? 0xCA : 0xA0;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031AB0);
+// Tempo set: a 16-bit value landing in the top half of the 20.12 tempo
+// accumulator, and the slide it cancels.
+void func_80031AB0(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    config->tempo = *track->addr++ << 16;
+    config->tempo |= *track->addr++ << 24;
+    config->tempo_slide_length = 0;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031AFC);
 
@@ -1341,7 +1347,20 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031CE0);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031D6C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031E98);
+void func_80031E98(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    u16 voice;
+    s32 flags;
+
+    voice = track->overlay_voice;
+    if (D_80062F04 != 0) {
+        voice -= 0x18;
+    }
+    flags = track->update_flags;
+    if (flags & 0x100) {
+        track->update_flags = flags & ~0x100;
+        config->unk24 &= ~(1 << voice);
+    }
+}
 
 void func_80031EEC(AKAO_TRACK* track) {
     u8 val = *track->addr++;
