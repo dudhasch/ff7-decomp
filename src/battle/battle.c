@@ -306,7 +306,27 @@ static void func_800A34CC(s32 arg0, s32 arg1, s8 arg2, s32 arg3) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A3534);
+// Cap the HP/MP a pending record can restore to what the combatant can
+// actually take.
+void func_800A3534(s32 arg0, s16 arg1) {
+    s32 idx;
+    u16 hp;
+    u16 mp;
+
+    if (arg1 >= 0) {
+        idx = D_800F9F3C[arg1].unk0;
+        if (idx >= 0 && idx < 3) {
+            hp = D_800F9F3C[arg1].unk6;
+            if (g_BattleState.combatant[idx].maxHP >= hp) {
+                g_CombatantTurnState[idx].unk3C = hp;
+            }
+            mp = D_800F9F3C[arg1].unk8;
+            if (g_BattleState.combatant[idx].unk2A >= mp) {
+                g_CombatantTurnState[idx].unk3E = mp;
+            }
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A35F8);
 
