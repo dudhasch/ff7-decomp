@@ -5677,94 +5677,81 @@ s32 OpcodeFuncAnimb(void) {
  *     being polled) and merging them stretches one live range across the
  *     animation block, which costs the pointer its register and 7 rows.
  *
- * The residue is one register-naming tie, and it is the *same* one CANIM and
- * CANM! are parked on: the model-entry lookup allocates modelIdx / entryIdx /
- * g_FieldModelData as a0 / a1 / v1 in the target and a1 / v1 / a0 in ours, a
- * three-cycle that then decides the two halves of `anims` as well. The
- * expression is byte-for-byte the one in StartModelAnimation, which matches,
- * so the spelling is not the problem -- the tie is broken by what else is
- * live in the block. Measured and inert: modelIdx as u8/s16/s32, a named
- * entryIdx local, declaration order. Inlining `anims` costs 8 rows.
+ * 14 -> 10 -> 0, and it takes *both* of the last two levers at once; each on
+ * its own is a plateau, and neither points at the other.
  *
- * FieldUpdateAnimationState had a residue that read *identically* -- the same
- * three registers in the same rotation -- and it fell to `s32 entryIdx` split
- * into its own statement plus `s32 modelIdx`. Applied here, to CANIM, to
- * CANM! and to FieldMoveToEntityUpdate, both levers measure to the row, as do
- * an `s32 lastFrame` local for the `- 1`, replacing modelIdx with the repeated
- * `g_EntityToModel[g_CurrentEntity]`, and every combination of the four. So
- * this is *not* that tie; it only looks like it. Whatever breaks it is
- * outside the lookup.
+ *   - The animation-restart block duplicated into both arms of
+ *     `if (g_EntityToModel) { ... } else { ... }`. The condition is an array's
+ *     address, so it is always true and pure -- jump_optimize and flow delete
+ *     the test and one copy, the length is unchanged, and what survives is a
+ *     different block structure for `anims`, whose two halves then land on the
+ *     target's $a1/$a0. This is decomp-permuter's `perm_ins_block` and the
+ *     `AddBackgroundToRender` dead-conditional idiom; its identity is not
+ *     recoverable from the target, so do not try to read it back out.
+ *     Wrapping only from `modelIdx = ...` measures the same 10, wrapping only
+ *     the two stores is 35 / +5, and the condition has to be an *array*:
+ *     `if (g_FieldModelData)` is a pointer global gcc cannot prove non-null,
+ *     both arms survive, and it is 64 rows and +44 instructions.
  *
- * CANIM and CANM! then landed, and they confirm that diagnosis exactly: their
- * rotation was caused by `lastFrame = GET_PARAM_U8(3) / divisor;` being
- * computed above the lookup and consumed below it, so one extra quantity was
- * live across the block; moving that one line down to the clamp matched both
- * functions outright. MOVE and MOVA have no such value -- nothing they compute
- * before the lookup survives past it -- which is why the same rotation is
- * still here, and it means the remaining lever is not another spelling of the
- * lookup either.
+ *   - The model-entry index split into its own `s32 entryIdx` statement:
+ *     `entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;` then
+ *     `model = &g_FieldModelData->modelEntries[entryIdx];`. This is exactly
+ *     the lever `FieldUpdateAnimationState` needed, and this note used to
+ *     record it as "measured, inert, so whatever these four need is a
+ *     different thing that only looks like this one". That was true of the
+ *     14-row body it was measured against and false of the 10-row one: with
+ *     the dead conditional in place it is worth the whole remaining 10, and
+ *     without it, on its own, it is still 14. Both together are 0.
  *
- * The rotation is now `modelIdx / entryIdx / g_FieldModelData` as
- * $a0 / $a1 / $v1 in the target against $a1 / $v1 / $a0 in ours, with the two
- * halves of `anims` following as $a1/$a0 against $a0/$a1. Every quantity here
- * reuses a register that has just died -- $a0 from g_CurrentEntity, $a1 from
- * the last FieldEventReadMemoryS16 argument, $v1 from g_FieldModelLoaderData
- * -- so both allocations are locally sensible and only the processing order
- * differs. Measured on top of everything above, all still 14: `anims` with
- * its two operands swapped; `model` inlined into `anims`; the modelIdx local
- * repeated as the full expression in the lookup only, in the animLastFrame
- * store only, or in both; and modelIdx declared first. Moving statements the
- * way CANIM's fix does is much worse, because here they are stores and not a
- * dead value -- the animSpeed store below the lookup costs 36 rows and 11
- * insertions, animCurrentFrame 34/10, both 59/7, and hoisting modelIdx to
- * just after the 0xFF guard 47/3. Inlining `anims` is 22/2 and repeating the
- * expression inside the lookup alone 18/5.
+ * So the residue this note spent three sessions calling an unreachable
+ * `QTY_CMP_PRI` tie was not one. The arithmetic in it was right as far as it
+ * went and is kept below because the *method* is worth having, but the
+ * conclusion drawn from it -- "neither term is reachable from C without
+ * emitting an instruction, so park" -- did not follow. The tell that it could
+ * not have been the whole story: our build and the target emit the *identical*
+ * instruction sequence here (0 inserted, 0 deleted, only register names
+ * differ), so the RTL insn stream is the same, so `n_refs` and `live_length`
+ * and therefore the ranking are the same in both. A ranking that is provably
+ * equal cannot be what differs. What differs has to be the *pseudo structure*
+ * -- how many quantities the block is cut into and where they are born and
+ * die -- and that is a variable-set question, which is C-reachable, not an
+ * allocation one, which is not.
  *
- * That RTL has now been read (`-dl` on an unparked field4.c), and it turns the
- * tie into arithmetic. All three quantities are block-local, so this is
- * `local_alloc`'s `block_alloc`, not `global_alloc`, and its ranking is
- * `QTY_CMP_PRI = floor_log2(n_refs) * n_refs * size / (death - birth)`. The
- * dump gives:
+ * For the record, the arithmetic, from `-dl` on an unparked field4.c: all
+ * three quantities are block-local, so this is `local_alloc`'s `block_alloc`
+ * and its ranking is `QTY_CMP_PRI = floor_log2(n_refs) * n_refs * size /
+ * (death - birth)`:
  *
  *   reg 196  modelIdx            4 refs / 13 insns   ->  2*4/13 = 0.62
  *   reg 202  entryIdx            3 refs /  4 insns   ->  1*3/4  = 0.75
  *   reg 195  g_FieldModelData    2 refs /  6 insns   ->  1*2/6  = 0.33
  *
- * so ours allocates entryIdx, then g_FieldModelData, then modelIdx, taking
- * $v1/$a0/$a1 off the free list in that order. The target's assignment --
- * g_FieldModelData $v1, modelIdx $a0, entryIdx $a1 -- is the exact **reverse**
- * order, so the whole three-way ranking has to invert. `n_refs` is fixed by
- * the arithmetic (entryIdx has three references because `* 36` decomposes into
- * `x*8 + x` then `<< 2`), which leaves `live_length` as the only term, and
- * every way of stretching one costs an instruction: entryIdx read above the
- * two animation stores is 40/4, above the whole animation block 43/4, modelIdx
- * read above the stores 37/3, and both together 48/8, against 14/0.
+ * -- ours allocated entryIdx, then g_FieldModelData, then modelIdx, taking
+ * $v1/$a0/$a1 off the free list in that order, where the target wants
+ * $a0/$a1/$v1. Naming `entryIdx` does not change any of those three numbers;
+ * what it changes is where the quantities are cut, and the ordering follows.
  *
- * 14 -> 10, and the step is decomp-permuter's `perm_ins_block`: the whole
- * animation-restart block duplicated into both arms of `if (g_EntityToModel)
- * { ... } else { ... }`. The condition is the address of an array, so it is
- * always true and pure; jump_optimize and flow delete the test and one copy,
- * the length is unchanged, and what survives is a different block structure
- * for `anims` -- whose two halves now land on the target's $a1/$a0. This is
- * the `AddBackgroundToRender` dead-conditional idiom, and it is worth noting
- * that the permuter's score moved only 85 -> 55 for it, so it would have been
- * easy to discard: re-measure every output with variant_eval.
- *
- * The remaining 10 are the three-way rotation above, unchanged, and the
- * allocno arithmetic in this note still applies to it: neither term of
- * `QTY_CMP_PRI` is reachable from C without emitting an instruction. What the
- * dead conditional shows is that the *block structure* around the lookup is
- * reachable even when the expression is not, so that is where the next
- * search should look. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncMove);
-#else
+ * Measured and inert on the 10-row body, so the dimensions really are closed
+ * this time: every declaration order of the five locals (five permutations),
+ * modelIdx as u8/s16, a local for the loaded `*(u16*)&anims[...]` frame count,
+ * and a `do { } while (0);` in place of the dead conditional (14) or after
+ * `anims` (26 / +2). A local for `g_FieldModelData->modelEntries` is 8, and a
+ * local for `g_FieldEntity[modelIdx].activeAnimId` is 16. Earlier, on the
+ * 14-row body: `anims` with its two operands swapped, `model` inlined into
+ * `anims`, modelIdx repeated as the full expression at either or both use
+ * sites -- all 14. Moving statements the way CANIM's fix does is much worse,
+ * because here they are stores and not a dead value: the animSpeed store
+ * below the lookup costs 36 rows and 11 insertions, animCurrentFrame 34/10,
+ * both 59/7, and hoisting modelIdx to just after the 0xFF guard 47/3.
+ * Inlining `anims` is 22/2 and repeating the expression inside the lookup
+ * alone 18/5. */
 s32 OpcodeFuncMove(void) {
     FieldEntity* entity;
     FieldEntity* moving;
     u8 modelIdx;
     u8* anims;
     FieldModelEntry* model;
+    s32 entryIdx;
 
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("move", 5);
@@ -5798,8 +5785,8 @@ s32 OpcodeFuncMove(void) {
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
         modelIdx = g_EntityToModel[g_CurrentEntity];
-        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
-                                                    .modelEntryIndex];
+        entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+        model = &g_FieldModelData->modelEntries[entryIdx];
         anims = model->modelData + model->animationOffset;
         g_FieldModels[modelIdx].animLastFrame =
             *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
@@ -5807,8 +5794,8 @@ s32 OpcodeFuncMove(void) {
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animSpeed = 0x10;
         g_FieldModels[g_EntityToModel[g_CurrentEntity]].animCurrentFrame = 0;
         modelIdx = g_EntityToModel[g_CurrentEntity];
-        model = &g_FieldModelData->modelEntries[g_FieldModelLoaderData[modelIdx]
-                                                    .modelEntryIndex];
+        entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+        model = &g_FieldModelData->modelEntries[entryIdx];
         anims = model->modelData + model->animationOffset;
         g_FieldModels[modelIdx].animLastFrame =
             *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] - 1;
@@ -5833,7 +5820,6 @@ started:
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
     return 1;
 }
-#endif
 
 /* FMOVE (0xAD): walk the current entity to a target point, letting it turn to
  * face the way it is going -- it clears DirLock, where CMOVE below sets it.
@@ -6118,36 +6104,42 @@ s32 OpcodeFuncMova(void) {
  *     (Contrast the turn opcodes, where the tail has to be the function's
  *     fall-through end -- read the target for which one it wants.)
  *
- * The 14 rows are the model-entry allocation tie, row for row the same one
- * OpcodeFuncMove is parked on -- read that note, which now carries the whole
- * measurement history. CANIM and CANM! shared it and landed once the value
- * that was live across their lookup was moved out of the block; MOVE and MOVA
- * have no such value, so two of the original four remain. Also measured here
- * and inert: `g_FieldModelData->modelEntries + idx` instead of `&...[idx]`,
- * and a local for `g_FieldModelData`; a local for `modelEntries` costs 6 more
- * rows.
- * 14 -> 10, the same lever and the same residue as OpcodeFuncMove: the
- * animation-restart block duplicated into both arms of
- * `if (g_EntityToModel) { ... } else { ... }`. The condition is an array's
- * address, so it is always true and pure and flow deletes the test and one
- * copy at no cost in length; the block structure it leaves is what puts the
- * two halves of `anims` on the target's registers. Wrapping only from
- * `modelIdx = ...` is identical (10); wrapping only the last statement is
- * 32 / +2. The condition has to be an *array* -- `g_FieldModelData` is a
- * pointer global, gcc cannot prove it non-null, and both arms survive:
- * 63 rows and +44 instructions.
+ * 14 -> 10 -> 0, both steps identical to OpcodeFuncMove's -- read that note
+ * for the full argument, since the two functions share the block and shared
+ * every measurement.
  *
- * The 10 left are the modelIdx / entryIdx / g_FieldModelData rotation this
- * note and OpcodeFuncMove's both describe, unchanged.
+ *   - The animation-restart block duplicated into both arms of
+ *     `if (g_EntityToModel) { ... } else { ... }`. The condition is an array's
+ *     address, so it is always true and pure and flow deletes the test and one
+ *     copy at no cost in length; the block structure it leaves is what puts
+ *     the two halves of `anims` on the target's registers. Wrapping only from
+ *     `modelIdx = ...` is identical (10); wrapping only the last statement is
+ *     32 / +2. The condition has to be an *array* -- `g_FieldModelData` is a
+ *     pointer global, gcc cannot prove it non-null, both arms survive, and it
+ *     is 63 rows and +44 instructions.
+ *
+ *   - The model-entry index split into its own `s32 entryIdx` statement.
+ *     Worth the whole remaining 10 with the dead conditional in place, and
+ *     nothing (14, i.e. the conditional's own gain given back) without it.
+ *
+ * That pairing is the whole lesson here: this note previously recorded the
+ * residue as "the modelIdx / entryIdx / g_FieldModelData rotation ...
+ * unchanged", with the entryIdx split written down in OpcodeFuncMove's note
+ * as measured and inert. It was inert -- against the 14-row body it was
+ * measured on. Neither lever moves this function alone; together they close
+ * it. A rejected-spelling list is only true of the program it was measured
+ * against, and the dead conditional changed the program.
+ *
+ * Also measured here and inert: `g_FieldModelData->modelEntries + idx`
+ * instead of `&...[idx]`, and a local for `g_FieldModelData`; a local for
+ * `modelEntries` costs 6 more rows.
  */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldMoveToEntityUpdate);
-#else
 s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
     FieldEntity* moving;
     FieldModelEntry* model;
     u8* anims;
     u8 modelIdx;
+    s32 entryIdx;
 
     if (g_EntityToModel[g_CurrentEntity] == 0xFF ||
         g_EntityToModel[targetEntityId & 0xFF] == 0xFF) {
@@ -6183,8 +6175,8 @@ s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
                 g_FieldModels[g_EntityToModel[g_CurrentEntity]]
                     .animCurrentFrame = 0;
                 modelIdx = g_EntityToModel[g_CurrentEntity];
-                model = &g_FieldModelData->modelEntries
-                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+                model = &g_FieldModelData->modelEntries[entryIdx];
                 anims = model->modelData + model->animationOffset;
                 g_FieldModels[modelIdx].animLastFrame =
                     *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] -
@@ -6195,8 +6187,8 @@ s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
                 g_FieldModels[g_EntityToModel[g_CurrentEntity]]
                     .animCurrentFrame = 0;
                 modelIdx = g_EntityToModel[g_CurrentEntity];
-                model = &g_FieldModelData->modelEntries
-                             [g_FieldModelLoaderData[modelIdx].modelEntryIndex];
+                entryIdx = g_FieldModelLoaderData[modelIdx].modelEntryIndex;
+                model = &g_FieldModelData->modelEntries[entryIdx];
                 anims = model->modelData + model->animationOffset;
                 g_FieldModels[modelIdx].animLastFrame =
                     *(u16*)&anims[g_FieldEntity[modelIdx].activeAnimId * 16] -
@@ -6216,7 +6208,6 @@ s32 FieldMoveToEntityUpdate(s32 targetEntityId) {
     g_FieldModels[g_EntityToModel[g_CurrentEntity]].ActionState = 0;
     return 1;
 }
-#endif
 
 void OpcodeFuncDira(void) {
     if (g_DebugLevel & 3) {
