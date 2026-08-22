@@ -41,13 +41,46 @@ typedef struct {
     /* 0x20 */ u8* unk20;
 } WorldModel; /* size: 0x24 */
 
+/* One VRAM upload in the group func_800C0808 walks: a rect plus the byte
+ * offset of the pixel data from the start of the group. */
+typedef struct {
+    /* 0x0 */ u16 w;
+    /* 0x2 */ u16 h;
+    /* 0x4 */ u16 x;
+    /* 0x6 */ u16 y;
+    /* 0x8 */ u32 offset;
+} WorldTim; /* size: 0xC */
+
+typedef struct {
+    /* 0x0 */ u32 unk0;
+    /* 0x4 */ u8 count;
+    /* 0x5 */ u8 unk5;
+    /* 0x6 */ u16 unk6;
+    /* 0x8 */ WorldTim entries[1];
+} WorldTimGroup;
+
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800BFBF0);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800BFCAC);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C02F4);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C0808);
+void func_800C0808(WorldTimGroup* group) {
+    RECT rect;
+    u32 i;
+    s32 count;
+    WorldTim* tim;
+
+    count = group->count;
+    tim = group->entries;
+    for (i = 0; i < count; i++) {
+        rect.x = tim[i].x;
+        rect.y = tim[i].y;
+        rect.w = tim[i].w;
+        rect.h = tim[i].h;
+        LoadImage(&rect, (u_long*)((u8*)group + tim[i].offset));
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C08A8);
 
