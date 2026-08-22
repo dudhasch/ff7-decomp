@@ -428,11 +428,13 @@ typedef struct {
 } Unk801B0C98;
 
 typedef struct {
-    s16 unk0;
+    u16 unk0; // read `lhu` and summed in func_800B0170
     s16 unk2;
     u16 unk4; // ATB fill gauge, saturates/compares at 0xFFFF -- unsigned
     s16 unk6;
-    s32 unk8;
+    u16 unk8; // two halfwords, not one word: 0x8 is a flag set read-modify-
+    u16 unkA; // write in func_800A4E80/func_800A4F14, 0xA is summed in
+              // func_800B0170
     u8 unkC;
     u8 unkD; // effect id of the equipped accessory (0xFF = none)
     u8 unkE;

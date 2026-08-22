@@ -2457,14 +2457,23 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AF874);
 void func_800AF9C8();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AF9C8);
 
-extern s32 D_800F499C;
-extern s32 D_800F49F8[][10];
-
 s32 func_800AFE98(s32 arg0) { return D_800F49F8[D_800F499C][arg0] >> 0xC; }
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AFECC);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0170);
+void func_800B0170(void) {
+    s32 i;
+    s32* p;
+    s32* q;
+
+    p = D_800F49A8[D_800F499C];
+    q = D_800F49F8[D_800F499C];
+    D_800F49A0[D_800F499C] += D_800F5F44.D_800F7DA6;
+    for (i = 0; i < 10; i++) {
+        p[i] += g_CombatantTurnState[i].unk0;
+        q[i] += g_CombatantTurnState[i].unkA;
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0234);
 

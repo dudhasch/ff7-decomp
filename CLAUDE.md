@@ -4586,6 +4586,22 @@ a near-miss, in rough order of frequency:
   loop the two zero-trip tests are not folded and you get a duplicate `blez`
   (+1 instruction). Guard plus `do`/`while` is the shape that gives one test
   and one copy.
+* **Several identical `lw` of one symbol with no store between them is
+  `volatile`, and it is worth far more than the loads.** cse shares a
+  global's load across a whole extended basic block, so a target that reloads
+  the same scalar three times in straight-line code cannot come from a plain
+  `extern` -- a volatile MEM is never entered in cse's table at all. What it
+  costs is not the three instructions but everything derived from them:
+  `D_800F499C` in `src/battle/battle.c` indexes three tables, and with one
+  shared load gcc computes `idx * 40` once and hands it to both bases where
+  the target computes it per load. That was 28 rows and **-8 instructions**
+  on `func_800B0170`; `extern volatile s32` matches outright. The check is
+  cheap and does not need a diff -- count the symbol's `%hi`
+  materialisations in the target against the number of times your source
+  names it. And check for a second, non-volatile `extern` of the same symbol
+  further down the `.c`: gcc 2.6.3 accepts the redeclaration silently, so a
+  file-local `extern` next to an already-matching function will quietly
+  decide which behaviour that function gets.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
