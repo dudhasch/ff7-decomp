@@ -1555,7 +1555,19 @@ void func_800AB9C4(s32 arg0, s32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800ABA68);
+// Open a new record for arg0 and snapshot the combatant's current HP/MP
+// into it alongside the caller's four values.
+void func_800ABA68(Unk800FA9D0* arg0, s16 arg1, u16 arg2, s16 arg3, s16 arg4) {
+    s32 actor = arg0->unk0;
+    Unk800F9F3C* rec = func_800A311C(arg0);
+
+    rec->unk2 = arg1;
+    rec->unk4 = arg2;
+    rec->unkA = arg3;
+    rec->unkC = arg4;
+    rec->unk6 = g_BattleState.combatant[actor].curHP;
+    rec->unk8 = g_BattleState.combatant[actor].unk28;
+}
 
 // mutually exclusive status pairs -- row 0 Slow/Haste, row 1 Sadness/Fury.
 // func_800ABB0C queues the partner for removal when one is applied; for
