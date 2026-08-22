@@ -875,7 +875,39 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB538);
 
 void func_800BB67C(s32 arg0, Unk800BB67C* arg1) { arg1->unk30 = arg0; }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB684);
+extern u8 D_8015184C[];
+extern u8 D_8015185A[];
+extern u8 D_80151868[];
+extern u8 D_80151876[];
+extern u8 D_801518AC[];
+extern u8 D_801518BA[];
+extern u8 D_801518C8[];
+extern u8 D_801518D6[];
+
+// reset the eight per-slot cursors to "none" and adopt the camera the current
+// setup entry names. The chain is not untidiness: a chained assignment stores
+// right to left, which is the descending address order the target has.
+void func_800BB684(void) {
+    s16 v;
+
+    v = D_80163798[D_801590E0].unk8;
+    if (v == -4) {
+        return;
+    }
+    D_800F8370 = v;
+    D_801590DC = 0;
+    *(s16*)D_8015184C = *(s16*)D_8015185A = *(s16*)D_80151868 =
+        *(s16*)D_80151876 = *(s16*)D_801518AC = *(s16*)D_801518BA =
+            *(s16*)D_801518C8 = *(s16*)D_801518D6 = 0xFF;
+    func_800BC2F0();
+    if (D_800F837C == 3) {
+        return;
+    }
+    if ((D_801516F4 & 3) == 3) {
+        return;
+    }
+    D_800F837C = D_801516F4 & 3;
+}
 
 static void func_800BB75C(Unk800BB75C* arg0, MATRIX* m, s16* arg2, s16* arg3) {
     int flag;
@@ -1442,7 +1474,26 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C223C);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2704);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2864);
+s32 func_800C2704(u_long*, s16, s16, s32, s32, s32, s32, s32);
+
+// draw the limit gauge over the model's staged screen position. The two
+// coordinates have to be loaded into s32 locals with the offsets applied at
+// the call: applied inline, the `- 0xE` is narrowed against the s16 parameter
+// and 0xFFF2 stops being a legal addiu immediate.
+void func_800C2864(s32 arg0) {
+    s32 off;
+    s32 px;
+    s32 py;
+
+    if (D_80163C7C == 4 && D_800FAFDC == 0 && D_801620A4 == 0) {
+        off = (u8)arg0 * 8;
+        px = *(u16*)((u8*)g_modelScreenPos + 4 + off);
+        py = *(u16*)((u8*)g_modelScreenPos + 6 + off);
+        D_80163C74 = (DR_MODE*)func_800C2704(
+            (u_long*)((u8*)g_cDb + 0x4084), px + 3, py - 0xE, 0, 0xD0, 0x30,
+            0x10, 0);
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2928);
 
@@ -1708,7 +1759,25 @@ static void func_800C614C(u_long* pTim, s32 palIndex) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C61C0);
+extern RECT D_800F4B1C;
+
+// stage the 16x3 strip at VRAM y=480 for each combatant whose setup type is
+// SETUP_SIDE_ATTACK_2. `.x` has to be assigned first: the base register the
+// four stores share is materialised at the first field referenced, and the
+// call needs it at offset 0.
+void func_800C61C0(void) {
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        if (D_801636B8[i].D_801636B8 == 6) {
+            D_800F4B1C.x = 0x10;
+            D_800F4B1C.y = 0x1E0;
+            D_800F4B1C.w = 0x10;
+            D_800F4B1C.h = 3;
+            BATTLE_EnqueueLoadImage(&D_800F4B1C, D_800F8CF4[i]);
+        }
+    }
+}
 
 // load an image into VRAM
 static void func_800C627C(void) {
