@@ -1595,7 +1595,18 @@ void func_80032718(AKAO_TRACK* track) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032770);
+void func_80032770(AKAO_TRACK* track) {
+    s32 steps;
+    s32 delta;
+
+    steps = *track->addr++;
+    if (steps == 0) {
+        steps = 0x100;
+    }
+    delta = (*track->addr++ << 8) - (u16)track->vibrato_depth;
+    track->vibrato_depth_slide_steps = steps;
+    track->unk82 = delta / steps;
+}
 
 void func_800327E0(AKAO_TRACK* track) {
     track->vibrato_pitch = 0;
