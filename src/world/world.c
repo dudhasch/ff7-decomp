@@ -2660,7 +2660,26 @@ void func_800B65E0(s32 arg0) {
     SystemAkaoExecute();
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B667C);
+void func_800B667C(void) {
+    s32 i;
+
+    for (i = 0; i < 0x2B; i++) {
+        D_801159E8[i] = -1;
+        D_80115A14[i] = 0;
+    }
+    D_80115A40 = 0;
+    D_80115A44 = 0;
+    D_80115A50 = 0;
+    D_80115A4C = 0;
+    D_80115A48 = 0;
+    D_80115A54 = 0;
+    D_80115A64 = 0;
+    D_80115A5C = 0;
+    D_80115A60 = 0;
+    D_80115A58 = 0;
+    D_80115A68 = 0;
+    D_800C80BC = (s32)&D_80115A6C;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6724);
 
