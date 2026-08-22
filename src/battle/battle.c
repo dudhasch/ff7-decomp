@@ -981,7 +981,21 @@ void func_800A70C4(s32 arg0, s32 arg1) {
                   g_BattleState.combatant[arg0].status);
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A7130);
+// Seed the HP/MP display pair for party slot arg0 from either the live
+// combatant record (arg1 != 0) or the pre-battle snapshot.
+void func_800A7130(s32 arg0, s32 arg1) {
+    if (arg0 < 3) {
+        if (arg1 != 0) {
+            *(s16*)((u8*)D_8009D85E + arg0 * 0x440) =
+                g_BattleState.combatant[arg0].maxHP;
+            *(s16*)((u8*)D_8009D862 + arg0 * 0x440) =
+                g_BattleState.combatant[arg0].unk2A;
+        } else {
+            *(s16*)((u8*)D_8009D85E + arg0 * 0x440) = D_800F5E60[arg0].maxHP;
+            *(s16*)((u8*)D_8009D862 + arg0 * 0x440) = D_800F5E60[arg0].maxMP;
+        }
+    }
+}
 
 void func_800A71E0(void) {}
 
