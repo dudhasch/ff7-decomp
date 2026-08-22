@@ -2874,7 +2874,39 @@ s32 func_800B0EB4(s32 arg0) {
     return count & 1;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0F04);
+/* Roll the four-entry drop/steal table of the SceneEnemy at `enemy` and return
+ * the id of the first entry whose top two rate bits match `kind`, or 0xFFFF.
+ * `always` forces the roll to succeed; otherwise the six-bit rate is scaled by
+ * `scale` and compared against a fresh 6-bit random number.
+ *
+ * The table is reached by byte offset rather than through SceneEnemy: that
+ * declaration is 0x20 short from 0x48 onward (attackID and cameraID are
+ * u16[16], not u8[16]), and src/battle/batini.c depends on the offsets it has
+ * today, so retyping the record here would break another unit. */
+s32 func_800B0F04(u8* enemy, s32 kind, s32 always, s32 scale) {
+    s32 result;
+    s32 chance;
+    s32 i;
+    u8* p;
+
+    result = 0xFFFF;
+    p = enemy;
+    for (i = 0; i < 4; i++) {
+        if (((p + i)[0x88] & ~0x3F) == kind) {
+            chance = (p + i)[0x88] & 0x3F;
+            if (always) {
+                chance = 0x100;
+            } else {
+                chance = chance * scale / 256;
+            }
+            if (chance >= (func_80014B70() & 0x3F)) {
+                result = *(u16*)&p[0x8C + i * 2];
+                break;
+            }
+        }
+    }
+    return result;
+}
 
 void func_800B0FFC(s32 arg0, s32 arg1, s32 arg2, s16* arg3) {
     func_800A31A0(

@@ -4638,6 +4638,31 @@ a near-miss, in rough order of frequency:
     line in `config/sym_extern.us.txt`; if nothing references it (which is the
     usual case, since the owner was the function you just wrote), the rename
     is free.
+* **`p[K + i]` evaluates the index first; `(p + i)[K]` evaluates the pointer
+  first.** Both address the same byte and both fold `K` into the MEM's
+  displacement, so the whole difference is which operand of the surviving
+  `addu` is the base. `p[K + i]` is one PLUS over a sum fold has already
+  reassociated to `(p + K) + i`, and expand computes the index into a pseudo
+  before it has the pointer, giving `addu <r>,<idx>,<base>`; `(p + i)[K]` makes
+  `p + i` a PLUS of its own with the pointer as op0 and comes out
+  `addu <r>,<base>,<idx>`. `*(p + i + K)` and `*(u8*)(&p[i] + K)` are the
+  pointer-first form too; only the flat subscript is index-first, and no cast
+  or parenthesisation of it reaches the other order. One row on
+  `func_800B0F04` in `src/battle/battle.c`. This is the same lever as the
+  `p + n` / `n + (s32)p` bullet above, seen with a constant in the sum.
+* **When the entry block's parameter copies come out in the wrong *order* and
+  nothing else differs, the target copied one parameter into a named local.**
+  `assign_parms` emits every parameter's `move <pseudo>,<aN>` at the very top
+  in parameter order, so a body that uses `a0` directly always shows `a0`'s
+  copy first. Write `T* p = param;` and use `p` everywhere instead: the
+  parameter's own pseudo then dies at that one assignment and coalesces into
+  `a0`, while the *local's* initialisation is an ordinary insn scheduled where
+  its first use wants it -- typically after the loop's hoisted constants, which
+  is exactly where a target that reads `move s3,a0` several insns down is
+  telling you it was. `func_800B0F04` measured 10 rows using the parameter
+  directly and 1 with the local, with identical register assignments either
+  way; declaration order, an initialiser on the declaration, and reordering the
+  other locals are all inert.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
