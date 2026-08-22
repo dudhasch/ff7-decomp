@@ -1,0 +1,236 @@
+{
+ "units": [
+  {
+   "unit": "field.c",
+   "lines": 2234,
+   "bodies": 13,
+   "matching": 10,
+   "parked": 3,
+   "include_asm": 0,
+   "handwritten": 0
+  },
+  {
+   "unit": "field2.c",
+   "lines": 5591,
+   "bodies": 46,
+   "matching": 37,
+   "parked": 9,
+   "include_asm": 0,
+   "handwritten": 0
+  },
+  {
+   "unit": "field3.c",
+   "lines": 184,
+   "bodies": 2,
+   "matching": 2,
+   "parked": 0,
+   "include_asm": 6,
+   "handwritten": 6
+  },
+  {
+   "unit": "field4.c",
+   "lines": 10546,
+   "bodies": 259,
+   "matching": 251,
+   "parked": 8,
+   "include_asm": 14,
+   "handwritten": 14
+  },
+  {
+   "unit": "field5.c",
+   "lines": 3081,
+   "bodies": 91,
+   "matching": 89,
+   "parked": 2,
+   "include_asm": 0,
+   "handwritten": 0
+  }
+ ],
+ "totals": {
+  "lines": 21636,
+  "bodies": 411,
+  "matching": 389,
+  "parked": 22,
+  "include_asm": 20,
+  "handwritten": 20,
+  "functions": 431
+ },
+ "handwritten_insns": 10732,
+ "naming": {
+  "globals_total": 223,
+  "globals_refs": 1381,
+  "renameable": 19,
+  "renameable_strings": 5,
+  "renameable_real": 14,
+  "renameable_names": [
+   "D_80062F1B",
+   "D_8007EBCC",
+   "D_8007EBDC",
+   "D_80099FCC",
+   "D_8009A108",
+   "D_8009A15C",
+   "D_8009A162",
+   "D_8009ABF6",
+   "D_8009AC2F",
+   "D_8009AC30",
+   "D_800DF08C",
+   "D_800DF0D4",
+   "D_800E0630",
+   "D_800E4900"
+  ],
+  "locked": 204,
+  "locked_by_parked_only": 198,
+  "locked_by_handwritten": 6,
+  "unnamed_functions": 22,
+  "m2c_locals": 144,
+  "m2c_local_refs": 809,
+  "unk_members": 157
+ },
+ "queue": [
+  {
+   "name": "FieldModelStructInit",
+   "rows": 1,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "HandleKawaiDataInModel",
+   "rows": 2,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncFadew",
+   "rows": 2,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncMove",
+   "rows": 10,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldMoveToEntityUpdate",
+   "rows": 10,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncVwoft",
+   "rows": 12,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldEventRunInit",
+   "rows": 15,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "LoadLocalFieldModelAndInitAll",
+   "rows": 32,
+   "ins": 2,
+   "length_delta": -1
+  },
+  {
+   "name": "FieldEntityWalkmechCross",
+   "rows": 34,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldBackgroundInitPackets",
+   "rows": 47,
+   "ins": 4,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldCalcPointOnLine",
+   "rows": 60,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "AddBackgroundToRender",
+   "rows": 65,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldMain",
+   "rows": 81,
+   "ins": 9,
+   "length_delta": 1
+  },
+  {
+   "name": "FieldInitDefaultValues",
+   "rows": 100,
+   "ins": 18,
+   "length_delta": 3
+  },
+  {
+   "name": "FieldDebugRenderString",
+   "rows": 100,
+   "ins": 6,
+   "length_delta": -1
+  },
+  {
+   "name": "DebugUpdateActor",
+   "rows": 152,
+   "ins": 4,
+   "length_delta": 2
+  },
+  {
+   "name": "KawaiSetVertexColorFromLighting",
+   "rows": 181,
+   "ins": 12,
+   "length_delta": 1
+  },
+  {
+   "name": "FieldModelCreatePktsForPart",
+   "rows": 247,
+   "ins": 29,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldEntityMove",
+   "rows": 357,
+   "ins": 36,
+   "length_delta": 6
+  },
+  {
+   "name": "FieldEntityMovementUpdate",
+   "rows": 500,
+   "ins": 94,
+   "length_delta": 21
+  },
+  {
+   "name": "FieldBGUpdateDrawenv",
+   "rows": 811,
+   "ins": 134,
+   "length_delta": 27
+  },
+  {
+   "name": "FieldDebugRenderPage",
+   "rows": 964,
+   "ins": 124,
+   "length_delta": 1
+  }
+ ],
+ "queue_measured": true,
+ "history": [
+  {
+   "lines": 21636,
+   "bodies": 411,
+   "matching": 389,
+   "parked": 22,
+   "include_asm": 20,
+   "handwritten": 20,
+   "functions": 431,
+   "date": "2026-08-22"
+  }
+ ]
+}

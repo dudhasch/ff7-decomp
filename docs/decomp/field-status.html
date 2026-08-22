@@ -1,0 +1,650 @@
+<title>Field Overlay Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  /* Light is the complete set; dark redefines only tokens, twice, so the
+     un-stamped (system) state and an explicit toggle both resolve. */
+  :root {
+    --ground:  #EEF1F8;
+    --surface: #FFFFFF;
+    --raised:  #F6F8FC;
+    --line:    #D3DAEA;
+    --line-2:  #E5EAF4;
+    --ink:     #0B1226;
+    --ink-2:   #33405E;
+    --muted:   #61708F;
+    --accent:  #12657F;
+    --accent-soft: #D8EDF4;
+    --exact:   #1F7A4C;
+    --exact-soft: #D8EFE1;
+    --gap:     #8A5C08;
+    --gap-soft: #F6E8C8;
+    --inert:   #7A86A3;
+    --shadow:  0 1px 2px rgba(11, 18, 38, .06), 0 8px 24px rgba(11, 18, 38, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:  #060B1A;
+      --surface: #0D1730;
+      --raised:  #131F3D;
+      --line:    #22315A;
+      --line-2:  #182444;
+      --ink:     #DFE6F7;
+      --ink-2:   #AFBCDA;
+      --muted:   #8494B8;
+      --accent:  #5FC8E8;
+      --accent-soft: #10304A;
+      --exact:   #6FD08C;
+      --exact-soft: #10331F;
+      --gap:     #E8B84B;
+      --gap-soft: #382A0C;
+      --inert:   #5D6B8E;
+      --shadow:  0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:  #060B1A;
+    --surface: #0D1730;
+    --raised:  #131F3D;
+    --line:    #22315A;
+    --line-2:  #182444;
+    --ink:     #DFE6F7;
+    --ink-2:   #AFBCDA;
+    --muted:   #8494B8;
+    --accent:  #5FC8E8;
+    --accent-soft: #10304A;
+    --exact:   #6FD08C;
+    --exact-soft: #10331F;
+    --gap:     #E8B84B;
+    --gap-soft: #382A0C;
+    --inert:   #5D6B8E;
+    --shadow:  0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .35);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 15px/1.6 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 44px;
+  }
+  h1, h2, h3 { margin: 0; text-wrap: balance; font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; }
+  h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: -.015em; line-height: 1.08; }
+  h2 { font-size: 19px; font-weight: 600; letter-spacing: .01em; }
+  p  { margin: 0; }
+  .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; font-weight: 500;
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .lede { color: var(--ink-2); max-width: 66ch; }
+
+  /* ---- masthead ---- */
+  header { display: flex; flex-direction: column; gap: 14px; }
+  .stamp {
+    display: inline-flex; align-items: center; gap: 9px;
+    align-self: flex-start;
+    padding: 5px 11px 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; color: var(--ink-2);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--exact); }
+
+  /* ---- ledger bar ---- */
+  .ledger { display: flex; flex-direction: column; gap: 14px; }
+  .bar {
+    display: flex; height: 46px; width: 100%;
+    border: 1px solid var(--line); border-radius: 7px;
+    overflow: hidden; background: var(--surface);
+  }
+  .bar > div { display: grid; place-items: center; min-width: 0; position: relative; }
+  .bar .seg-match { background: var(--exact); }
+  .bar .seg-park  { background: var(--gap); }
+  .bar .seg-hand  { background: var(--inert); }
+  .bar b {
+    font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
+    font-size: 13px; font-weight: 600; color: var(--ground);
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 26px; }
+  .legend div { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; transform: translateY(1px); }
+
+  /* ---- stat cards ---- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(184px, 1fr)); gap: 14px; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 9px; padding: 16px 18px 15px;
+    display: flex; flex-direction: column; gap: 5px;
+    box-shadow: var(--shadow);
+  }
+  .stat .v { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums;
+             font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -.02em; }
+  .stat .k { font-size: 12.5px; color: var(--muted); }
+  .stat.is-accent .v { color: var(--accent); }
+  .stat.is-gap .v { color: var(--gap); }
+
+  /* ---- panels + tables ---- */
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .panel-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px;
+    padding: 16px 20px; border-bottom: 1px solid var(--line-2);
+  }
+  .panel-head .note { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 20px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px; font-weight: 500;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--muted);
+    background: var(--raised);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.n { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; }
+  td.name { font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+  .full { width: 99%; white-space: normal; }
+
+  .chip {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip-exact { background: var(--exact-soft); color: var(--exact); }
+  .chip-gap   { background: var(--gap-soft);   color: var(--gap); }
+
+  /* proportional rail: how far a body is from matching */
+  .rail { display: block; width: 132px; height: 6px; border-radius: 3px; background: var(--line-2); overflow: hidden; }
+  .rail i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+
+  .filters { display: flex; gap: 8px; }
+  .filters button {
+    font: 500 12.5px/1 "IBM Plex Mono", monospace;
+    padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    background: var(--raised); color: var(--ink-2);
+    border: 1px solid var(--line);
+  }
+  .filters button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .filters button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- unlock diagram ---- */
+  .unlock { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0; }
+  .unlock > div { padding: 18px 20px; border-right: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; }
+  .unlock > div:last-child { border-right: 0; }
+  .unlock .v { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; line-height: 1; }
+  .unlock .lbl { font-size: 13px; color: var(--ink-2); }
+  .unlock .sub { font-size: 12.5px; color: var(--muted); }
+
+  footer { color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
+  code {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+    background: var(--raised); border: 1px solid var(--line-2);
+    border-radius: 4px; padding: 1px 6px; color: var(--ink-2);
+  }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 0; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="stamp"><span class="dot" id="stamp-dot"></span><span id="stamp-text">—</span></span>
+    <h1>Field overlay ledger</h1>
+    <p class="lede">What is left to decompile in <span class="num">src/field/</span>, and what is left to
+      name. Every figure is derived from the tree by <span class="num">tools/field_status.py</span>, so this
+      page is regenerated rather than edited.</p>
+  </header>
+
+  <section class="ledger">
+    <div class="eyebrow">Every function in the overlay</div>
+    <div class="bar" id="bar"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>The parked queue</h2>
+      <div class="filters" id="filters">
+        <button data-f="all" aria-pressed="true">all</button>
+        <button data-f="gap" aria-pressed="false">length gap</button>
+        <button data-f="exact" aria-pressed="false">exact length</button>
+      </div>
+      <p class="note" id="queue-note"></p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="full">Function</th>
+            <th style="text-align:right">Rows</th>
+            <th style="text-align:right">Ins</th>
+            <th>Length</th>
+            <th>Distance</th>
+          </tr>
+        </thead>
+        <tbody id="queue"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Naming is downstream of decompiling</h2>
+      <p class="note">splat freezes a function's <span class="num">.s</span> at the names it had when it
+        stopped being <span class="num">INCLUDE_ASM</span></p>
+    </div>
+    <div class="unlock" id="unlock"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Naming debt</h2></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th class="full">What</th><th style="text-align:right">Count</th><th>Available now</th></tr></thead>
+        <tbody id="naming"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Per unit</h2></div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th class="full">Unit</th><th style="text-align:right">Lines</th>
+            <th style="text-align:right">Matching</th><th style="text-align:right">Parked</th>
+            <th style="text-align:right">Handwritten</th></tr>
+        </thead>
+        <tbody id="units"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr>
+  <footer>
+    <p>Regenerate with <code>tools/field_status.py --measure --html &lt;out&gt;</code>. The row and length
+      figures need a compile, so they come from <code>tools/parked_queue.py</code> and are carried forward
+      between measured runs.</p>
+    <p>Read the length column before the row count: rows only compare between two bodies of the same length,
+      so a nonzero length is both the thing to fix first and a sign that structural work is still available.</p>
+  </footer>
+</div>
+
+<script>
+  const DATA = {
+ "units": [
+  {
+   "unit": "field.c",
+   "lines": 2234,
+   "bodies": 13,
+   "matching": 10,
+   "parked": 3,
+   "include_asm": 0,
+   "handwritten": 0
+  },
+  {
+   "unit": "field2.c",
+   "lines": 5591,
+   "bodies": 46,
+   "matching": 37,
+   "parked": 9,
+   "include_asm": 0,
+   "handwritten": 0
+  },
+  {
+   "unit": "field3.c",
+   "lines": 184,
+   "bodies": 2,
+   "matching": 2,
+   "parked": 0,
+   "include_asm": 6,
+   "handwritten": 6
+  },
+  {
+   "unit": "field4.c",
+   "lines": 10546,
+   "bodies": 259,
+   "matching": 251,
+   "parked": 8,
+   "include_asm": 14,
+   "handwritten": 14
+  },
+  {
+   "unit": "field5.c",
+   "lines": 3081,
+   "bodies": 91,
+   "matching": 89,
+   "parked": 2,
+   "include_asm": 0,
+   "handwritten": 0
+  }
+ ],
+ "totals": {
+  "lines": 21636,
+  "bodies": 411,
+  "matching": 389,
+  "parked": 22,
+  "include_asm": 20,
+  "handwritten": 20,
+  "functions": 431
+ },
+ "handwritten_insns": 10732,
+ "naming": {
+  "globals_total": 223,
+  "globals_refs": 1381,
+  "renameable": 19,
+  "renameable_strings": 5,
+  "renameable_real": 14,
+  "renameable_names": [
+   "D_80062F1B",
+   "D_8007EBCC",
+   "D_8007EBDC",
+   "D_80099FCC",
+   "D_8009A108",
+   "D_8009A15C",
+   "D_8009A162",
+   "D_8009ABF6",
+   "D_8009AC2F",
+   "D_8009AC30",
+   "D_800DF08C",
+   "D_800DF0D4",
+   "D_800E0630",
+   "D_800E4900"
+  ],
+  "locked": 204,
+  "locked_by_parked_only": 198,
+  "locked_by_handwritten": 6,
+  "unnamed_functions": 22,
+  "m2c_locals": 144,
+  "m2c_local_refs": 809,
+  "unk_members": 157
+ },
+ "queue": [
+  {
+   "name": "FieldModelStructInit",
+   "rows": 1,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "HandleKawaiDataInModel",
+   "rows": 2,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncFadew",
+   "rows": 2,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncMove",
+   "rows": 10,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldMoveToEntityUpdate",
+   "rows": 10,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "OpcodeFuncVwoft",
+   "rows": 12,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldEventRunInit",
+   "rows": 15,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "LoadLocalFieldModelAndInitAll",
+   "rows": 32,
+   "ins": 2,
+   "length_delta": -1
+  },
+  {
+   "name": "FieldEntityWalkmechCross",
+   "rows": 34,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldBackgroundInitPackets",
+   "rows": 47,
+   "ins": 4,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldCalcPointOnLine",
+   "rows": 60,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "AddBackgroundToRender",
+   "rows": 65,
+   "ins": 0,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldMain",
+   "rows": 81,
+   "ins": 9,
+   "length_delta": 1
+  },
+  {
+   "name": "FieldInitDefaultValues",
+   "rows": 100,
+   "ins": 18,
+   "length_delta": 3
+  },
+  {
+   "name": "FieldDebugRenderString",
+   "rows": 100,
+   "ins": 6,
+   "length_delta": -1
+  },
+  {
+   "name": "DebugUpdateActor",
+   "rows": 152,
+   "ins": 4,
+   "length_delta": 2
+  },
+  {
+   "name": "KawaiSetVertexColorFromLighting",
+   "rows": 181,
+   "ins": 12,
+   "length_delta": 1
+  },
+  {
+   "name": "FieldModelCreatePktsForPart",
+   "rows": 247,
+   "ins": 29,
+   "length_delta": 0
+  },
+  {
+   "name": "FieldEntityMove",
+   "rows": 357,
+   "ins": 36,
+   "length_delta": 6
+  },
+  {
+   "name": "FieldEntityMovementUpdate",
+   "rows": 500,
+   "ins": 94,
+   "length_delta": 21
+  },
+  {
+   "name": "FieldBGUpdateDrawenv",
+   "rows": 811,
+   "ins": 134,
+   "length_delta": 27
+  },
+  {
+   "name": "FieldDebugRenderPage",
+   "rows": 964,
+   "ins": 124,
+   "length_delta": 1
+  }
+ ],
+ "queue_measured": true,
+ "history": [
+  {
+   "lines": 21636,
+   "bodies": 411,
+   "matching": 389,
+   "parked": 22,
+   "include_asm": 20,
+   "handwritten": 20,
+   "functions": 431,
+   "date": "2026-08-22"
+  }
+ ]
+};
+
+  const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
+  const T = DATA.totals, N = DATA.naming;
+
+  /* stamp */
+  document.getElementById("stamp-text").textContent =
+    DATA.queue_measured ? "measured · " + DATA.queue.length + " parked bodies scored"
+                        : "static census · queue not measured";
+  if (!DATA.queue_measured) document.getElementById("stamp-dot").style.background = "var(--gap)";
+
+  /* ledger bar */
+  const segs = [
+    ["seg-match", T.matching,    "matching C",  "byte-identical to the retail overlay"],
+    ["seg-park",  T.parked,      "parked",      "C written, does not match yet"],
+    ["seg-hand",  T.include_asm, "handwritten", "assembly that can never become matching C"],
+  ];
+  const bar = document.getElementById("bar"), legend = document.getElementById("legend");
+  for (const [cls, v, label, sub] of segs) {
+    const d = el("div", cls);
+    d.style.flex = v;
+    d.title = label + " — " + v;
+    if (v / T.functions > 0.045) d.appendChild(el("b", null, v));
+    bar.appendChild(d);
+    const L = el("div");
+    const sw = el("span", "swatch");
+    sw.style.background = getComputedStyle(d).backgroundColor;
+    L.append(sw, el("strong", "num", v), el("span", null, label + " — " + sub));
+    legend.appendChild(L);
+  }
+
+  /* stats */
+  const stats = [
+    [T.functions, "functions in the overlay", ""],
+    [T.parked, "left to finish", "is-gap"],
+    [DATA.handwritten_insns.toLocaleString(), "instructions of handwritten asm", ""],
+    [N.globals_total, "address-named globals in use", ""],
+    [N.renameable_real, "globals nameable right now", "is-accent"],
+  ];
+  const sw = document.getElementById("stats");
+  for (const [v, k, cls] of stats) {
+    const c = el("div", "stat" + (cls ? " " + cls : ""));
+    c.append(el("div", "v", v), el("div", "k", k));
+    sw.appendChild(c);
+  }
+
+  /* parked queue */
+  const tb = document.getElementById("queue");
+  const worst = Math.max(1, ...DATA.queue.map(q => q.rows));
+  function draw(filter) {
+    tb.textContent = "";
+    const rows = DATA.queue.filter(q =>
+      filter === "all" || (filter === "gap") === (q.length_delta !== 0));
+    for (const q of rows) {
+      const tr = el("tr");
+      tr.append(el("td", "name", q.name),
+                el("td", "n", q.rows), el("td", "n", q.ins));
+      const td = el("td");
+      const chip = el("span", "chip " + (q.length_delta ? "chip-gap" : "chip-exact"),
+        q.length_delta ? (q.length_delta > 0 ? "+" : "") + q.length_delta : "exact");
+      td.appendChild(chip);
+      tr.appendChild(td);
+      const rt = el("td"), rail = el("span", "rail"), fill = el("i");
+      fill.style.width = Math.max(2, (q.rows / worst) * 100) + "%";
+      if (q.length_delta) fill.style.background = "var(--gap)";
+      rail.appendChild(fill); rt.appendChild(rail); tr.appendChild(rt);
+      tb.appendChild(tr);
+    }
+    document.getElementById("queue-note").textContent =
+      rows.length + " of " + DATA.queue.length + " shown";
+  }
+  draw("all");
+  document.getElementById("filters").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    for (const o of e.currentTarget.querySelectorAll("button"))
+      o.setAttribute("aria-pressed", String(o === b));
+    draw(b.dataset.f);
+  });
+
+  /* unlock */
+  const unlock = [
+    [N.locked_by_parked_only, "unlock as the parked bodies match",
+     "pinned only by a parked function's frozen .s", "var(--gap)"],
+    [N.locked_by_handwritten, "held by handwritten assembly",
+     "no path to renaming while those stay asm", "var(--inert)"],
+    [N.renameable_real, "nameable right now",
+     "no frozen .s mentions them", "var(--accent)"],
+  ];
+  const uw = document.getElementById("unlock");
+  for (const [v, lbl, sub, col] of unlock) {
+    const d = el("div");
+    const n = el("div", "v", v); n.style.color = col;
+    d.append(n, el("div", "lbl", lbl), el("div", "sub", sub));
+    uw.appendChild(d);
+  }
+
+  /* naming debt */
+  const debt = [
+    ["Address-named globals referenced from src/field/", N.globals_total,
+     N.renameable_real + " real + " + N.renameable_strings + " .rodata strings"],
+    ["Address-named functions (func_xxxxxxxx)", N.unnamed_functions, "—"],
+    ["m2c locals still called var_* / temp_*", N.m2c_locals,
+     "all " + N.m2c_locals + " (" + N.m2c_local_refs + " references)"],
+    ["Unnamed unkNN struct members", N.unk_members, "all " + N.unk_members],
+  ];
+  const nb = document.getElementById("naming");
+  for (const [what, count, avail] of debt) {
+    const tr = el("tr");
+    tr.append(el("td", "full", what), el("td", "n", count), el("td", null, avail));
+    nb.appendChild(tr);
+  }
+
+  /* units */
+  const ub = document.getElementById("units");
+  for (const u of DATA.units) {
+    const tr = el("tr");
+    tr.append(el("td", "name full", u.unit), el("td", "n", u.lines.toLocaleString()),
+              el("td", "n", u.matching), el("td", "n", u.parked || "—"),
+              el("td", "n", u.handwritten || "—"));
+    ub.appendChild(tr);
+  }
+</script>
