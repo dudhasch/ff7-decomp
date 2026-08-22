@@ -599,7 +599,34 @@ void func_800A60D8(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A6168);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A63FC);
+s32 func_800A63FC(WorldChunkHeader* chunk, s16 x, s16 z, s16* outX, s16* outZ) {
+    s16 dx;
+    s16 dz;
+    s32 d;
+    s32 near;
+
+    dx = chunk->x - x;
+    *outX = dx;
+    if (dx >= 0x13) {
+        *outX = dx - 0x24;
+    } else if (dx < -0x12) {
+        *outX = dx + 0x24;
+    }
+    dz = chunk->z - z;
+    *outZ = dz;
+    if (dz >= 0xF) {
+        *outZ = dz - 0x1C;
+    } else if (dz < -0xE) {
+        *outZ = dz + 0x1C;
+    }
+    d = ABS(*outX);
+    near = 0;
+    if (d < 3) {
+        d = ABS(*outZ);
+        near = d < 3;
+    }
+    return near;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A64AC);
 
