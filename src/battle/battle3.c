@@ -273,34 +273,35 @@ void func_800DE2B4(void) {
  * materialisations differ.  The target emits them
  *   li v1,1 (QImode) / li v0,1 (HImode) / li v0,3 (QImode) / li v0,3 (HImode)
  * and this body emits the HImode 1 first, i.e. in LUID order -- the QImode 1
- * is created at its first use, the 8th store (D_800F92EE), and sched2 hoists
- * it to the front but behind the HImode one.  For the target's order the
- * QImode 1 has to exist *before* the D_800F92E6 store, which no arrangement
- * of these 17 statements produces while keeping the store order:
- *   D_800F92EE = 1 moved to the front                    6
- *   D_800F92F3 = D_800F92EE = 1 chained                  6
- *   D_800F38A5 = 1 moved to the front                    8
- * Residue is `local_alloc` quantity ordering over four one-def constants;
- * both terms of QTY_CMP_PRI are fixed by the store list, so per CLAUDE.md
- * this is a park rather than a search. */
+ * (unkC) is created at its first use, the 8th store, and sched2 hoists it to
+ * the front but behind the HImode one.  For the target's order the QImode 1
+ * has to exist before the unk4 store, which no arrangement of these 17
+ * statements produces while keeping the store order:
+ *   unkC = 1 moved to the front                          6
+ *   unk11 = 1 moved to the front                         8
+ *   the whole record written in field order              15
+ * Typing 0x800F92E2..F3 as the one Unk80026448 it is took this from 4 rows
+ * to 3 and is right independently of the residue.  Residue is local_alloc
+ * quantity ordering over four one-def constants; both terms of QTY_CMP_PRI
+ * are fixed by the store list, so per CLAUDE.md this is a park. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DE3CC);
 #else
 void func_800DE3CC(void) {
-    D_800F92E6 = 1;
-    D_800F92EF = 3;
+    D_800F92E2.unk4 = 1;
+    D_800F92E2.unkD = 3;
     D_800F38A4 = 0;
-    D_800F92EC = 0;
-    D_800F92ED = 0;
-    D_800F92E2 = 0;
-    D_800F92E4 = 0;
-    D_800F92EE = 1;
-    D_800F92E8 = 3;
-    D_800F92F2 = 0;
-    D_800F92F3 = 1;
-    D_800F92F0 = 0;
-    D_800F92F1 = 0;
-    D_800F92EA = 0;
+    D_800F92E2.unkA = 0;
+    D_800F92E2.unkB = 0;
+    D_800F92E2.unk0 = 0;
+    D_800F92E2.unk2 = 0;
+    D_800F92E2.unkC = 1;
+    D_800F92E2.unk6 = 3;
+    D_800F92E2.unk10 = 0;
+    D_800F92E2.unk11 = 1;
+    D_800F92E2.unkE = 0;
+    D_800F92E2.unkF = 0;
+    D_800F92E2.unk8 = 0;
     D_800F389D = 0;
     D_800F38A5 = 1;
     D_800F977C = 0;
