@@ -1,6 +1,24 @@
 //! PSYQ=3.3 CC1=2.7.2 G=8
 #include "main_private.h"
 
+// Tentative definitions, not `extern` declarations, and the difference is the
+// whole addressing form. This unit is compiled `-G8`: cc1 puts an object it
+// defines that is no larger than the threshold into `.sdata`/`.sbss`, emits a
+// tentative definition as a small `.comm`, and the assembler then reaches any
+// of those through `$gp` -- one instruction, `%gp_rel(<sym>)($gp)`. Declared
+// `extern` instead, cc1 emits only `.extern <sym>,<size>`, nothing lands in
+// small data, and every access is the two- or three-instruction `%hi`/`%lo`
+// form that the target does not have. The real definitions live in
+// `src/main/18B8.c` and `asm/us/main/data/536C4.bss.s`; `--use-comm-section`
+// (see tools/ninja/gen.py) keeps these as COMMON so the link binds to those
+// rather than seeing two definitions.
+s32 D_80062DF8;
+s8 D_80062DFC;
+s32 D_80062FC0;
+u_long* D_80062FC4; // also declared extern in game.h, for the units at -G0
+Gpu D_80063008;
+u_long* D_8006300C;
+
 s8 D_80062EBC = 0;
 static s8 _D_80062EBD = 0;
 static s8 _D_80062EBE = 0;
@@ -22,7 +40,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022DE4);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022FE0);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023050);
+s32 func_80023050(void) { return D_80062DF8; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_8002305C);
 
@@ -49,7 +67,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_8002382C);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023940);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023AC4);
+void func_80023AC4(void) { D_80062FC0 = 2; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023AD4);
 
@@ -495,15 +513,15 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800264A8);
 
 void func_800269C0(void* arg0) { D_80062F24.poly = arg0; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800269D0);
+void func_800269D0(void) { D_80063008 = D_80062F24; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800269E8);
+void func_800269E8(void) { D_80062F24 = D_80063008; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A00);
+void func_80026A00(u_long* arg0) { D_80062FC4 = arg0; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A0C);
+void func_80026A0C(void) { D_8006300C = D_80062FC4; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A20);
+void func_80026A20(void) { D_80062FC4 = D_8006300C; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A34);
 
@@ -511,7 +529,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A94);
 
 void func_80026B5C(void) {}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026B64);
+void func_80026B64(s8 arg0) { D_80062DFC = arg0; }
 
 // strlen but for FF7 strings
 // FF7 string is 0x00: ' ', 0x10: '0', 0x21: 'A', 0xFF: terminator

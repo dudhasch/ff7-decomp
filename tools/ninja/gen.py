@@ -193,9 +193,24 @@ def add_c(cfg: any, file_name: str):
         return
     compiler_flags = get_compiler_params(in_path)
     objs.append(out_path)
+    # `-G<n>` has to reach maspsx as well as cc1. cc1 only decides *where its
+    # own definitions go* -- an object it defines that is no larger than the
+    # threshold lands in `.sdata`/`.sbss`, and a tentative definition becomes a
+    # small `.comm` -- and it leaves every access as the plain `lw $2,<sym>`
+    # macro for the assembler to expand. maspsx does that expansion, and with
+    # sdata_limit 0 (the default) it has no idea any symbol is small, so every
+    # such access comes out as the two- or three-instruction `%hi`/`%lo` form
+    # where the retail build has `%gp_rel(<sym>)($gp)`.
+    #
+    # `--use-comm-section` goes with it: a tentative definition of a symbol
+    # that some other unit really defines has to stay a `.comm`, or maspsx
+    # emits its own `.sbss` block for it and the link sees two definitions.
+    as_flags = compiler_flags.as_flags
+    if compiler_flags.cc_gp != "-G0":
+        as_flags = f"{as_flags} --use-comm-section {compiler_flags.cc_gp}"
     variables = {
         "cc1": compiler_flags.cc1,
-        "as_flags": compiler_flags.as_flags,
+        "as_flags": as_flags,
         "cc_flags": f"{compiler_flags.cc_opt} {compiler_flags.cc_gp} {compiler_flags.g_opt} {compiler_flags.gcoff_opt}",
     }
     # Overlays are loaded on an 8-byte boundary, so a unit's .rodata offset

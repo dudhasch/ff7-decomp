@@ -1368,15 +1368,13 @@ a near-miss, in rough order of frequency:
   bullet above — give the address a second reference by spelling a neighbour
   as an offset from it.
 
-  **In a unit compiled with `-G<n>` there is a third route, and it is a fact
-  about the symbol rather than about the function: a `D_` scalar the target
-  addresses through a `lui`/`addiu` pair with `0(reg)` is a *member of a large
-  object*, not a standalone global.** `-G8` (the `//! G=8` header on
-  `src/main/1255C.c` and its siblings) makes gcc treat any object it can prove
-  is at most 8 bytes as small-data, so its address never needs a register and
-  every access comes out as the assembler's `$at` expansion; the address of a
-  member of a 0x10F4-byte struct is not small-data, so gcc builds it once into
-  a register and reuses it for the load *and* the store. `D_8009D260` in
+  **There is a third route and it is a fact about the symbol rather than
+  about the function: a `D_` scalar the target addresses through a
+  `lui`/`addiu` pair with `0(reg)` is a *member of a larger object*, not a
+  standalone global.** An operand of the form `<sym>+<offset>` is not the same
+  thing to maspsx as a bare `<sym>`, so a member reference comes out as one
+  `lui`/`addiu` in a register that serves the load *and* the store, where the
+  bare symbol is re-expanded through `$at` at every access. `D_8009D260` in
   `src/main/1255C.c` is `Savemap.gil` — `Savemap` is `0x8009C6E4` and `gil` is
   at `+0xB7C` — and rewriting the two `SystemMenuAddPartyGold` /
   `SystemMenuRemovePartyGold` bodies to say `Savemap.gil` matched both
@@ -1394,6 +1392,53 @@ a near-miss, in rough order of frequency:
   difference lands on a member. `grep -n 'Savemap = ' config/sym_extern.us.txt`
   gives the bases; the struct's own `/* 0xNNN */` offset comments give the
   rest. It costs a minute and it is the difference between a match and a park.
+
+* **`%gp_rel(<sym>)($gp)` in the target where your build has `%hi`/`%lo` is a
+  *declaration* fact: in a `-G<n>` unit the small globals are written as
+  tentative definitions, not as `extern`s.** cc1 does not decide the
+  addressing form — it emits every access as the plain `lw $2,<sym>` macro and
+  lets the assembler expand it. What `-G<n>` decides is where cc1 puts the
+  objects *this unit declares*: an object no larger than the threshold goes to
+  `.sdata`/`.sbss`, and a **tentative definition** (`s32 D_80062DF8;`, file
+  scope, no `extern`, no initialiser — the ordinary 1990s spelling for "this
+  global lives somewhere in the program") becomes a small `.comm`. maspsx then
+  addresses anything in `.sdata`/`.sbss`/small-`.comm` through `$gp`. Declared
+  `extern` instead, cc1 emits only `.extern <sym>,<size>`, nothing lands in
+  small data, and every access is two or three instructions where the target
+  has one.
+
+  Two build-side pieces are needed and both are in `tools/ninja/gen.py`:
+  `-G<n>` has to be passed to **maspsx** as well as to cc1 (it is what sets
+  maspsx's `sdata_limit`; the default 0 means "no symbol is small"), and
+  `--use-comm-section` has to go with it, or maspsx emits its own `.sbss`
+  block for the tentative definition and the link sees two definitions of a
+  symbol `asm/us/<ovl>/data/*.bss.s` already defines.
+
+  **Do not reach for `.extern <sym>,<size>` instead, however much it looks
+  like the intended mechanism.** Teaching maspsx to treat a small `.extern` as
+  gp-addressable is a four-line change that makes the accessors match and then
+  fails the link: of the 39 small externs across `src/main/18B8.c` and
+  `src/main/1255C.c`, only 7 are inside the ±32K window around `_gp`, and the
+  other 32 come back as `relocation truncated to fit: R_MIPS_GPREL16`. The
+  set of gp-addressed symbols is chosen by the *source* — which globals a unit
+  spells as tentative definitions — and it is not recoverable from sizes.
+  maspsx needs no change; it already does the right thing for `.comm`.
+
+  The tell costs one command, and the answer is a list rather than a verdict:
+
+  ```shell
+  grep -ho '%gp_rel([A-Za-z_0-9]*)' asm/us/main/nonmatchings/1255C/*.s \
+    | sed 's/%gp_rel(//;s/)//' | sort -u
+  ```
+
+  Every name it prints is a global that unit declares as a tentative
+  definition; every other data symbol it touches is an `extern`. In
+  `src/main/1255C.c` that is 39 names against 107, and it is why the file's
+  existing C already opens with `s8 D_80062EBC = 0;` and friends rather than
+  with a block of `extern`s. **37 of that file's 52 remaining functions touch
+  at least one gp-addressed symbol**, so until the flag and the spelling are
+  both right none of them can match, and every one of them reads as an
+  ordinary `%hi`/`%lo` addressing residue.
 * **A scaled subscript folds the symbol into the address register; a
   pre-scaled byte offset does not.** This is the whole of the "`$at`
   rematerialisation wall" that a dozen park notes in `src/field/` describe.
