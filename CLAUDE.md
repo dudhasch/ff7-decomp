@@ -2435,6 +2435,57 @@ a near-miss, in rough order of frequency:
   to grep the target `.s` for both mnemonics — if it spells one of them, the
   tool must not rewrite it.
 
+* **A `%hi` entry at an address the target never materialises names a wrong
+  address, and no row count can see it.** The per-address table is the only
+  thing that catches a pointer difference that is scaled twice — the
+  companion to the m2c byte-offset rule above, reached from the other end.
+  `FieldBGUpdateDrawenv` passed ten `DRAWENV`s to `SetDrawEnv` as
+  `(DRAWENV*)(&D_80113F34 - 8)`, and `D_80113F34` is an `extern s16`, so the
+  pointer landed **0x10** below the symbol where the target's twenty-four
+  `addiu $a1, $reg, -0x8` say 8. Correcting it measures *exactly* the same
+  811 rows / 134 insertions as the wrong version, because either spelling
+  folds the constant into the `%lo` and either row is a CHG against a target
+  that holds the symbol's own address in a register. The table said it in one
+  line: four `%hi` at `0x80113F24` against the target's zero.
+
+  The fix for that whole family is a **per-site pointer local with the store
+  routed through it** — `envN = &SYM; *envN = ...; f(x, (T*)((u8*)envN - 8));`
+  — which reproduces `lui`/`addiu` of the symbol, `sh $v0,0($reg)` and
+  `addiu $a1,$reg,-0x8` register-for-register, and took that function from
+  **811 rows to 632**. Two halves are separately load-bearing and neither is
+  guessable from the diff: the store must go through the pointer, since a
+  pointer local that is never dereferenced is folded straight back into the
+  address by cse and measures *exactly* inert; and it must be one local **per
+  site**, since a single shared one becomes an allocno with 48 references,
+  wins a callee-saved register, lives across the whole function and is 85
+  rows worse than doing nothing.
+
+* **Reload aligns a spill slot to `BIGGEST_ALIGNMENT`, which is 64 bits on
+  MIPS, so spilled `short`s sit 8 bytes apart and do not look like `short`s.**
+  Three halfword slots at `0x20`, `0x28`, `0x30` read like three 8-byte
+  aggregates and are three spilled `u16` locals. Read them as evidence of
+  *register pressure*, not of a missing struct: in `FieldBGUpdateDrawenv` the
+  target spills exactly three halfwords because two of its callee-saved
+  registers are spent holding two globals' addresses, which this project's
+  body does not do. Fixing the addressing is what produces the spills, and
+  the `TREE_ADDRESSABLE` lever is the wrong tool for them.
+
+* **A symbol the target materialises *nine* times is a count of cse regions,
+  and the pointer-local idiom applies per region, not per function.** The
+  standing advice — a scalar global read many times wants a named pointer
+  local — is right about the form and silent about the scope, and the scope
+  is the whole question when the target's count is neither 1 nor N.
+  `FieldBGUpdateDrawenv` reads each screen-centre global 31 times; the target
+  materialises each address 9 times, which decomposes as **three**
+  register-held regions (`lui`+`addiu` into a callee-saved register, then
+  `lhu $a2,0($s3)`) plus six isolated `$at`-form reads in the tail. Those
+  three regions are readable straight off the target — one set right after a
+  call and covering both arms of the `if` below it, one inside each arm of a
+  later `if` — so the fix is one pointer pair per region with the tail reads
+  left direct. A single pair for the whole function gives 1 against 9 and
+  overshoots the length by exactly what the six isolated reads cost (`pcX`
+  alone +2, `pcY` alone +6, both **-18**).
+
 * **`variant_eval.py` prints the compiled length too, and that is the number
   to read.** It reports `length <ours> against <target> (+N instructions)`
   whenever the two differ, taken from the function's ELF symbol size rather
