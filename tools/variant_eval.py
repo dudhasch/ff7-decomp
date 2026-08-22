@@ -405,15 +405,36 @@ def main(argv):
     context = 3
     jobs = 1
     specs = []
+    # Accept both `--jobs 8` and `--jobs=8`. Only the second parsed for a long
+    # time, while this file's own usage line above showed the first -- so the
+    # documented invocation read `8` as a spec path, ran every variant on one
+    # core, and reported an extra FAILED tag. parked_queue.py takes both, and
+    # two sibling tools disagreeing about their own flags is how an hour goes.
+    want = None
     for a in args:
-        if a.startswith("--context="):
+        if want is not None:
+            if want == "--context":
+                context = int(a)
+            else:
+                jobs = int(a)
+            want = None
+        elif a in ("--context", "--jobs"):
+            want = a
+        elif a.startswith("--context="):
             context = int(a.split("=", 1)[1])
         elif a.startswith("--jobs="):
             jobs = int(a.split("=", 1)[1])
         elif a in ("--rows", "--keep"):
             continue
+        elif a.startswith("-"):
+            # Never silently treat an unrecognised flag as a spec path: that
+            # is exactly how the --jobs form above failed, and it fails as a
+            # plausible-looking FAILED row rather than as an error.
+            die("unknown option %r" % a)
         else:
             specs.append(a)
+    if want is not None:
+        die("%s needs a value" % want)
     if not specs:
         die("no spec files given")
 

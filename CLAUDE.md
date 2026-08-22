@@ -1509,6 +1509,23 @@ a near-miss, in rough order of frequency:
   `src/field/field4.c` matched on exactly this, from 26 rows; note this is not
   the same as the `KawaiFadeModelColor` bullet above, which is about *avoiding*
   duplication so cse keeps knowing what the variables held.
+
+  **The sharper form: duplicate the exit tail in the arm that is *not* wrong,
+  to stop two other arms merging.** Post-reload cross-jumping compares emitted
+  tails including registers, so two switch arms both ending
+  `beqz <r>,<tail> / li v0,1 / j <epilogue>` are merged and the function comes
+  out three instructions short. Nothing you do to *those two* arms separates
+  them once their values land in the same register. Writing a **third** arm's
+  tail out in full — `if (fadeAdjust >= 0xFF) { PC_INC(1); return 0; }
+  return 1;` instead of falling into the shared tail — gives that arm its own
+  copy of the `PC_INC` block, so the conditional jumps carry different labels
+  when cross-jumping compares them and the merge does not happen.
+  `OpcodeFuncFadew` in `src/field/field4.c` matched on this, 2 rows to 0.
+  The trap that hid it: on the shared-tail body every polarity flip of that
+  guard is *exactly inert*, so the dimension reads as closed and swept — and
+  the polarity only becomes load-bearing once the tail is duplicated, at which
+  point the other spelling is 2 rows again. Two knobs that are each inert
+  alone and jointly decisive, which is the paired-lever shape one more time.
 * **A cast through a `volatile` pointer drops the qualifier, and the loads it
   frees fill the target's `nop`s.** `volatile u8* ev;` says nothing about
   `*(u16*)(ev + 1)` -- the cast produces a plain `u16*`, the MEM is not
@@ -2206,6 +2223,50 @@ a near-miss, in rough order of frequency:
   inner loop bodies or all four at once. That second result is worth as much
   as the first: it is what turns "65 rows of register naming" from a guess
   into a finding, and it costs one sweep.
+
+  **It is also a cse barrier, not only a scheduling one, and that is a second
+  use worth knowing.** A named address local is folded back into the subscript
+  below it unless a basic-block boundary intervenes; the empty loop supplies
+  one. Worth 4 rows in `FieldEventRunInit`, and it is what lets the local sit
+  where the preheader hoist order needs it rather than where cse will tolerate
+  it. So an "exactly inert" result closes the *scheduling* dimension only —
+  re-test with the barrier placed between a definition and its use before
+  concluding a local cannot be moved.
+
+* **A diff of 0 insertions and 0 deletions refutes an `allocno_compare` or
+  `QTY_CMP_PRI` diagnosis by construction, and that is a proof rather than an
+  argument.** Same instruction stream means the same RTL, which means the same
+  `n_refs` and `live_length`, which means the same ranking — so a ranking that
+  is provably *equal* on both sides cannot be the thing that differs. What
+  differs in that case is the **pseudo structure**: how many quantities the
+  block is cut into, which is decided by how many variables the source spells
+  and is therefore reachable from C. `OpcodeFuncMove` and
+  `FieldMoveToEntityUpdate` in `src/field/field4.c` were parked three sessions
+  on the opposite reading — both notes ended in the allocno arithmetic and
+  concluded no term was reachable — and both matched on naming one
+  intermediate. Read the insertion/deletion counts before believing any
+  allocation diagnosis; this file's standing advice to park on allocno
+  arithmetic applies to a residue with insertions in it, not to a pure
+  permutation.
+
+* **Paired levers can both be *plateaus*, not regressions, and a note that
+  measures one at a time rejects both.** The existing paired-levers rule is
+  about two changes at +1 and −1 instruction that cancel. The commoner case
+  moves nothing: `OpcodeFuncMove`'s dead conditional is 14 rows → 10 and the
+  `s32 entryIdx` split is 14 → 14, so the second reads as exactly inert and
+  every note recorded it as "measured and inert" — together they are **0**.
+  `FieldEventRunInit` is the same shape (a moved local at −2 instructions, a
+  barrier at +1, together 15 → 11). An inert measurement is evidence about
+  that lever *in the presence of the others you happened to have*, and nothing
+  more. Cross the note's inert entries with its partial wins before spending a
+  budget on anything new.
+
+* **A `perm_ins_block` dead conditional is free only when the duplicated block
+  leaves nothing live at the join.** `OpcodeFuncMove`'s is deleted by flow at
+  no cost in length; the same construct in `FieldEventRunInit`, wrapped around
+  blocks whose locals are read afterwards, costs +5 and +6 instructions. Two
+  data points and the mechanism is unread, so treat it as a rule of thumb:
+  check the length, not just the rows, on every inserted block.
 
 * **Before deciding two residues are two problems, check whether the lever for
   one is the cause of the other.** `HandleKawaiDataInModel` in
@@ -2999,6 +3060,23 @@ verdict is the one `checkfn.py` would give (same alias discounting, same
 scoping). A variant is described as *edits against a pinned base*, and each
 `old` string must match exactly once or the run aborts, so a typo cannot
 silently score as "no change".
+
+That "exactly once" is over the **whole unit**, not the function, and these
+units are full of near-clones: `    s32 off;` occurs ten times in `field5.c`,
+and `OpcodeFuncMove`'s model-entry lookup statement occurs four times in
+`field4.c` — two of them inside already-matching C, where an edit would be a
+silent regression rather than an abort. Anchor on something the function alone
+contains: its signature, a whole block, or a neighbouring comment. A bare
+declaration is never a safe anchor here.
+
+Two flags, both hardened after they cost real time. `--jobs` takes either
+`--jobs 8` or `--jobs=8` — only the second parsed for a long while, and this
+file and the tool's own usage line both showed the first, so the documented
+invocation read `8` as a spec path, ran single-threaded, and reported an extra
+`FAILED` tag that looked like a broken variant. And any unrecognised `-flag`
+is now a hard error instead of being appended to the spec list, which is the
+general form of that failure: a mistyped option must not come back as a
+plausible-looking result row.
 
 **Name the spec files in one case.** `.variants/` sits on the repo's working
 tree, which on Windows is case-insensitive, so a sweep that tags its variants
