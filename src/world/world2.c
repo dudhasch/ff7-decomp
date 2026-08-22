@@ -109,7 +109,31 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C1FD8);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C2130);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C2450);
+void func_800C2524(WorldModelPart* part, s16 arg1, s16 arg2, s16 arg3);
+
+s32 func_800C2450(WorldModel* model, u8* p) {
+    u32 i;
+    s32 count;
+    WorldModelPart* part;
+    s16 c0;
+    s16 c1;
+    s16 c2;
+    /* The target's frame is 8 bytes larger than this body needs, with the
+     * extra between the outgoing-argument area and the register saves.  The
+     * identity of the local is not recoverable. */
+    u8 unusedLocals[8];
+
+    count = model->unk3;
+    part = (WorldModelPart*)(model->unk18 + (s32)model->unk1C);
+    c0 = (p[1] << 8) | p[0];
+    c1 = (p[3] << 8) | p[2];
+    c2 = (p[5] << 8) | p[4];
+    *(u32*)0x1F800200 = p[6];
+    for (i = 0; i < count; i++) {
+        func_800C2524(&part[i], c0, c1, c2);
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C2524);
 
