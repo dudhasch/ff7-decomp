@@ -54,7 +54,21 @@ void func_800A0B48(void) {
 
 static s32 func_800A0BD4(void) { return D_800D05E8; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A0BE4);
+u8* func_800A0BE4(s32 arg0) {
+    u8* cur;
+    u8* next;
+    u8* ret;
+
+    cur = (u8*)D_800D05E0;
+    next = (u8*)(arg0 * 40 + (s32)cur);
+    if (next < (u8*)(D_800D05DC + 0x20800)) {
+        D_800D05E0 = (s32)next;
+        ret = cur;
+    } else {
+        func_800A0B40(1);
+    }
+    return ret;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A0C54);
 
