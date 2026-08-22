@@ -1104,7 +1104,54 @@ static void func_8002C2CC(void* arg0, void* arg1) {
     voice->half1.unkE0 = temp_v1 | 0x10;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C300);
+typedef struct {
+    u32 unk0;
+    s32 unk4;
+    s8 unk8;
+} Unk8002C300;
+
+/* As func_8002BD04, on the 20.12 pair at 0x3C/0x40 -- signed byte target,
+ * full-word accumulator, so the tick count is `s32` here rather than `s16`.
+ *
+ * PARKED, 5 rows, 41 instructions against 42. The residue is one `move`:
+ * the target copies the tick count out of $a2 into $v0 before the two
+ * `unk5A` stores and puts the second quotient in $v1, where this keeps the
+ * count in $a2 and the quotient in $v0. The instruction the copy would be
+ * is the one this body is short, and everything else is byte-identical.
+ *
+ * Twelve spellings measured, all **exactly 5 rows**: a narrow (`s16`/`u16`)
+ * local for the stored value -- CLAUDE.md's "a value the target copies with
+ * `move` is an s16 local", which is the obvious read and is wrong here,
+ * because the target's copy is `addu v0,a2,zero` in SImode and not a
+ * truncation; both chained-assignment orders; an `s32` local for the count;
+ * a named local for the second quotient (to lengthen its live range) with
+ * the stores before and after it; and both orders of the two halves.
+ *
+ * A `do { } while (0); ` barrier before the pair, between the two stores and
+ * after them measures 5 rows in all three positions, so the residue is
+ * register allocation rather than sched2 and no reordering can reach it --
+ * the copy is `block_alloc` choosing to give the stored value its own
+ * quantity, which is not expressible in C without emitting an instruction.
+ *
+ * func_8002FE48 below carries 5 branch-target rows purely from this
+ * function's missing instruction; both clear together.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/akao", func_8002C300);
+#else
+void func_8002C300(Unk8002C300* arg0, Unk80099788* voice) {
+    s32 steps;
+
+    steps = 1;
+    if (arg0->unk4 != 0) {
+        steps = arg0->unk4;
+    }
+    voice->half0.unk40 = ((arg0->unk8 << 8) - voice->half0.unk3C) / steps;
+    voice->half1.unk40 = ((arg0->unk8 << 8) - voice->half1.unk3C) / steps;
+    voice->half1.unk5A = steps;
+    voice->half0.unk5A = steps;
+}
+#endif
 
 // Apply the paired handler to 4 blocks spaced 0x210 bytes apart.
 void func_8002C3A8(void* arg0) {
