@@ -17,12 +17,31 @@ extern u8 D_800694D4[];
 extern u8 D_80063048[];
 extern void* D_800707C0;
 void func_80014804(void);
-/* main's .bss, addressed %gp_rel under -G8 -- declare, never define. */
-extern s8 D_80062FFC;
-extern u8 D_80063020;
-extern Unk80062F7C* D_80062F7C;
-extern s32 D_80062F10;
-extern s32 D_80062FBC;
+/* main's .bss, addressed `%gp_rel(<sym>)($gp)` by the target. These are
+ * *tentative definitions*, not `extern` declarations, and the difference is
+ * the whole addressing form: this unit is compiled `-G8`, so cc1 emits a
+ * tentative definition of a small object as a `.comm`, and maspsx (given
+ * `--use-comm-section -G8` by tools/ninja/gen.py) then reaches it through
+ * `$gp` in one instruction. Declared `extern`, cc1 emits only
+ * `.extern <sym>,<size>`, nothing is small, and every access is the two- or
+ * three-instruction `%hi`/`%lo` pair the target does not have. The real
+ * definitions live in `asm/us/main/data/536C4.bss.s`; `--use-comm-section`
+ * keeps these COMMON so the link binds to those rather than seeing two.
+ * Widths are read off the target's opcodes, not guessed. */
+s8 D_80062FFC;
+u8 D_80063020;
+Unk80062F7C* D_80062F7C;
+s32 D_80062F10;
+s32 D_80062FBC;
+s32 D_80062F14;
+s32 D_80062F58;
+s32 D_80062F60;
+s32 D_80062F88;
+s32 D_80062F9C;
+u8 D_80062FEC;
+s32 D_80062FF0;
+u16 D_80063018;
+Unk800A8D04* g_CurrentAction;
 
 s32 D_80062D4C = 0x00000000;
 s32 D_80062D50 = 0x000000FF;

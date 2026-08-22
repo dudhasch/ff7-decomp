@@ -5512,6 +5512,60 @@ shape as the `field.c` five-way split: one merged unit carrying two
 incompatible per-unit settings, where the fix is a split at the boundary the
 addressing mode reveals, not a header change applied to the whole file.
 
+**Second correction, on `src/main/18B8.c`: the reason a tentative definition
+"measured and rejected" three times in this file is that `build.ninja` was
+stale, and `ninja <obj>` never regenerates it.** The `-G<n>` that maspsx needs
+is written into the edge by `tools/ninja/gen.py`, so a checkout that predates
+that change carries `as_flags = --expand-div --aspsx-version=2.34` and nothing
+else — and under those flags a tentative definition is **exactly inert**, which
+is indistinguishable from "the mechanism does not work". Three park notes in
+`src/main/18B8.c` recorded that reading verbatim ("a tentative definition
+`u8 SYM;` in this unit ... measured and rejected, all exactly 5 rows"), and all
+three functions match with no change to their bodies at all. The check costs
+one command and belongs ahead of any `-G` measurement:
+
+```shell
+grep -c 'use-comm-section' build.ninja     # 0 means every -G verdict is void
+```
+
+`make build` regenerates it; `ninja build/us/src/<ovl>/<unit>.c.o` does not, and
+neither does `variant_eval.py`, which *reads* the edge it finds.
+
+**And the count that matters is not "how many tentative definitions does the
+unit have" — it is "how many of its `%gp_rel` symbols does it not define".**
+An *initialised* definition (`s32 D_80062D4C = 0x00000000;`) lands in `.sdata`
+under `-G8` exactly as a tentative one lands in small `.comm`, so a `grep` for
+the no-initialiser spelling under-counts wildly: `src/main/18B8.c` reads as
+having **zero** tentative definitions and was already emitting the `$gp` form
+for **67 of the 81** distinct symbols its remaining `.s` files reach that way.
+The 14 it was missing were the ones that live in *another* object — main's
+`.bss`, `asm/us/main/data/536C4.bss.s` — and were spelled `extern`. Diff the two
+lists instead:
+
+```shell
+grep -ho '%gp_rel([A-Za-z_0-9]*)' asm/us/<ovl>/nonmatchings/<unit>/*.s \
+  | sed 's/%gp_rel(//;s/)//' | sort -u
+```
+
+against the unit's own file-scope definitions; every name in the first list and
+not the second is one blocked symbol, and `grep -l` on the `.s` files turns that
+into the function count. For 18B8 the 14 blocked 27 of its 137 remaining
+functions and 3 of its 7 parked bodies — where all 72 functions that touch a
+`%gp_rel` symbol at all had been reported as blocked, a 2.7x over-count.
+
+**The price of the conversion, measured: nothing.** No `config/` change of any
+kind — no `sym_extern.us.txt` line, no `symbols.main.us.txt` entry, no symbol
+collision, and the small-data window did not move; `make build` went straight to
+19x `OK` with the fourteen definitions added and again with three functions
+unparked on top. `--use-comm-section` is what buys that: the objects stay
+COMMON, so the link binds them to the real definitions in the overlay's `.bss`
+`.s` rather than seeing two, and **two units may both spell the same symbol as a
+tentative definition** — `D_80062F58` is one in `src/main/1255C.c` and in
+`src/main/18B8.c` at the same time. So for `akao.c` and `psxsdk.c` the expected
+cost is a header comment and a list of widths read off the target's opcodes
+(`lbu` -> `u8`, `lhu`/`sh` -> `u16`, `lw`/`sw` -> `s32`), not a `config/`
+negotiation.
+
 The general rule: **`grep -l gp_rel` first, then check whether the hits
 cluster.** A contiguous run means an original translation unit and a bounded
 fix; a scatter through the file means something else is going on and the
