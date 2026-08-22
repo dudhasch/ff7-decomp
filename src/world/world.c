@@ -1618,7 +1618,65 @@ void func_800AB570(void) {
         func_800AB398(var_s0);
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AB5E4);
+/* 9 changed / 1 inserted at the exact 64 instructions, all of it in the
+ * three-iteration clearing loop over D_8010ADF4. gcc reduces the two
+ * `q[2]` / `q[1]` stores onto a single address giv based at
+ * `D_8010ADF4 + 4` -- `combine_givs` bases on the last offset referenced in
+ * insn order -- and emits them as `4(v1)` / `0(v1)`, where the target keeps
+ * a plain walking pointer based at `D_8010ADF4 + 0` and emits `8(a0)` /
+ * `4(a0)`. The pointer and the byte counter then also hold each other's
+ * register. The only offset that would put the base at 0 is the third
+ * store, and that one has to keep the assembler `$at` form
+ * (`lui at / addiu at / addu at,at,<counter>`), which it only does while it
+ * is spelled as a byte offset from the symbol rather than through the
+ * pointer.
+ *
+ * Measured, all against this 10-row body: a `u8*` pointer with
+ * `*(s32*)(p + 8)` 10; the counter declared after the pointer 10; the two
+ * increments swapped 10; the counter initialised after the pointer 10;
+ * `for (k = 0; k < 3; k++)` with `k * 0x10` for the third store 11, and the
+ * same as a `do`/`while` 11; the third store written through the pointer as
+ * `*(s32*)((u8*)q + 0)` 12 (it loses the `$at` form); both the counter and
+ * the pointer in the `for` increment list 15.
+ *
+ * The rest of the function is exact, including the four descending
+ * assignment chains -- reversing the `D_8010AD94[1] = [2] = [3]` one was
+ * worth 2 rows and is what a chained assignment's right-to-left store order
+ * predicts.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world", func_800AB5E4);
+#else
+void func_800AB5E4(WorldScriptData* arg0) {
+    s32 i;
+    s32 off;
+    u8* p;
+    s32* q;
+
+    D_8010AD68 = arg0;
+    D_8010AD6C = (u16*)((u8*)arg0 + 0x400);
+    D_8010AD90 = D_8010AD70;
+    D_8010AD94[0] = (u8*)D_8009D288;
+    D_8010AD94[1] = D_8010AD94[2] = D_8010AD94[3] = D_8010ADA4;
+    D_8010ADE4 = NULL;
+    D_8010ADE8 = D_8010ADEC = D_8010ADF0 = 0;
+    for (i = 0x3F, p = &D_8010ADA4[0x3F]; i >= 0; i--) {
+        *p-- = 0;
+    }
+    off = 0;
+    q = &D_8010ADF4;
+    do {
+        q[2] = 0;
+        q[1] = 0;
+        *(s32*)((u8*)&D_8010ADF4 + off) = 0;
+        off += 0x10;
+        q += 4;
+    } while (off < 0x30);
+    D_8010AE24 = D_8010AE28 = 0;
+    D_8010AE2C = D_8010AE30 = 0;
+    D_8010AE34.vx = D_8010AE34.vy = D_8010AE34.vz = 0;
+}
+#endif
 
 // pushes execution of given script to player's execution stack
 void func_800AB6E4(s32 arg0, s32 arg1) {
