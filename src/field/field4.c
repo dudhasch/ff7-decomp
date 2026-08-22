@@ -39,25 +39,21 @@ extern u8 D_800DF114;
  * place in the polygon table; this one is the pass that pushes the result out
  * to the GPU packets, so it walks two cursors at once.
  *
- * 202 rows / 12 insertions at 294 instructions against 293, from an m2c seed
- * that did not compile and could not have been measured: every GTE op came
- * out as an `M2C_ERROR` holding the raw text `unknown instruction: lwc2`,
- * `nccs`, `swc2`, which
- * emits nothing, so the body was 35 instructions short before any codegen
- * question could be asked. What the rewrite established:
+ * **187 rows at 292 instructions against 293, and `insn_histogram.py` reports
+ * exactly one opcode out: `addu 34 against 35`.** Everything else in both
+ * tables is identical, including every `%hi`. The one missing instruction is
+ * the target's `move t8,a0` at insn 0 -- see the last paragraph, which closes
+ * the dimension rather than leaving it open.
+ *
+ * From an m2c seed that did not compile and could not have been measured:
+ * every GTE op came out as an `M2C_ERROR` holding the raw text
+ * `unknown instruction: lwc2`, `nccs`, `swc2`, which emits nothing, so the
+ * body was 35 instructions short before any codegen question could be asked.
+ * What the rewrite established:
  *
  *   - The parameter is a `FieldModelPart*`, and the typedef lives 350 lines
  *     below in this unit; the seed's `void* arg0` with `->pkts` is why gcc
- *     rejected the whole file with the body unparked. Lifted the typedef.
- *   - The GTE sequence is the sibling's, verbatim:
- *     `gte_ldv0(normals + c[k * 4 + 7] * 8)`, `gte_ldrgb(&c[k * 4 + 4])`,
- *     `gte_nccs()`, then `gte_strgb` -- but into `pkt + 4` rather than the
- *     scratchpad, with no three-byte copy back, because the packet *is* the
- *     destination.
- *   - `swc2` writes four bytes, so it clobbers the packet's `code` byte at +7.
- *     The target saves it (`lbu t5,0(t2)`) before the inner loop and restores
- *     it (`sb t5,0(t2)`) after -- which is what m2c renders as the inert
- *     `*var_t2 = *var_t2;`.
+ *     rejected it.
  *   - Eight loops, and both strides differ per kind. The polygon-table
  *     strides are the sibling's exactly (0x18, 0x14, 0xC, 0xC, 8, 8, 0x10,
  *     0x14); the packet strides are 0x34, 0x28, 0x28, 0x20, 0x14, 0x18, 0x1C,
@@ -66,66 +62,65 @@ extern u8 D_800DF114;
  *     each outer loop's branch delay slot.
  *   - Each iteration is guarded by `if (*(u32*)pkt != 0)` -- the packet's tag
  *     word, i.e. only linked packets are lit.
- *   - Two cursors over the polygon table, not one. The target takes a fixed
- *     snapshot (`move t4,t1`) that the rgb giv is measured from *and* a
- *     walking one (`move a0,t1`, stepped by 4) that supplies the normal index
- *     at [7]. One `c = poly;` gives a single base with two givs. Worth 4 rows
- *     and 2 instructions, but only together with the next item.
- *   - The snapshot is taken *before* the saved code byte: the target's
- *     preheader is `t4 = t1 / t5 = *t2 / v1 = 0 / a2 = a3 + 4`. Reordering
- *     alone is 198/+3, two cursors alone 206/+1, both 202/+1 -- and the
- *     comparison that matters is within a length class, where 202 beats 206.
+ *   - **Read the inner loop's increments off the target's `bnez` delay slot
+ *     and the two `addiu`s above it, and count them.** The four multi-vertex
+ *     loops each have four: `rgb`, the `k * 4 + 4` giv, `k` itself, and the
+ *     normal cursor -- `addiu a0,a0,4` in the delay slot. Loops 7 and 8 were
+ *     written without `n += 4;`, so every vertex of a textured tri or quad
+ *     was lit from the *first* vertex's normal. That is a wrong program and
+ *     it reads in the histogram as `addiu -2` and nothing else.
+ *   - **`rgb = pkt + 4;` has to be its own statement in the four
+ *     single-vertex loops too**, not `gte_strgb(&pkt[4])` at the use. As a
+ *     statement the address is computed early enough for sched2 to put it in
+ *     the load-delay slot after `lbu code`; at the use it lands after the
+ *     GTE ops and the slot takes a `nop`. Four loops, four `nop`s, and it is
+ *     the whole of what the histogram called `nop +4`.
+ *   - **One cursor pair per loop**, `c1/n1` .. `c4/n4`: the four
+ *     multi-vertex loops sharing one pair is 198 rows and any partial
+ *     sharing 198-204, all at the same length. This is the "one pointer pair
+ *     per loop" idiom and it is the same lever that matched the sibling.
+ *   - The snapshot cursor and the walking cursor are two variables: one
+ *     cursor indexed at `+4` and `+7` is 198, and one cursor walked by 4 is
+ *     167 rows but **-13 instructions**, which is a different program.
  *
- * Measured and rejected: copying the parameter into a `FieldModelPart* p` and
- * reading every field through it, to reproduce the target's `move t8,a0`, is
- * *exactly* inert -- gcc coalesces the copy away. That one instruction plus
- * two more elsewhere is the whole of the +1.
+ * ---- why the last instruction is not reachable from C ----
  *
- * A warning for whoever picks this up: an earlier pass here measured 168 rows
- * and -3 instructions, and it was a different program. The variant generator's
- * anchor had been broken by the reordering above, so the walking cursor `n`
- * was used at four sites and assigned at none. An uninitialised local is legal
- * C, gcc says nothing, and the number looks like the best result of the
- * session. Grep the body for an assignment to every local before believing a
- * sweep.
+ * The target's insn 0 is `move t8,a0` and every `part->` read goes through
+ * `$t8`; this build reads them through `$a0` and needs no copy. Both bodies
+ * use the same fifteen registers otherwise -- it is a pure permutation with
+ * one copy on the target's side.
  *
- * 202 rows -> 169, from the lever that matched the sibling
- * KawaiLightingApplyToPolyColor below: the *first* inner loop gets its own
- * pair of cursor variables, so the shared pair's reference count drops by a
- * loop and the allocation changes underneath. Both cursors have to be split
- * -- giving loop 1 its own `c1` while it still shares `n` is exactly inert.
- * Which loop is split does not matter and neither does splitting more of
- * them: loops {1}, {1,2}, {1,4}, {2,3,4} and all four measure 169 to the
- * row, so 169 is a plateau rather than a step. In the sibling the same
- * change was worth the match outright; here it leaves the $t8 parameter copy
- * and one instruction still unaccounted for.
+ * `cc1 -dg` states it exactly. The parameter is allocno 71, and the dump's
+ * first two lines about it are
  *
- * The 169 above is stale -- the body measures **181 rows / +1** now, and the
- * note's own numbers should be re-run before any of them is trusted.
+ *     ;; 71 conflicts: ... 79 80 ...
+ *     ;; 71 preferences: 4
  *
- * `insn_histogram.py` states the +1 in three counts rather than 181 rows:
- * `nop +4`, `addiu -2`, `addu -1`, and nothing else (the `nccs 0/8` against
- * `c2 8/0` row is objdump not folding the GTE mnemonic, not a difference).
- * So the target does three more address computations than this body and gets
- * four load-delay slots filled for them, which is the same trade
- * `FieldDebugRenderPage` makes at a larger scale.
+ * -- it conflicts with the loop-1 and loop-2 normal cursors (79, 80) and it
+ * prefers hard register 4, `$a0`, because of the entry copy gcc emits for
+ * every register parameter. `global_alloc` allocates 71 **last** of 42, and
+ * `find_reg`'s first pass ORs `regs_someone_prefers` into the used set, so
+ * *every allocno that conflicts with 71 avoids `$a0`* -- which is why this
+ * build's globals start at `$a1` and the cursors land on `$t0`, leaving
+ * `$a0` free for 71 at the end. For the target's assignment a conflicting
+ * allocno has to take `$a0` anyway, which happens only when `find_reg`'s
+ * first pass fails and it retries; the cursors are allocated 8th of 42, so
+ * there is no pressure to make it fail.
  *
- * The width dimension is closed: `tools/width_sweep.py` scores all 25
- * alternatives for the five scalar locals and every one is 181 rows at +1,
- * so nothing here is declared at the wrong width.
+ * Nothing in C reaches either term. Measured, all exactly 187 rows at -1:
+ * `p = part` as the first statement with every field through `p`; the same
+ * with `polyCounts1` left on `part`; `p` assigned after the head with
+ * `polyCounts1` through it; the head's four statements in three other orders;
+ * a separate `count` per loop; `polyCounts1` hoisted to the top (189 and -2);
+ * and every partition of the cursor variables. `width_sweep` is flat over all
+ * five scalar locals. A copy `p = part` cannot help because cse propagates it
+ * away, and it can only be kept alive by leaving `part` live past it, which
+ * costs a register rather than a preference.
  *
- * Loop 1's two cursors were re-tested against that reading, because the diff
- * shows the target with a single `move t4,t1` where this build emits two
- * copies of the same base -- and `c1[k * 4 + 4]` and `n1[7]` are the same
- * walk three bytes apart, so one variable looks sufficient. It is not: one
- * cursor indexed at `+4` and `+7` is **213 rows**, one cursor walked by 4 is
- * 180 but **-2 instructions**, and two cursors both indexed rather than one
- * walked is 213. The current pairing is right and the extra `move` is
- * somewhere else.
- *
- * What is left is register naming with the length within one, which is
- * decomp-permuter's job. Codegen pinned via MASPSX_OVERRIDE; the #else is the
- * verified C. */
+ * So this is an `allocno`-arithmetic residue in the sense CLAUDE.md means:
+ * park it, and do **not** hand it to decomp-permuter, which edits C and
+ * therefore cannot reach it either. Codegen pinned via MASPSX_OVERRIDE; the
+ * #else is the verified C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field4", KawaiSetVertexColorFromLighting);
@@ -134,10 +129,14 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     u8* normals;
     u8* poly;
     u8* pkt;
-    u8* c;
-    u8* n;
     u8* c1;
+    u8* c2;
+    u8* c3;
+    u8* c4;
     u8* n1;
+    u8* n2;
+    u8* n3;
+    u8* n4;
     u8* rgb;
     u8 code;
     u32 counts;
@@ -175,17 +174,17 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     count = (counts & 0xFF00) >> 8;
     for (i = 0; i < count; i++, pkt += 0x28, poly += 0x14) {
         if (*(u32*)pkt != 0) {
-            c = poly;
-            n = poly;
+            c2 = poly;
+            n2 = poly;
             code = pkt[7];
             rgb = pkt + 4;
             for (k = 0; k < 3; k++) {
-                gte_ldv0(normals + n[7] * 8);
-                gte_ldrgb(&c[k * 4 + 4]);
+                gte_ldv0(normals + n2[7] * 8);
+                gte_ldrgb(&c2[k * 4 + 4]);
                 gte_nccs();
                 gte_strgb(rgb);
                 rgb += 0xC;
-                n += 4;
+                n2 += 4;
             }
             pkt[7] = code;
         }
@@ -195,10 +194,11 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     for (i = 0; i < count; i++, pkt += 0x28, poly += 0xC) {
         if (*(u32*)pkt != 0) {
             code = pkt[7];
+            rgb = pkt + 4;
             gte_ldv0(normals + poly[7] * 8);
             gte_ldrgb(&poly[4]);
             gte_nccs();
-            gte_strgb(&pkt[4]);
+            gte_strgb(rgb);
             pkt[7] = code;
         }
     }
@@ -207,10 +207,11 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     for (i = 0; i < count; i++, pkt += 0x20, poly += 0xC) {
         if (*(u32*)pkt != 0) {
             code = pkt[7];
+            rgb = pkt + 4;
             gte_ldv0(normals + poly[7] * 8);
             gte_ldrgb(&poly[4]);
             gte_nccs();
-            gte_strgb(&pkt[4]);
+            gte_strgb(rgb);
             pkt[7] = code;
         }
     }
@@ -221,10 +222,11 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     for (i = 0; i < count; i++, pkt += 0x14, poly += 8) {
         if (*(u32*)pkt != 0) {
             code = pkt[7];
+            rgb = pkt + 4;
             gte_ldv0(normals + poly[7] * 8);
             gte_ldrgb(&poly[4]);
             gte_nccs();
-            gte_strgb(&pkt[4]);
+            gte_strgb(rgb);
             pkt[7] = code;
         }
     }
@@ -233,10 +235,11 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     for (i = 0; i < count; i++, pkt += 0x18, poly += 8) {
         if (*(u32*)pkt != 0) {
             code = pkt[7];
+            rgb = pkt + 4;
             gte_ldv0(normals + poly[7] * 8);
             gte_ldrgb(&poly[4]);
             gte_nccs();
-            gte_strgb(&pkt[4]);
+            gte_strgb(rgb);
             pkt[7] = code;
         }
     }
@@ -244,16 +247,17 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     count = (counts >> 16) & 0xFF;
     for (i = 0; i < count; i++, pkt += 0x1C, poly += 0x10) {
         if (*(u32*)pkt != 0) {
-            c = poly;
-            n = poly;
+            c3 = poly;
+            n3 = poly;
             code = pkt[7];
             rgb = pkt + 4;
             for (k = 0; k < 3; k++) {
-                gte_ldv0(normals + n[7] * 8);
-                gte_ldrgb(&c[k * 4 + 4]);
+                gte_ldv0(normals + n3[7] * 8);
+                gte_ldrgb(&c3[k * 4 + 4]);
                 gte_nccs();
                 gte_strgb(rgb);
                 rgb += 8;
+                n3 += 4;
             }
             pkt[7] = code;
         }
@@ -262,16 +266,17 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
     count = counts >> 24;
     for (i = 0; i < count; i++, pkt += 0x24, poly += 0x14) {
         if (*(u32*)pkt != 0) {
-            c = poly;
-            n = poly;
+            c4 = poly;
+            n4 = poly;
             code = pkt[7];
             rgb = pkt + 4;
             for (k = 0; k < 4; k++) {
-                gte_ldv0(normals + n[7] * 8);
-                gte_ldrgb(&c[k * 4 + 4]);
+                gte_ldv0(normals + n4[7] * 8);
+                gte_ldrgb(&c4[k * 4 + 4]);
                 gte_nccs();
                 gte_strgb(rgb);
                 rgb += 8;
+                n4 += 4;
             }
             pkt[7] = code;
         }

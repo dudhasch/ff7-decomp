@@ -1856,6 +1856,51 @@ a near-miss, in rough order of frequency:
   second loop's preheader and nothing else wrong with the loop.
   `FieldModelStructInit` in `src/field/field2.c` needs the reset after the
   `if`, not at the end of its body.
+* **A register parameter keeps its incoming register for free, and a target
+  that copies it out is telling you an allocno that *conflicts* with it took
+  that register anyway — which `find_reg`'s first pass is built to prevent.**
+  gcc emits `(set (reg P) (reg a0))` at entry for every register parameter,
+  and `global_alloc`'s `set_preferences` turns that into
+  `;; P preferences: 4`. The consequence is not just that P likes `$a0`: on
+  its first pass `find_reg` ORs `regs_someone_prefers` into the used set, so
+  **every allocno that conflicts with P avoids `$a0`**, and P — however low
+  its priority, however late it is allocated — gets it at the end. The tell in
+  your own build is that the global allocnos start at `$a1` and the
+  parameter sits in `$a0` with no copy, where the target has `move t8,a0` at
+  insn 0 and a loop cursor in `$a0`.
+
+  Reaching the target's assignment needs the first pass to *fail*, so
+  `find_reg` retries without the restriction — i.e. real pressure at the
+  moment that allocno is allocated. If it is allocated 8th of 42 there is
+  none, and the residue is not reachable from C at all: a `p = part;` copy is
+  propagated away by cse, and keeping `part` live past the copy to defeat that
+  costs a whole register rather than a preference.
+  `KawaiSetVertexColorFromLighting` in `src/field/field4.c` is parked on
+  exactly this one instruction, with `insn_histogram` reporting a single
+  opcode out (`addu 34 against 35`) and every `%hi` identical. `cc1 -dg`
+  prints the two lines that settle it — the allocno's `conflicts` list and
+  its `preferences` line — so this is a five-minute question, not a search.
+
+* **Count the increments in a loop's `bnez` delay slot and the two `addiu`s
+  above it before reading anything else.** A counted inner loop with a walking
+  pointer has one `addiu` per induction variable, and they are all in the last
+  three slots of the body. A missing one is a *wrong program*, not codegen:
+  `KawaiSetVertexColorFromLighting`'s last two loops were written without
+  `n += 4;`, so every vertex of a textured triangle or quad was lit from the
+  first vertex's normal, and the whole symptom in the histogram was
+  `addiu -2`. The same reading gives the strides for free — the outer loop's
+  own `addiu` is in its branch delay slot.
+
+* **`p = base + K;` as its own statement is computed early enough to fill a
+  load-delay slot; `f(&base[K])` at the use site is not.** Same address, same
+  instruction, and the statement form lets sched2 issue it in the slot after
+  the neighbouring load while the use-site form lands after the work in
+  between and leaves a `nop`. Four `gte_strgb(&pkt[4])` calls rewritten as
+  `rgb = pkt + 4;` … `gte_strgb(rgb)` are four `nop`s in
+  `KawaiSetVertexColorFromLighting`. This is the inverse of the standing
+  advice to repeat an indexed expression rather than name it: name it when
+  the target computes the address *early*, repeat it when the target
+  recomputes it at each use.
 * **A parameter the target keeps in its incoming register *and* copies to a
   temporary is two source variables, not one.** A pseudo gets one hard
   register, so a target that stores through `$a1` at entry, computes a derived
