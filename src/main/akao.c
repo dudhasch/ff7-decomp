@@ -1810,7 +1810,36 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800320C4);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032274);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800323CC);
+// Re-apply the current instrument's eight parameter bytes, and mirror them
+// into the voice shadow if the track is live. Unlike the single-field
+// handlers, this reaches the shadow eight times, so the base is worth a
+// register and the subscript form is what the target uses.
+void func_800323CC(AKAO_TRACK* track) {
+    AkaoInstrument* ins;
+    AKAO_TRACK* shadow;
+
+    ins = &D_80075F28[track->instr_id];
+    track->unkFA = ins->unk8;
+    track->unkFC = ins->unk9;
+    track->unkFE = ins->unkA;
+    track->unk100 = ins->unkB;
+    track->unk102 = ins->unkC;
+    track->unkEC = ins->unkD;
+    track->unkF0 = ins->unkE;
+    track->unkF4 = ins->unkF;
+    track->attr_mask |= 0xFF00;
+    if (track->update_flags & 0x100) {
+        shadow = &((AKAO_TRACK*)D_80096608)[track->overlay_voice];
+        shadow->unkFA = track->unkFA;
+        shadow->unkFC = track->unkFC;
+        shadow->unkFE = track->unkFE;
+        shadow->unk100 = track->unk100;
+        shadow->unk102 = track->unk102;
+        shadow->unkEC = track->unkEC;
+        shadow->unkF0 = track->unkF0;
+        shadow->unkF4 = track->unkF4;
+    }
+}
 
 void func_800324D8(AKAO_TRACK* track) { track->transpose = (s8)*track->addr++; }
 
