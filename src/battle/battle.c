@@ -2823,7 +2823,64 @@ static s32 func_800B13B0(s32 arg0, s32 arg1, void** arg2) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B141C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B153C);
+/* Read the variable func_800B13B0 resolves, at the width `size` names.  The
+ * default arm returns whatever `result` happens to hold -- the original left
+ * it uninitialised, and the target reads $s1 with no write on that path.
+ *
+ * PARKED: 10 changed / 0 inserted / 0 deleted, at the exact 58 instructions.
+ * Every row is one three-way rotation of the caller-saved set, repeated once
+ * per switch arm: the target keeps `bit` in $v1, the four `base` reloads in
+ * $a0, and the shift/mask temporaries in $v0; this body has bit in $a0, base
+ * in $v0/$v1 and the temporaries in $v1.  Zero insertions and zero deletions
+ * means the RTL is identical, so this is `local_alloc`/`global_alloc`
+ * register *numbering* and nothing else.
+ *
+ * `qty_pri.py` says why it is not reachable from C.  Eleven block-local
+ * quantities (the shifts, the masks, the addus) all tie at pri 4.000 and take
+ * $v0/$v1 in quantity order; `bit` is reg 76, a global allocno at 6 refs / 19
+ * insns / pri 2.526, allocated after them, so $v1 is already gone by the time
+ * it is placed.  For the target's assignment `bit` would have to be ranked
+ * ahead of a group whose priority is 4.000 -- neither term of
+ * QTY_CMP_PRI = floor_log2(n_refs) * n_refs * size / (death - birth) gets it
+ * there without emitting an instruction, and the length is already exact.
+ * Note the def is `(set (reg 76) (reg:SI 2 v0))`, so reg 76 *prefers* $v0 and
+ * the target did not give it that either -- the preference lost to the same
+ * block-locals.
+ *
+ * Measured and flat at 10: `u8* base` instead of `void*` (with the three
+ * casts adjusted); both declaration orders of base/bit/result; `bit & 7`
+ * hoisted to its own local ahead of the shift; `bit >> 3` hoisted to its own
+ * local; a `do { } while (0);` barrier after the call (so the residue is not
+ * sched2's -- see CLAUDE.md); a full `width_sweep.py` over all three locals.
+ * Worse: case 0 split into a load then a shift-and-mask (12); `return` per
+ * arm instead of `break` (14).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800B153C);
+#else
+s32 func_800B153C(s32 arg0, s32 size, s32 arg2) {
+    void* base;
+    s32 bit;
+    s32 result;
+
+    bit = func_800B13B0(arg0, arg2, &base);
+    switch (size) {
+    case 0:
+        result = (((u8*)base)[bit >> 3] >> (bit & 7)) & 1;
+        break;
+    case 1:
+        result = ((u8*)base)[bit >> 3];
+        break;
+    case 2:
+        result = ((u16*)base)[bit >> 4];
+        break;
+    case 3:
+        result = ((u32*)base)[bit >> 5];
+        break;
+    }
+    return result;
+}
+#endif
 
 // Push `value` onto the operand stack as `size` bytes, most significant byte
 // first. Sizes above 3 (or negative) push nothing; the cases deliberately fall
