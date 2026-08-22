@@ -2297,54 +2297,69 @@ extern s16 D_801144CC;
  *     three spellings and the remaining branch-polarity row is not reachable
  *     from the condition.
  *
- * 145 rows to **99 changed / +4 instructions**. Three levers, all found by
- * reading the rows rather than by permuting:
+ * 145 rows to 99, then **99 to 34 changed / 0 inserted / 0 deleted, at the
+ * target's exact 291 instructions**. Start by discarding the previous note's
+ * headline: it read "+4 instructions", which was `checkfn`'s *insertion*
+ * count, and the body was in fact **11 instructions short**. Three of the
+ * levers below only look like regressions if you rank by rows, because they
+ * each add instructions -- which is what a body 11 short needs. Rank by
+ * length until the length is right.
  *
- *   - Write `D_801144CC` and `D_80113F28` out in all three arms rather than
- *     sharing a `store:` tail behind an `edge` variable. Worth 10 rows. The
- *     hypothesis behind it is only half confirmed and the other half is the
- *     open question here: the target's relocation multiset names `D_80113F28`
- *     **six** times against our four, which is three store sites against two,
- *     so gcc is merging the identical `D_80113F28 = *triId;` suffix that all
- *     three arms end with. Writing the arms out does *not* stop it -- the
- *     count is still four afterwards -- so the 10 rows come from the block
- *     layout rather than from the merge, and whatever source shape gives the
- *     original three surviving sites has not been found. Do not re-derive
- *     this from the rows; re-run `permuter_scratch.sh` and read the count.
- *   - Assign `scratch` *before* `result = 0`, not after the `D_80113F28`
- *     store. Whichever pseudo is created first wins the first `bgez`'s delay
- *     slot, and the target puts `lui s0,0x1f80` there. 3 rows.
- *   - The position-to-mesh conversion on its **own** local. The seed reused
- *     `px` for `pos->vx`, `pos->vy` and then the mesh-space x the cross
- *     products need, which welds three unrelated live ranges into one pseudo:
- *     it takes a `$t` register rather than `$v0`, and the scheduler hoists the
- *     `pos->vy` load into the block above to cover it. A separate `mesh` local
- *     is worth **29 rows** and costs nothing. This is the counter-merging
- *     idiom read backwards -- merge counters that describe the same walk,
- *     split values that merely happen to be spelled alike.
+ *   - **One `link`/`shift` pair per arm, each arm retrying on its own** --
+ *     `link0/1/2`, `shift0/1/2`, and `*triId = linkN; goto loop;` written out
+ *     three times instead of one shared `retry:` label. 99 rows -> 86 and
+ *     +4 instructions. Same lever as FieldCalcPointOnLine's per-arm locals:
+ *     one variable per arm is one pseudo per arm, and the arms then stop
+ *     being register-identical.
+ *   - **The `*triId` reload as a per-arm local, read *before* the
+ *     `D_801144CC` store** -- `triN = *triId; D_801144CC = N;
+ *     D_80113F28 = triN;`. This is what splits the cross-jump: with one
+ *     shared tail gcc merges all three arms and emits a single
+ *     `D_80113F28` store site, where the target has three `lhu` reloads and
+ *     keeps arm 0's store separate (merging only arms 1 and 2). That is
+ *     exactly the "target names D_80113F28 six times against our four"
+ *     the old note left open, and the answer was not a ref-count trick --
+ *     it is that each arm reads the value itself. Reading it *after* the
+ *     D_801144CC store instead is worth 3 fewer instructions, so the
+ *     position is load-bearing. -11 -> -4 instructions.
+ *   - **One index local per call, with the +N carried on the index.** The
+ *     target computes `id * 0x18` then `addiu a1,a2,8` then `addu a1,a1,v0`
+ *     -- constant onto the index, base added last. Every pointer spelling
+ *     and the flat integer sum `*triId * 0x18 + 8 + (s32)D_800E4274` are
+ *     reassociated by fold to `(base + 8) + idx`; a named local for the
+ *     inner sum is what survives, and it has to be *per call* (a shared
+ *     index local measures 72 rows against 59). The old note measured the
+ *     flat sum at 148 rows and rejected it -- it was right about the rows
+ *     and wrong to stop, because it is +3 instructions in the right
+ *     direction.
+ *   - **The last instruction is an aliasing question at the top of the
+ *     function.** `pos->vy` is a COMPONENT_REF and therefore
+ *     MEM_IN_STRUCT_P, the scratch store through a raw `*(s32*)0x1F8000NN`
+ *     cast is not, and `true_dependence` lets the struct load float above
+ *     the non-struct store -- which fills the second `bgez`'s delay slot and
+ *     loses the `nop` the target has. Writing the three pre-loop stores as
+ *     `scratch[12..14]` (an ARRAY_REF, so MEM_IN_STRUCT_P) pins the load
+ *     below them. Reading `pos->vy` through a plain deref cast instead is
+ *     byte-identical, so either side of the pair works; the array spelling
+ *     is kept because those slots are read back as `scratch[12]`/`[13]`
+ *     twenty lines later. -1 -> exact.
  *
- * Measured and rejected on top of that, none better than 99:
- *   - the sibling scratch slots as raw `(s32*)0x1F800010` constants (101), as
- *     `(s32*)(sbase + 0x10)` off a `u8*` twin (112), the triangle base in a
- *     per-call local (139) and as an integer sum (114). The target reaches the
- *     second slot with `addiu a0,s0,%lo(D_1F800010)` where we emit
- *     `ori a0,s0,0x10`: cse relates the two constants either way and picks the
- *     operator itself, and nothing in the C chooses it.
- *   - arm 2 as a fall-through behind `if (cross2 >= 0) goto loop;`, which is
- *     the target's branch polarity at that test -- exactly inert.
- *   - `scratch` declared `VECTOR*` so the three edge copies are
- *     MEM_IN_STRUCT_P on both sides, the standing hypothesis for the length
- *     gap -- exactly inert, 145 to the row.
+ * Measured and rejected on this body: an index local for the
+ * `D_80114458[...]` lookups (+1 instruction), `shift` as `s16` (inert),
+ * `link` as `s32` (31 rows but six instructions short, and it drops the
+ * sign-extension the target has), and the `outEdge` stores as
+ * `((s32*)outEdge)[k]` (exactly inert -- an ARRAY_REF sets MEM_IN_STRUCT_P
+ * just as a COMPONENT_REF does, so that spelling is not the non-struct one
+ * it looks like).
  *
- * Do not read a barrier sweep here as progress: `do { } while (0);` ahead of
- * the fast-path test scored 132 against the then-current 145 and ahead of the
- * cross products 127, both by *adding* 8 or 9 load-delay nops (+4 insertions
- * becomes +12/+13). Rows are only comparable at equal length, so all six
- * placements were rejected.
- *
- * What is left is the three `FieldEntityVectorSub` call sites, which differ
- * only in whether the +8 lands on the scaled index or on the computed pointer,
- * and the register rotation behind them. A permuter target. */
+ * The residue is 34 rows of pure register naming at the exact length. 24 of
+ * them are one pair swapping in the three `D_80114458` lookups -- the base
+ * pointer and the scaled index trade `$v0`/`$v1`, and `link` trades
+ * `$a0`/`$a1` behind them, identically in all three arms. The other rows
+ * are the two sibling scratch slots (`addiu a0,s0,%lo(D_1F800010)` against
+ * our `ori a0,s0,0x10`, which the old note already established is cse
+ * choosing the operator with nothing in the C to steer it) and the arm-2
+ * guard polarity. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
@@ -2359,8 +2374,22 @@ s32 FieldEntityWalkmechCross(
     s32 py;
     s32* scratch;
     s32 result;
-    s32 shift;
-    s16 link;
+    s32 shift0;
+    s32 shift1;
+    s32 shift2;
+    s16 link0;
+    s16 link1;
+    s16 link2;
+    u16 tri0;
+    u16 tri1;
+    u16 tri2;
+    s32 i0;
+    s32 i1;
+    s32 i2;
+    s32 p0;
+    s32 p1;
+    s32 p2;
+    s32 q1;
 
     scratch = (s32*)0x1F800000;
     result = 0;
@@ -2368,21 +2397,28 @@ s32 FieldEntityWalkmechCross(
     if (mesh < 0) {
         mesh += 0xFFF;
     }
-    *(s32*)0x1F800030 = mesh >> 12;
+    scratch[12] = mesh >> 12;
     mesh = pos->vy;
     if (mesh < 0) {
         mesh += 0xFFF;
     }
-    *(s32*)0x1F800034 = mesh >> 12;
-    *(s32*)0x1F800038 = 0;
+    scratch[13] = mesh >> 12;
+    scratch[14] = 0;
     D_80113F28 = 0xFFFF;
 loop:
+    i0 = *triId * 0x18;
+    p0 = i0 + 8;
     FieldEntityVectorSub(
-        scratch, D_800E4274 + *triId * 0xC + 4, D_800E4274 + *triId * 0xC);
-    FieldEntityVectorSub(scratch + 4, D_800E4274 + *triId * 0xC + 8,
-                         D_800E4274 + *triId * 0xC + 4);
-    FieldEntityVectorSub(
-        scratch + 8, D_800E4274 + *triId * 0xC, D_800E4274 + *triId * 0xC + 8);
+        scratch, (s16*)(p0 + (s32)D_800E4274), (s16*)(i0 + (s32)D_800E4274));
+    i1 = *triId * 0x18;
+    p1 = i1 + 0x10;
+    q1 = i1 + 8;
+    FieldEntityVectorSub(scratch + 4, (s16*)(p1 + (s32)D_800E4274),
+                         (s16*)(q1 + (s32)D_800E4274));
+    i2 = *triId * 0x18;
+    p2 = i2 + 0x10;
+    FieldEntityVectorSub(scratch + 8, (s16*)(i2 + (s32)D_800E4274),
+                         (s16*)(p2 + (s32)D_800E4274));
     v = D_800E4274 + *triId * 0xC;
     px = scratch[12];
     py = scratch[13];
@@ -2393,10 +2429,12 @@ loop:
         goto done;
     }
     if (cross0 < 0) {
-        link = D_80114458[*triId * 3];
-        shift = link >> 3;
-        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
-            goto retry;
+        link0 = D_80114458[*triId * 3];
+        shift0 = link0 >> 3;
+        if (link0 >= 0 &&
+            ((D_8009ACA6[shift0] >> (link0 - shift0 * 8)) & 1) == 0) {
+            *triId = link0;
+            goto loop;
         }
         outEdge->vx = scratch[0];
         outEdge->vy = scratch[1];
@@ -2405,13 +2443,16 @@ loop:
         if (scratch[0] * delta->vx + scratch[1] * delta->vy >= 0) {
             result = 8;
         }
+        tri0 = *triId;
         D_801144CC = 0;
-        D_80113F28 = *triId;
+        D_80113F28 = tri0;
     } else if (cross1 < 0) {
-        link = D_80114458[*triId * 3 + 1];
-        shift = link >> 3;
-        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
-            goto retry;
+        link1 = D_80114458[*triId * 3 + 1];
+        shift1 = link1 >> 3;
+        if (link1 >= 0 &&
+            ((D_8009ACA6[shift1] >> (link1 - shift1 * 8)) & 1) == 0) {
+            *triId = link1;
+            goto loop;
         }
         outEdge->vx = scratch[4];
         outEdge->vy = scratch[5];
@@ -2420,14 +2461,15 @@ loop:
         if (scratch[4] * delta->vx + scratch[5] * delta->vy >= 0) {
             result = 8;
         }
+        tri1 = *triId;
         D_801144CC = 1;
-        D_80113F28 = *triId;
+        D_80113F28 = tri1;
     } else if (cross2 < 0) {
-        link = D_80114458[*triId * 3 + 2];
-        shift = link >> 3;
-        if (link >= 0 && ((D_8009ACA6[shift] >> (link - shift * 8)) & 1) == 0) {
-        retry:
-            *triId = link;
+        link2 = D_80114458[*triId * 3 + 2];
+        shift2 = link2 >> 3;
+        if (link2 >= 0 &&
+            ((D_8009ACA6[shift2] >> (link2 - shift2 * 8)) & 1) == 0) {
+            *triId = link2;
             goto loop;
         }
         outEdge->vx = scratch[8];
@@ -2437,8 +2479,9 @@ loop:
         if (scratch[8] * delta->vx + scratch[9] * delta->vy >= 0) {
             result = 8;
         }
+        tri2 = *triId;
         D_801144CC = 2;
-        D_80113F28 = *triId;
+        D_80113F28 = tri2;
     } else {
         goto loop;
     }
