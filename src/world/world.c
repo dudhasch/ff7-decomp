@@ -744,7 +744,19 @@ static void func_800A7E8C(s32 arg0) { D_80109D6C = arg0; }
 
 static void func_800A7E9C(void) {}
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A7EA4);
+void func_800A7EA4(void) {
+    func_800A4DDC();
+    func_800A59A0();
+    func_800A60D8();
+    D_80109D54 = 0;
+    D_80109D58 = 0;
+    D_80109D5C = NULL;
+    D_80109D60 = NULL;
+    D_800E5828 = 1;
+    D_80109D64 = 0;
+    D_80109D68 = 0;
+    D_80109D6C = 0;
+}
 
 void func_800A7F18(void) { func_800A7F38(); }
 
