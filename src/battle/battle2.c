@@ -1102,7 +1102,16 @@ void func_800D3E8C(s32 arg0) {
     temp_v0->unkE = *(s16*)& temp_v0->unk10 = D_801518E4[arg0].D_801518EA;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3F0C);
+// Claim a slot running func_800D3AF0 and seed it with a position plus two
+// scalars. The four lwl/lwr + swl/swr pairs are the block move for an 8-byte
+// aggregate of alignment 2, i.e. one SVECTOR assignment, not four stores.
+void func_800D3F0C(SVECTOR* arg0, s32 arg1, s32 arg2) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D3AF0)];
+
+    *(SVECTOR*)&p->D_801621F4 = *arg0;
+    p->unkE = arg1;
+    p->unk10.unk.unk0 = arg2;
+}
 
 void func_800D3F8C(void) {
     Unk801621F0* temp_s0;
