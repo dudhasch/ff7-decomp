@@ -2744,7 +2744,25 @@ extern u8 D_800E1036[];
  * condition at +3, `g_FieldDebugRChars++` before the sprite stores at +8, and
  * `addPrim`'s second argument spelled `D_800E1028 + charOff + rbOff` to force
  * the target's second address computation -- which does reproduce it but
- * costs more than the two insns it buys. Codegen pinned via MASPSX_OVERRIDE. */
+ * costs more than the two insns it buys.
+ *
+ * `insn_histogram.py` states the -1 exactly and it is worth having written
+ * down, because it is two facts rather than a hundred rows: every opcode
+ * count matches except **addu 22 against 24** and **nop 13 against 12**, so
+ * the body needs two more `addu` and one fewer `nop` and nothing else. The
+ * `%hi` table is clean apart from our jump table being a local `.rodata`
+ * label where the target names `jtbl_800A12E8`, which `checkfn` aliases.
+ *
+ * The obvious candidate for the two `addu` -- `*(D_800E08A8 + off + row)`,
+ * where the target adds `off + row` first and the base last -- is not it.
+ * CLAUDE.md's `n + (s32)p` lever does not apply when both addends are plain
+ * `s32` locals and the base is an array symbol: `off + row + (s32)D_800E08A8`,
+ * `(off + row) + (s32)D_800E08A8` and `row + off + (s32)D_800E08A8` are all
+ * *exactly* inert at 100 rows and still -1. And `off = page * 378;` lifted
+ * above the `while` -- which the note above says puts all five insns of the
+ * multiply in the preheader -- is 103 rows and still -1, so the hoisting
+ * placement is not the length either (it moves five insns, it does not
+ * create any). Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderString);
 #else

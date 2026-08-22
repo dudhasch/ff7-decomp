@@ -520,7 +520,47 @@ extern s16 D_80071E3C;
  *      stores (106/11), and writing the fade block fadeType/fadeAdjust/
  *      fadeSpeed rather than fadeType/fadeSpeed/fadeAdjust (67/3).
  * The remaining rows are branch-target addresses, which follow from the
- * length difference and cost nothing once the clusters above are closed. */
+ * length difference and cost nothing once the clusters above are closed.
+ *
+ * **81 rows / +1 instruction -> 54 changed / 8 inserted, at the exact 786.**
+ * Two local *widths* in the tail, and both were within the dimension this
+ * note calls finished. The note's numbers for that block were quoted against
+ * a 65/3 base and the function measures 81/9 now, so every one of them was
+ * stale -- that is the whole lesson here, and it is the same one
+ * FieldEntityWalkmechCross and LoadLocalFieldModelAndInitAll taught this
+ * session.
+ *
+ *   - **`preloadId` is `s32`, not `s16`.** The note records `u16` (67/4) and
+ *     never tried the signed wide form. `D_80071A5C` is an `s16`, so an `s32`
+ *     local takes it with a sign-extending `lh` -- the one `lh` in the target
+ *     that this build did not have anywhere -- instead of `lhu` plus a
+ *     separate widening. 81/+1 -> 62 and the length exact.
+ *   - **`fieldId` is `s32` too** (`u32` is byte-identical). 62 -> 54.
+ *
+ * `insn_histogram.py` is what made this tractable and is worth re-running
+ * before anything else here: at 81 rows it read `ori +2 / addiu -2`,
+ * `lhu +1 / lh -1`, `lui +1`, `andi +1`, `nop -1` -- seven opcode counts, of
+ * which the `lh` is a *declaration* fact rather than codegen, and it named
+ * the one local in the function whose type had never been swept wide.
+ *
+ * What is left is 54 rows and the length is now exact, so the remaining
+ * clusters are comparable to each other for the first time:
+ *
+ *   - `ori +2 / addiu -2`. The `FieldEventInit(&g_FieldState, ...)` argument:
+ *     the target keeps `&g_FieldStateData.layer2_bgScrollXSpeed` (+0xA6) in a
+ *     general register for the first of the three scroll-speed stores and
+ *     then reuses it as `addiu a0,a0,-0xa6` in the `jal`'s delay slot, where
+ *     this build materialises `&g_FieldState` with its own `lui`/`addiu` and
+ *     leaves the slot a `nop`. Spelling the argument so cse relates the two
+ *     does work -- `(void*)((u8*)&g_FieldStateData.layer2_bgScrollXSpeed -
+ *     0xA6)`, the `(s32)` form, and simply `&g_FieldStateData` are all
+ *     byte-identical -- but all three come out **58 rows and -1 instruction**,
+ *     so they buy the delay slot and lose an instruction elsewhere. Worse by
+ *     the length rule; not taken.
+ *   - `andi +1` against the target's extra `sll`/`sra` pair, which is the
+ *     `fieldId` masking this note already describes. Unchanged by either
+ *     width above.
+ */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
 #else
@@ -531,8 +571,8 @@ void FieldMain(void) {
     s8* fill;
     s32 fillVal;
     s32 i;
-    u16 fieldId;
-    s16 preloadId;
+    s32 fieldId;
+    s32 preloadId;
     u8 exitKind;
 
     ClearOTagR(&g_FieldRenderData[0].OtFadeDrenv, 1);
