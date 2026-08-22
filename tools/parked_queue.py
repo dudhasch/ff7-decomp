@@ -51,8 +51,17 @@ import tempfile
 # uses the second form throughout. Anchoring on the guard also keeps an
 # ordinary file-scope INCLUDE_ASM -- a function with no C body at all, which is
 # work still to do rather than a near-miss -- out of the queue.
+#
+# The pin macro is not always the first line inside the guard: a park whose
+# body needs a forward declaration, or that carries a `// why` comment, puts
+# those above it, and requiring the macro on the very next line silently
+# dropped those functions from the queue. Three of `src/main/18B8.c`'s seven
+# parks are spelled that way and read as "no parked body" for as long as the
+# anchor was `\n\s*`. Skip any line that is not itself a preprocessor branch.
 PARKED = re.compile(
-    r'#ifndef NON_MATCHINGS\s*\n\s*(?:MASPSX_OVERRIDE|INCLUDE_ASM)\('
+    r'#ifndef NON_MATCHINGS[^\n]*\n'
+    r'(?:(?!\s*#(?:else|endif|if))[^\n]*\n)*?'
+    r'\s*(?:MASPSX_OVERRIDE|INCLUDE_ASM)\('
     r'\s*"[^"]*"\s*,\s*(\w+)\s*\)\s*;', re.S)
 
 

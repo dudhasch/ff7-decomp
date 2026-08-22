@@ -4308,6 +4308,21 @@ nothing, before believing any file's park count: `grep -n 'INCLUDE_ASM' <file>`
 and look at what surrounds each hit — a genuinely unfinished function has no
 `#ifndef NON_MATCHINGS` above it and no `#else` body below.
 
+**And the pin macro is not always the guard's first line.** A park whose body
+needs a forward declaration — an opcode-style helper defined further down the
+unit, say — or that carries a one-line `// why` comment puts those *inside*
+the guard, above the macro. `parked_queue.py`'s anchor was `#ifndef
+NON_MATCHINGS\s*\n\s*(MASPSX_OVERRIDE|INCLUDE_ASM)\(`, which those two lines
+break, so such a function is simply absent from the queue — not reported as
+failed, not reported at all. Three of `src/main/18B8.c`'s seven parks are
+spelled that way, and the queue read "4 parked bodies" against a `grep` that
+finds seven; two of the three turned out to be five and eight rows out.
+`checkfn.py`'s guard was already tolerant (it matches `#ifndef …(.*?)#else`),
+which is what makes the discrepancy invisible — the one tool that refuses is
+not the one that enumerates. Both now skip any line that is not itself a
+preprocessor branch. **Cross-check a park count against `grep -c 'MASPSX_OVERRIDE'`
+before believing a queue is empty.**
+
 **A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
 truncates silently: on a longer function the tail simply never enters the
 comparison, so it can differ freely while the visible rows look perfect.
