@@ -2014,6 +2014,39 @@ a near-miss, in rough order of frequency:
   refuting it. A body with two clean histogram tables and rows remaining is a
   park, not a search, and specifically not a permuter target.
 
+  **The *opcode* column had the same bug one table over, and it manufactured a
+  second whole hypothesis before anyone checked it.** objdump prints an alias
+  where the `.s` spells the real mnemonic, and the alias is ambiguous: `li` is
+  `ori rD,$zero,K` for a constant that fits unsigned and `addiu rD,$zero,-K`
+  for one that does not, and `move` is `addu rD,rS,$zero` or `or rD,rS,$zero`
+  (splat emits 264 of the first and 32 of the second in the field overlay
+  alone). Folding by *name* credited every negative `li` to `ori` and invented
+  an `addiu` deficit of exactly the same size. `FieldMain` has one
+  `addiu $a0,$zero,-0x1`, so it reported `ori +2 / nop -1 / addiu -1` -- three
+  faults summing to zero, which is precisely the "an exact length can be errors
+  cancelling" shape, and it was read that way and assigned as such. Decoded
+  from the instruction word it is `ori +1 / nop -1`, which is *one* cluster the
+  park note already names. Fixed in 7e68f5f; the `.s` side needs no folding at
+  all.
+
+  **The check that catches both without knowing either: add the columns up.**
+  A naming or folding artifact moves counts between rows and cannot change the
+  total, so its rows are complementary and balance. `AddBackgroundToRender`
+  read `D_80071A48 8/2` against five neighbours at `0/1` and one at `0/2` --
+  8 against 8 -- and `D_8009ACA2 2/1` against `D_8009ACA4 0/1` -- 2 against 2.
+  Two balanced groups, no fault. A real addressing error does not balance:
+  `FieldDebugRenderPage` is `+3 +2 +2 +1 +1 +1` against `-1 -1 -1`. This costs
+  one glance and it is the only structural check available before the tool
+  itself is trusted.
+
+  One row class in that table is naming and will stay: a string literal or a
+  jump table is a local `.rodata` label in our object and a named symbol in the
+  `.s`, so any function with either reports `.rodata` against `D_800A0000` /
+  `jtbl_800A0008`. `checkfn.py` resolves it by calibrating the section base
+  from paired diff rows, which needs an alignment this tool deliberately does
+  not have. It is **not** the parked-`.rodata`-blob artifact -- on `FieldMain`
+  the rows are identical with `const u32 D_800A0000[]` deleted.
+
 * **On a function hundreds of rows out, count instructions before reading
   any.** `tools/insn_histogram.py <src> <func>` prints the compiled length and
   two tables: opcodes (objdump's aliases folded back to the `.s` spelling, or

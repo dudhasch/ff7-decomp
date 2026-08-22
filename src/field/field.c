@@ -643,9 +643,68 @@ extern s16 D_80071E3C;
  * Two further things measured at this base and worth not re-deriving:
  * `exitKind` as `s32` or `u32` is inert; reading it before the `ev + 1` load
  * is 57 and dropping the 0xC arm's field-id local entirely is 47.
- * `insn_histogram.py` disagrees with `variant_eval` on this function's opcode
- * counts (it reports `ori +2 / addiu -1 / nop -1` where the rows account for
- * one `ori`/`nop` pair only); the rows are the ones to trust here.
+ *
+ * `insn_histogram.py` agrees with the rows now and did not before. It used to
+ * report `ori +2 / addiu -1 / nop -1`, which reads as three faults cancelling
+ * to the exact 786 -- two constants materialised that the target does not
+ * have, against an `addiu` and a load-delay `nop` it has and we do not. One of
+ * those three was the tool: objdump renders this function's single
+ * `addiu $a0,$zero,-0x1` as `li a0,-1` and the fold was by mnemonic name, so
+ * every negative `li` was credited to `ori` and an equal `addiu` deficit
+ * invented (fixed in 7e68f5f, folding by encoding). Decoded, the table is
+ * `ori +1 / nop -1` and that is **cluster 3 and nothing else** -- one extra
+ * `li v1,0xf` in the `j`'s delay slot against the target's `nop`. So the
+ * opcode table now carries no information the four clusters do not, which is
+ * itself worth knowing: there is no fifth fault hiding behind the exact
+ * length.
+ * The three `%hi` rows it still prints (`.rodata` x2 ours against
+ * `D_800A0000` and `jtbl_800A0008` x1 each) are the local-label naming gap in
+ * that tool, not the parked-blob artifact -- they are unchanged with
+ * `const u32 D_800A0000[]` deleted.
+ *
+ * Re-swept at the 27-row base, and every one of these is a *new* dimension or
+ * a re-measurement of a stale number rather than a repeat:
+ *   - cluster 1, `ev` in the loop body so `move_movables` can hoist it into
+ *     the preheader the way the target does. This is the whole hypothesis for
+ *     those 12 rows and it is now closed from both ends. After the
+ *     `D_800965EC == 1 || 3` block (the first in-body use of the fade base,
+ *     so the discovery order would be right) is **40 at the exact 786** --
+ *     a different fault set of the same length, not a longer one. Inside the
+ *     `== 2` arm 138, before the `!= 0xD` fade block 149 at +8, after that
+ *     block 134 at +1. The +1/+8 are the point: `ev` is used at `*ev = 0`
+ *     earlier in the body than those two placements, so the pseudo is live
+ *     across the back edge and `move_movables` will not touch it -- gcc
+ *     rematerialises `lui`/`addiu` instead of deriving `addiu s1,s3,-0x4b`.
+ *     No in-body position both dominates every use and is discovered after
+ *     the fade base, which is the same wall the earlier sweep hit from the
+ *     spelling side.
+ *   - `ev` as a declaration *initialiser* placed above `RECT clip` -- a
+ *     different knob from an assignment statement, since the aggregate's blob
+ *     copy is a scheduling barrier and a declaration above it is emitted
+ *     first (CLAUDE.md, FieldEntityTriggerCheck). Exactly inert, 27. As an
+ *     initialiser below the aggregate, also 27. Swapping the pre-loop store
+ *     and the `ev` assignment is 29.
+ *   - cluster 3, the loop's *shape* rather than its statement order: a `for`
+ *     with `fill--` in the increment list 31, `fill = ...` before `i = 0xF`
+ *     31 (the old note says 43 -- stale, the base moved under it), a
+ *     `for (;;)` with `if (--i < 0) break;` 60 at +3. Making `fill` a giv
+ *     instead of a hand-walked pointer -- `(&D_8009A057)[i - 0xF]` and
+ *     `(&D_8009A057 - 0xF)[i]`, which is the lever that decides delay-slot
+ *     stealing in KawaiSetModelTransparency -- is **61** either way, and 61
+ *     as a `do`/`while` too. So the giv/ordinary-insn distinction is not what
+ *     separates these two bodies; reorg steals the join's `ori v1,zero,0xf`
+ *     here and leaves it in the target for a reason no loop shape reaches.
+ *   - `width_sweep.py` over all eight scalar locals, 30 variants: **flat**.
+ *     Nothing ties the 34-row parked base and everything else is worse
+ *     (best alternatives `exitId`/`exitKind`/`fillVal`/`preloadId` at 34,
+ *     then 35, then 54+). The width dimension is closed.
+ *   - the paired-lever cross from CLAUDE.md -- a placement that moves the
+ *     length one way against a width that moves it the other, which is what
+ *     took this function from 47 to 39. Twelve crosses of the four `ev`
+ *     placements with `fieldId`->`u16` (-1), `exitKind`->`u16` (-2) and
+ *     `i`->`u16` (-8): every one is worse than both of its components
+ *     (60, 63, 118, 124, 136, 140, 151, 151). The pattern is real and it does
+ *     not fire here.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
@@ -2181,6 +2240,27 @@ extern FieldBgOtSlot D_8009ACA2;
  * and cross-jumping deleted the whole construct, here the guard's load
  * survives. So the reference-count lever is real and the spelling that
  * delivers it without emitting anything is not one this reading found.
+ *
+ * Both of `insn_histogram.py`'s tables are **clean** on this body -- 658
+ * against 658 instructions, opcodes `(identical)`, `%hi` materialisations per
+ * address `(identical)` -- and that is the evidence that closes the question
+ * rather than one more negative. Two clean tables with 65 rows still differing
+ * cannot be an addressing or an instruction-mix fault; there is nothing left
+ * for the residue to be except which register each quantity got. So the
+ * `allocno_compare` arithmetic below is not a guess that ran out of ideas, it
+ * is the only remaining explanation, and CLAUDE.md's rule applies: a residue
+ * that reduces to allocno arithmetic with no reachable term is a park, not a
+ * search, and specifically not a permuter target.
+ *
+ * (Read that with the tool's own history in mind. Before commits 2ac13ad /
+ * 7e68f5f the same tables reported `D_80071A48 +6` against five interior
+ * halfwords at -1 each, which reads exactly like "the original declares six
+ * scalars where we declare an array" -- a whole program-level hypothesis,
+ * arrived at from a table, contradicting this note. It was arithmetic on
+ * symbol *names*: `%hi(D_80071A48+2)` and `%hi(D_80071A4A)` are the same
+ * address and the same linked bytes. The totals gave it away -- 8 against 8,
+ * 2 against 2 -- and totals are worth checking on any table whose rows are
+ * complementary.)
  *
  * This one belongs to decomp-permuter, and the scratch must be re-imported
  * against this body rather than an older one. The pass that matters is

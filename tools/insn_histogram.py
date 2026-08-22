@@ -10,10 +10,12 @@ answers a different question -- which instructions are there in the wrong
 quantity -- and it stays meaningful at any distance, since it is alignment-free.
 
 Two tables. The opcode histogram folds objdump aliases back to the mnemonics
-splat writes (`move` is `addu ..,$zero`, `li` is `ori ..,$zero`), or every
-comparison drowns in spelling. The `%hi` table counts address materialisations
-per *address*, which is where an addressing mistake shows up as a clean
-integer.
+splat writes, by decoding the instruction word rather than by reading the
+alias -- `li` is `ori rD,$zero,K` or `addiu rD,$zero,-K` and `move` is
+`addu rD,rS,$zero` or `or rD,rS,$zero`, and folding by name alone credits every
+negative `li` to `ori` and invents an `addiu` deficit the same size. The `%hi`
+table counts address materialisations per *address*, which is where an
+addressing mistake shows up as a clean integer.
 
 Per address, not per name, and that is the whole of what makes the table
 readable. MIPS uses REL relocations, so the addend is not in the relocation --
@@ -24,6 +26,16 @@ relocates against the project name for a global while a frozen `.s` still says
 every function that touches a renamed global -- twelve of them on every
 handler in `src/field/field4.c`, all phantom, and quite enough to read as a
 diagnosis and send a session chasing an addressing bug that is not there.
+
+One class of row is still naming and not a fault, and there is no plan to
+resolve it here: a string literal or a jump table is a *local* `.rodata` label
+in our object and a named symbol in the `.s`, so a function with either reports
+`.rodata` on our side against `D_800A0000` / `jtbl_800A0008` on the target's.
+`checkfn.py` calibrates the section base by voting across paired diff rows,
+which needs an aligned diff this tool deliberately does not have. The counts
+balance (2 against 1+1 on `FieldMain`); read them as one row, not three. It is
+*not* the parked-`.rodata`-blob artifact -- deleting `const u32 D_800A0000[]`
+leaves the rows exactly where they were.
 
 Read the tables as a trade, not as a list of faults. `FieldDebugRenderPage` at
 +1 instruction reports `nop +14, lui +8` against `addu -12, sll -7, sra -3`:
