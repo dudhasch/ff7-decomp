@@ -454,26 +454,35 @@ extern s16 D_80114272;
 extern u16 g_FieldScreenCenterX;
 extern u16 g_FieldScreenCenterY;
 
-/* The trigger block carries the background-scroll parameters at +0x18: four
- * layer extents in tiles, then two banks of four scroll offsets that wrap
- * against them (`offset %% (extent * 0x10)`). Spelled as a struct rather than
- * `*(u16*)(g_FieldTriggers + 0x20)` for the reason field.c's header records:
- * a struct load does not alias a store to a plain extern, so gcc may hoist
- * it. */
+/* The trigger block carries the two scrolling background banks at +0x18, three
+ * parallel groups of four. What each group is, is fixed by the two functions
+ * that read them: the tile index comes out as
+ *
+ *     ((camera * parallax) >> 8  +  scroll >> 4)  %  wrapTiles
+ *
+ * and elsewhere the offset is wrapped directly as `scroll %% (wrapTiles *
+ * 0x10)`. So wrapTiles is an extent in 16-pixel tiles, scroll is an offset in
+ * pixels, and parallax is an 8.8 fraction of the camera position. The axis is
+ * not a guess either -- screen.vx multiplies parallaxX1 and the result wraps
+ * against wrapTilesX1, screen.vy pairs with the Y members.
+ *
+ * Spelled as a struct rather than `*(u16*)(g_FieldTriggers + 0x20)` for the
+ * reason field.c's header records: a struct load does not alias a store to a
+ * plain extern, so gcc may hoist it. */
 typedef struct {
     /* 0x00 */ u8 unk00[0x18];
-    /* 0x18 */ u16 unk18;
-    /* 0x1A */ u16 unk1A;
-    /* 0x1C */ u16 unk1C;
-    /* 0x1E */ u16 unk1E;
-    /* 0x20 */ u16 unk20;
-    /* 0x22 */ u16 unk22;
-    /* 0x24 */ u16 unk24;
-    /* 0x26 */ u16 unk26;
-    /* 0x28 */ u16 unk28;
-    /* 0x2A */ u16 unk2A;
-    /* 0x2C */ u16 unk2C;
-    /* 0x2E */ u16 unk2E;
+    /* 0x18 */ u16 wrapTilesX1;
+    /* 0x1A */ u16 wrapTilesY1;
+    /* 0x1C */ u16 wrapTilesX2;
+    /* 0x1E */ u16 wrapTilesY2;
+    /* 0x20 */ u16 scrollX1;
+    /* 0x22 */ u16 scrollY1;
+    /* 0x24 */ u16 scrollX2;
+    /* 0x26 */ u16 scrollY2;
+    /* 0x28 */ u16 parallaxX1;
+    /* 0x2A */ u16 parallaxY1;
+    /* 0x2C */ u16 parallaxX2;
+    /* 0x2E */ u16 parallaxY2;
 } FieldBgScroll;
 
 /* What D_80071E40 really points at: the view matrix the rest of the overlay
@@ -601,26 +610,26 @@ void FieldBGUpdateDrawenv(s32 arg0) {
     s32 temp_s5;
     u8 var_v0;
 
-    ((FieldBgScroll*)g_FieldTriggers)->unk20 =
-        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk20 + D_8009AC9A);
-    ((FieldBgScroll*)g_FieldTriggers)->unk22 =
-        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk22 + D_8009AC9C);
-    ((FieldBgScroll*)g_FieldTriggers)->unk20 =
-        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk20 %
-              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk18 * 0x10));
-    ((FieldBgScroll*)g_FieldTriggers)->unk22 =
-        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk22 %
-              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1A * 0x10));
-    ((FieldBgScroll*)g_FieldTriggers)->unk24 =
-        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk24 + D_8009AC9E);
-    ((FieldBgScroll*)g_FieldTriggers)->unk26 =
-        (u16)(((FieldBgScroll*)g_FieldTriggers)->unk26 + D_8009ACA0);
-    ((FieldBgScroll*)g_FieldTriggers)->unk24 =
-        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk24 %
-              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1C * 0x10));
-    ((FieldBgScroll*)g_FieldTriggers)->unk26 =
-        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->unk26 %
-              (s32)(((FieldBgScroll*)g_FieldTriggers)->unk1E * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->scrollX1 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->scrollX1 + D_8009AC9A);
+    ((FieldBgScroll*)g_FieldTriggers)->scrollY1 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->scrollY1 + D_8009AC9C);
+    ((FieldBgScroll*)g_FieldTriggers)->scrollX1 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->scrollX1 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->wrapTilesX1 * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->scrollY1 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->scrollY1 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->wrapTilesY1 * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->scrollX2 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->scrollX2 + D_8009AC9E);
+    ((FieldBgScroll*)g_FieldTriggers)->scrollY2 =
+        (u16)(((FieldBgScroll*)g_FieldTriggers)->scrollY2 + D_8009ACA0);
+    ((FieldBgScroll*)g_FieldTriggers)->scrollX2 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->scrollX2 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->wrapTilesX2 * 0x10));
+    ((FieldBgScroll*)g_FieldTriggers)->scrollY2 =
+        (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->scrollY2 %
+              (s32)(((FieldBgScroll*)g_FieldTriggers)->wrapTilesY2 * 0x10));
     SetGeomScreen((s32)((FieldCamera*)D_80071E40)->unk24);
     if ((g_FieldMovieStreamActive == 0) || (D_8009AC2E != 0)) {
         if (D_8009A100 == 0) {
@@ -670,36 +679,38 @@ void FieldBGUpdateDrawenv(s32 arg0) {
             D_800E48E6 = screen.vy;
             FieldBGClampPos((s16*)&screen);
             FieldCalcPointOnLine(g_FieldTriggers, &screen);
-            temp_s5 = (s16)(((s32)((s16)screen.vx *
-                                   ((FieldBgScroll*)g_FieldTriggers)->unk28) >>
-                             8) +
-                            ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk20
-                                   << 0x10) >>
-                             0x14)) %
-                      (s16)((FieldBgScroll*)g_FieldTriggers)->unk18;
-            temp_hi = (s16)(((s32)(screen.vy *
-                                   ((FieldBgScroll*)g_FieldTriggers)->unk2A) >>
-                             8) +
-                            ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk22
-                                   << 0x10) >>
-                             0x14)) %
-                      (s16)((FieldBgScroll*)g_FieldTriggers)->unk1A;
+            temp_s5 =
+                (s16)(((s32)((s16)screen.vx *
+                             ((FieldBgScroll*)g_FieldTriggers)->parallaxX1) >>
+                       8) +
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollX1
+                             << 0x10) >>
+                       0x14)) %
+                (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesX1;
+            temp_hi =
+                (s16)(((s32)(screen.vy *
+                             ((FieldBgScroll*)g_FieldTriggers)->parallaxY1) >>
+                       8) +
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollY1
+                             << 0x10) >>
+                       0x14)) %
+                (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesY1;
             temp_hi_2 =
                 (s16)(((s32)((s16)screen.vx *
-                             ((FieldBgScroll*)g_FieldTriggers)->unk2C) >>
+                             ((FieldBgScroll*)g_FieldTriggers)->parallaxX2) >>
                        8) +
-                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk24
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollX2
                              << 0x10) >>
                        0x14)) %
-                (s16)((FieldBgScroll*)g_FieldTriggers)->unk1C;
+                (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesX2;
             temp_hi_3 =
                 (s16)(((s32)(screen.vy *
-                             ((FieldBgScroll*)g_FieldTriggers)->unk2E) >>
+                             ((FieldBgScroll*)g_FieldTriggers)->parallaxY2) >>
                        8) +
-                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk26
+                      ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollY2
                              << 0x10) >>
                        0x14)) %
-                (s16)((FieldBgScroll*)g_FieldTriggers)->unk1E;
+                (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesY2;
             g_FieldExitArrowY = (u16)g_FieldExitArrowY - screen.vy;
             g_FieldExitArrowX = (u16)g_FieldExitArrowX - screen.vx;
             sp20 = (u16)temp_hi;
@@ -777,31 +788,33 @@ void FieldBGUpdateDrawenv(s32 arg0) {
         temp_a3 = -D_80071E38;
         temp_a2_2 = -D_80071E3C;
         temp_s3 =
-            (s16)(((s32)(temp_a3 * ((FieldBgScroll*)g_FieldTriggers)->unk28) >>
+            (s16)(((s32)(temp_a3 *
+                         ((FieldBgScroll*)g_FieldTriggers)->parallaxX1) >>
                    8) +
-                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk20 << 0x10) >>
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollX1 << 0x10) >>
                    0x14)) %
-            (s16)((FieldBgScroll*)g_FieldTriggers)->unk18;
+            (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesX1;
         temp_hi_4 =
             (s16)(((s32)(temp_a2_2 *
-                         ((FieldBgScroll*)g_FieldTriggers)->unk2A) >>
+                         ((FieldBgScroll*)g_FieldTriggers)->parallaxY1) >>
                    8) +
-                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk22 << 0x10) >>
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollY1 << 0x10) >>
                    0x14)) %
-            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1A;
+            (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesY1;
         temp_hi_5 =
-            (s16)(((s32)(temp_a3 * ((FieldBgScroll*)g_FieldTriggers)->unk2C) >>
+            (s16)(((s32)(temp_a3 *
+                         ((FieldBgScroll*)g_FieldTriggers)->parallaxX2) >>
                    8) +
-                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk24 << 0x10) >>
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollX2 << 0x10) >>
                    0x14)) %
-            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1C;
+            (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesX2;
         temp_hi_6 =
             (s16)(((s32)(temp_a2_2 *
-                         ((FieldBgScroll*)g_FieldTriggers)->unk2E) >>
+                         ((FieldBgScroll*)g_FieldTriggers)->parallaxY2) >>
                    8) +
-                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->unk26 << 0x10) >>
+                  ((s32)(((FieldBgScroll*)g_FieldTriggers)->scrollY2 << 0x10) >>
                    0x14)) %
-            (s16)((FieldBgScroll*)g_FieldTriggers)->unk1E;
+            (s16)((FieldBgScroll*)g_FieldTriggers)->wrapTilesY2;
         sp20 = (u16)temp_hi_4;
         sp28 = (u16)temp_hi_5;
         sp30 = (u16)temp_hi_6;
