@@ -2391,8 +2391,8 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
     s16* camTri;
     s32 lineOff;
     s32 nameOff;
-    s8* temp_s5;
-    s8* temp_s7;
+    s8* labelZ;
+    s8* labelY;
 
     if (arg0 == 4) {
         if (!(g_FieldScriptDebugFlags & 4) ||
@@ -2698,14 +2698,14 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             if (g_FieldScriptDebugFlags & 2) {
                 DebugPrintToFieldWindow(g_DebugText);
             }
-            temp_s7 = "Y=";
-            FieldDebugStringCopy(g_DebugText, temp_s7);
+            labelY = "Y=";
+            FieldDebugStringCopy(g_DebugText, labelY);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 1],
                 g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
-            temp_s5 = " Z=";
-            FieldDebugStringConcat(g_DebugText, temp_s5);
+            labelZ = " Z=";
+            FieldDebugStringConcat(g_DebugText, labelZ);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 2],
                 g_DebugMessageBuffer);
@@ -2728,12 +2728,12 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             if (g_FieldScriptDebugFlags & 2) {
                 DebugPrintToFieldWindow(g_DebugText);
             }
-            FieldDebugStringCopy(g_DebugText, temp_s7);
+            FieldDebugStringCopy(g_DebugText, labelY);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 5],
                 g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
-            FieldDebugStringConcat(g_DebugText, temp_s5);
+            FieldDebugStringConcat(g_DebugText, labelZ);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 6],
                 g_DebugMessageBuffer);
@@ -2756,12 +2756,12 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             if (g_FieldScriptDebugFlags & 2) {
                 DebugPrintToFieldWindow(g_DebugText);
             }
-            FieldDebugStringCopy(g_DebugText, temp_s7);
+            FieldDebugStringCopy(g_DebugText, labelY);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 9],
                 g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
-            FieldDebugStringConcat(g_DebugText, temp_s5);
+            FieldDebugStringConcat(g_DebugText, labelZ);
             FieldDebugStringU32hex(
                 (s32)D_800E4274[g_FieldEntity[*camTri].PosI * 12 + 10],
                 g_DebugMessageBuffer);
@@ -2784,12 +2784,12 @@ void DebugUpdateActor(s16 arg0, s16 actorId) {
             if (g_FieldScriptDebugFlags & 2) {
                 DebugPrintToFieldWindow(g_DebugText);
             }
-            FieldDebugStringCopy(g_DebugText, temp_s7);
+            FieldDebugStringCopy(g_DebugText, labelY);
             FieldDebugStringU32hex(
                 (s32)g_FieldModels[g_EntityToModel[actorId]].OffsetY,
                 g_DebugMessageBuffer);
             FieldDebugStringConcat(g_DebugText, g_DebugMessageBuffer);
-            FieldDebugStringConcat(g_DebugText, temp_s5);
+            FieldDebugStringConcat(g_DebugText, labelZ);
             FieldDebugStringU32hex(
                 (s32)g_FieldModels[g_EntityToModel[actorId]].OffsetZ,
                 g_DebugMessageBuffer);
