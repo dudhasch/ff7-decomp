@@ -1682,6 +1682,53 @@ extern s16 D_801144D0;
  *    regression, and on the corrected base two of them are the answer.
  *    Re-run a "closed" dimension after any change to a declaration.
  *
+ * 14b. **Lever 14 re-diagnosed: it is not a sched2 priority tie, it is an
+ *    anti-dependence on a register `local_alloc` reused.** Read the two
+ *    schedules side by side rather than the row count. The target spreads the
+ *    `--count` chain through three load-delay slots -- `addiu a0,s3,-1` in
+ *    `lbu v0,5(v0)`'s, `move s3,a0` in `lhu v0,6(v1)`'s, `sll a0,a0,0x10` in
+ *    `lbu v0,8(v1)`'s -- and issues the spilled counter's `lhu`/`addiu`/`sh`
+ *    afterwards. This build cannot do the first of those *at all*, because
+ *    its decrement temp is `$v1` and `$v1` is the D_8007EBD4 pointer until
+ *    `lbu v0,8(v1)`: `addiu v1,s3,-1` anti-depends on that read and can only
+ *    be issued after it. The counter chain then fills the slots the decrement
+ *    was going to have. So the schedule is a consequence and the register is
+ *    the cause, and every sweep of *statement position* was sweeping the
+ *    wrong dimension -- which is why all of them came back inert.
+ *
+ *    `tools/qty_pri.py` prints both quantities and they are a dead tie:
+ *
+ *      pri 12.000  refs  9  life  9  -> v1  (plus (subreg (reg/v:HI count)) -1)
+ *      pri 12.000  refs 12  life 12  -> v1  (mem (symbol_ref "D_8007EBD4"))
+ *
+ *    -- and a tie is not the point, because the two do not *conflict*: the
+ *    pointer dies at its last read and the temp is born after it, so
+ *    `block_alloc` hands the temp the same lowest-free register whatever the
+ *    order. For the target's `$a0` the temp has to conflict with both `$v0`
+ *    and `$v1`, i.e. its live range has to **start before the last
+ *    D_8007EBD4 pointer use**. That is the specification a candidate has to
+ *    meet, and `--count` in a `do`/`while` test is emitted at the bottom of
+ *    the body by construction, so no statement order reaches it.
+ *
+ *    Swept against that specification and all worse: keeping a pointer
+ *    quantity alive to the loop bottom by moving `pairs[1]` after the three
+ *    bumps (63 at **-10** instructions), both `pairs` stores after them (116
+ *    at -6), `D_8007EBD4++` after `sprt++`/`pairs += 2` (exactly inert, 50),
+ *    `sprite34Count++` last of all (48 at +4). Pinning the counter instead --
+ *    a `volatile u16` local, which is the lever that closed FieldMain's fade
+ *    block -- costs instructions at every spelling: `spriteCount` volatile
+ *    with `x = x + 1` 94 at +4, with `x++` 104 at +6, `sprite34Count`
+ *    volatile with `x++` 62 at +4, both 128 at +8. A volatile *local* is a
+ *    declared stack slot reloaded at every use, so it is not the same tool as
+ *    a volatile MEM on a global.
+ *
+ *    One trap found while sweeping this, and it is the exact-length-by-
+ *    cancellation shape again: moving `sprt->clut` below `pairs[0]` scores
+ *    **51 rows at the exact 395**, which reads as the length finally fitting.
+ *    It is not -- layer 4 loses the clut store's `lhu v0,6(v1)`/`move`/`sh`
+ *    outright (cse shares the pointer load with `pairs[0]`'s) and two `nop`s
+ *    elsewhere pay for it. Check the rows before believing a length.
+ *
  * 14. **What is left**: two `nop`s, one each in the layer-3 and layer-4 tile
  *    loops, in the load-delay slot of
  *

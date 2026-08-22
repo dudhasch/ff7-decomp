@@ -2823,6 +2823,32 @@ a near-miss, in rough order of frequency:
   which costs a save, a restore and the whole allocation. Assign it after the
   last call that precedes its uses. Worth 12 rows either way in
   `FieldEventRunInit`, in opposite directions.
+* **A delay slot the target fills and yours leaves empty, with the filler
+  sitting a few slots *below* it, is an anti-dependence on a register the
+  allocator reused — read the register, not the schedule.** sched2 runs after
+  reload, so its dependence graph is over *hard* registers: an insn that
+  writes `$v1` cannot be hoisted above the last read of whatever else was in
+  `$v1`. `local_alloc` gives a block-local quantity the lowest register free
+  over its own range, and two quantities that do not overlap share one
+  happily — so a temporary born at the bottom of a loop body routinely lands
+  on the register a pointer held at the top, and is then nailed to the
+  bottom. The diff shows a `nop` where the target has the temporary's first
+  insn, and the temporary a few slots later; it reads as a scheduling tie and
+  every sweep of *statement position* comes back inert, because position is
+  not the dimension. `FieldBackgroundInitPackets` in `src/field/field.c` is
+  parked on exactly this: its `--count` temp gets `$v1`, which the
+  `D_8007EBD4` pointer holds until three instructions earlier, where the
+  target's temp is `$a0` and moves freely.
+
+  What that buys is a specification instead of a search: the temporary has to
+  **conflict** with every register below the one the target gave it, i.e. its
+  live range has to start before the last use of whichever quantity holds
+  them. `tools/qty_pri.py` prints the two quantities and their ranking, and
+  the ranking is usually beside the point — non-overlapping quantities get
+  the same register whatever the order, so the lever is the *range*, not the
+  priority. If the value is a loop counter decremented in a `do`/`while`
+  test, its range starts at the bottom of the body by construction and no
+  source order reaches it; say so and park.
 * **A `move` of a variable into a scratch register immediately before a
   compare against a constant is a post-increment in the test.**
   `addu v0,s6,zero / slti v0,v0,9 / addiu s6,s6,1` cannot come from
