@@ -4341,15 +4341,37 @@ rows whose two addresses differ by a constant, do not read it as a finding:
 subtract the two, divide by four, and check that against the instruction
 surplus of the functions above.
 
-**A red `make build` that is the container's, not yours.** On the Windows
-Docker path `build/` lives in a named volume over virtiofs, and a full build
-occasionally fails once with a missing object
-(`cannot find build/us/src/main/psxsdk.c.o`) or a SHA-1 mismatch on
-`main_final.elf`, then passes on an immediate re-run with no source change at
-all. It happened twice in one session here. **Re-run a red build once before
-believing it** — and note the risk runs the other way too, so a green build
-that follows a red one on the same tree is worth a second confirmation before
-committing.
+**A red `make build` that belongs to another agent's worktree.** The symptom
+is a full build that fails once with a missing object
+(`cannot find build/us/src/main/psxsdk.c.o`), a SHA-1 mismatch on
+`main_final.elf`, or a `multiple definition` naming a unit you have never
+touched (`src/menu/itemmenu.c`), then passes on an immediate re-run with no
+source change. It reads exactly like a filesystem flake and it is not: it is
+two worktrees sharing one Docker build volume, which is the corruption this
+file's *Working in parallel* section warns about, arriving through the one
+route nobody checks. `tools/docker-build.ps1` derives the volume with
+
+```powershell
+elseif ($repoRoot -match '[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)') {
+```
+
+and the character class **must** be `[\\/]`, not `[\/]` — in .NET regex `[\/]`
+is just `[/]` and never matches a Windows path separator, so the match fails
+silently and every worktree falls through to the shared `ff7_build`. The
+script is gitignored, so each worktree carries its own copy and each one has
+to be checked. Two commands prove it:
+
+```powershell
+docker volume ls | Select-String 'ff7_build'
+.\tools\docker-build.ps1 'echo x'   # then look for ff7_build_<name> in the list
+```
+
+Everything measured on a shared volume is suspect — `checkfn.py`,
+`insn_histogram.py` and `make build` all read `build/`. `variant_eval.py`
+compiles to a private temp directory and is the one tool that is not exposed.
+After fixing the regex, re-run `make build` (it starts from an empty volume
+and rebuilds everything, which is expected) and re-run `checkfn.py` over every
+function landed on the old volume before believing any of them.
 
 #### Sweeping many variants at once
 

@@ -1550,9 +1550,11 @@ void func_800E58B0(void) {
 // The source table is the MAGIC overlay's load slot, addressed as a literal:
 // the target's `lui t1,0x801b` carries no %lo half at all, which only a
 // compile-time-known address produces.  splat renders the same two words as
-// %hi/%lo(func_801B0000) because 0x801B0000 happens to carry that label, so
-// checkfn reports two rows of symbol naming here; the encoded bytes
-// (3c09801b / 8c420000) are identical either way.  See CLAUDE.md.
+// %hi/%lo(func_801B0000) because 0x801B0000 happens to carry that label;
+// checkfn resolves that relocation back to the same value, so this is a
+// MATCH, and the encoded words (3c09801b / 8c420000) are identical.  Spelling
+// it as the symbol instead costs an instruction: gcc cannot know the low half
+// is zero and emits the addiu.
 void func_800E58CC(void) {
     s32 i;
     s32* src = (s32*)0x801B0000;
