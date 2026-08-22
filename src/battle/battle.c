@@ -559,7 +559,14 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A50E0);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5250);
 
-void func_800A555C(s32 arg0, s32 arg1) {
+/* K&R definition on purpose: func_800A6A70 below calls this with only the
+   first argument, relying on whatever the caller left in $a1. A prototype
+   would make gcc reject that call ("too few arguments") -- it reports the
+   error, substitutes for the missing argument and keeps generating code, so
+   the diagnostic is the only symptom. */
+void func_800A555C(arg0, arg1) s32 arg0;
+s32 arg1;
+{
     u8* row;
     u16 value;
 
@@ -759,7 +766,11 @@ void func_800A661C(s32 arg0) {
     }
 }
 
-void func_800A66A4(s32 arg0, s32 arg1) {
+/* K&R definition on purpose -- func_800A6858 calls this with no arguments at
+   all, passing its own $a0/$a1 straight through. See func_800A555C. */
+void func_800A66A4(arg0, arg1) s32 arg0;
+s32 arg1;
+{
     func_800A653C(arg0);
     func_800A65B0(arg0, arg1);
     func_800A4D88(arg0);
@@ -2012,10 +2023,10 @@ int func_800B062C();
 int func_800B079C();
 int func_800B0B8C();
 int func_800B0910();
-int func_800B089C();
+void func_800B089C(void);
 int (* const D_800A04E0[])() = {
     func_800B0378, func_800B062C, func_800B079C, func_800B0B8C,
-    func_800B0B8C, func_800B0B8C, func_800B0910, func_800B089C,
+    func_800B0B8C, func_800B0B8C, func_800B0910, (int (*)())func_800B089C,
 };
 // ___end
 
@@ -2035,7 +2046,10 @@ void func_800AEB80(s32 arg0, s32 arg1, s32 arg2) {
     }
 }
 
-void func_800AEBF0(int index) { func_800AE954(index); }
+/* K&R definition on purpose -- func_800AF320 calls this with no arguments,
+   passing its own $a0 through. See func_800A555C. */
+void func_800AEBF0(index) int index;
+{ func_800AE954(index); }
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AEC10);
 
