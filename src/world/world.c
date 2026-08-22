@@ -2856,7 +2856,20 @@ void func_800B76A8(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7714);
+void func_800B7714(s32 arg0) {
+    u8* e;
+    s32 idx;
+
+    idx = ((((arg0 >> 8) - 1) << 1) & 0x1FE) | (arg0 & 1);
+    e = (u8*)(idx * 12 + (s32)D_800BF5F0);
+    D_8009ABF6 = *(u16*)(e + 6);
+    D_8009ABF8 = *(u16*)(e + 0);
+    D_8009ABFA = *(u16*)(e + 2);
+    D_8009AC16 = *(u16*)(e + 4);
+    D_8011626C = 0;
+    D_80116270 = arg0;
+    D_8009AC18 = *(u8*)(e + 8);
+}
 
 void func_800B77A8(s32 arg0) {
     if (arg0 & 0x40000000) {
