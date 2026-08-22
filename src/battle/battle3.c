@@ -1032,7 +1032,49 @@ s32 func_800E1A2C(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E1AC0);
+/* 11 changed / 6 inserted / -1 instruction (95 against 96).  The argument
+ * record, its field widths (unk10..unk12 are u8 -- as s8 the 0x80 and 0xFF
+ * stores come out as "li -0x80" / "li -1") and both call sites are right.
+ * What is left is where sched2 puts "addiu a0,sp,0x10" and the two constant
+ * materialisations relative to the three "sb"s: the target issues the
+ * argument address early and the constants late, this body the reverse, and
+ * the target has one "nop" this body fills.  Pure entry-block scheduling. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800E1AC0);
+#else
+void func_800E1AC0(s16 arg0) {
+    Unk80027408 req;
+    Unk8009D84C* ch;
+    s16 y;
+
+    y = (arg0 * 0x10) + 0x10;
+    req.unk0 = 0x90;
+    req.unk2 = y;
+    req.unk4 = 0x3C;
+    req.unk6 = 1;
+    req.unk8 = D_8015174C[arg0] >> 8;
+    req.unkE = D_801517C8[arg0] >> 8;
+    ch = &D_8009D84C[arg0];
+    req.unkA = ch->unk12;
+    req.unk10 = 0;
+    req.unk11 = 0x80;
+    req.unk12 = 0xFF;
+    req.unkC = D_801031F4[arg0];
+    func_80027408(&req);
+    req.unk0 = 0xCF;
+    req.unk2 = y;
+    req.unk4 = 0x1E;
+    req.unk6 = 1;
+    req.unk8 = D_8015178C[arg0] >> 8;
+    req.unkE = D_8015187C[arg0] >> 8;
+    req.unkA = ch->unk16;
+    req.unk10 = 0;
+    req.unk11 = 0xFF;
+    req.unk12 = 0x80;
+    req.unkC = D_80151688[arg0];
+    func_80027408(&req);
+}
+#endif
 
 void func_800E1C40(void) {
     Unk8009D84C* activeCharacters = D_8009D84C;
