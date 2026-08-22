@@ -2360,17 +2360,11 @@ void FieldDebugRenderPage(s16 page) {
     u8* rowText;
     s16 temp_t0;
     s16 temp_t3;
-    s16 temp_v0;
     s16 temp_v0_2;
-    s16 temp_v1_2;
-    s16 var_a2;
     s16 var_s1_2;
-    s16 var_s2;
-    s32 temp_a0;
     s32 temp_a0_10;
     s32 temp_a0_3;
     s32 temp_a0_8;
-    s32 temp_a1;
     s32 temp_a1_11;
     s32 temp_a1_12;
     s32 temp_a1_3;
@@ -2386,8 +2380,6 @@ void FieldDebugRenderPage(s16 page) {
     s32 temp_a3_4;
     s32 temp_a3_7;
     s32 temp_t5;
-    s32 var_a1;
-    s32 var_s1;
     s32* temp_a0_13;
     s32* temp_a0_14;
     s32* temp_a0_4;
@@ -2395,7 +2387,6 @@ void FieldDebugRenderPage(s16 page) {
     s32* temp_a1_2;
     s8 var_v0_2;
     s8 var_v1_4;
-    u16 temp_v1;
     u32 var_v0;
     u32* temp_a0_11;
     u32* temp_a1_7;

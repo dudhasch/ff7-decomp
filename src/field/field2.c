@@ -1407,7 +1407,6 @@ void FieldEntityMovementUpdate(s32 arg0) {
     s16 temp_v1_6;
     s16 temp_v1_7;
     s16 temp_v1_9;
-    s16 var_v0_10;
     s16 var_v1_5;
     s16 var_v1_6;
     s32 temp_a0_6;
@@ -1442,12 +1441,9 @@ void FieldEntityMovementUpdate(s32 arg0) {
     s32 var_v0_24;
     s32 var_v0_25;
     s32 var_v0_26;
-    s32 var_v1_2;
     s32 var_v1_3;
     s32 var_v1_4;
     s8 var_v0_11;
-    u16 temp_a0_4;
-    u16 temp_a0_5;
     u8 temp_a0_8;
     u8 temp_a0_9;
     u8 temp_a1_2;

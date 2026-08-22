@@ -7378,8 +7378,6 @@ s32 OpcodeFuncXor2(void) {
  * operand is.
  */
 s32 OpcodeFuncPlus(void) {
-    u16* temp_a0;
-    u8 temp_s0;
 
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("plus", 3);
@@ -8042,7 +8040,6 @@ s32 OpcodeFuncDec2Ex(void) {
  * If you specify a 16-bit bank, only the lower byte is randomised.
  */
 s32 OpcodeFuncRandm(void) {
-    u16* temp_v1;
 
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("randm", 2);
