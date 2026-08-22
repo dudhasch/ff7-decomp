@@ -691,7 +691,58 @@ void func_800E0530(void) {
     func_800E58CC();
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E05E4);
+extern u8 D_8009D2FC;
+extern s8 D_800F913C;
+
+void func_800E05E4(void) {
+    u8 next;
+
+    if (D_800F3896 == 0x1C) {
+        switch (D_800F57D4) {
+        case 0:
+            func_800264A8(&D_800F9132);
+            if (D_80062D7C & 0x20) {
+                if (D_800F913C == 0) {
+                    func_800E58B0();
+                    D_800F57D4 = 2;
+                } else {
+                    func_800A4844(0);
+                }
+            }
+            break;
+        case 1:
+            if ((D_80062D7C & 0x20) && (func_800E593C() != 0)) {
+                D_800F57D4 = 3;
+            }
+            break;
+        case 2:
+            if (D_80062D7C & 0x20) {
+                func_800BB9FC(0x1D3);
+                D_800F57D4 = 1;
+            }
+            break;
+        case 3:
+            if (D_80062D7C & 0x20) {
+                func_800A4844(1);
+                func_800D9F5C(0x1C);
+                D_800F57D4 = 4;
+                /* The increment has to be computed before the D_8009D2FC
+                   store, or gcc reuses the old value's register and the two
+                   sb come out in the other order.  D_8009D2FC =
+                   D_80163604++ swaps them; a wide `next` costs 3 rows. */
+                next = D_80163604 + 1;
+                D_8009D2FC = D_80163604;
+                D_80163604 = next;
+            }
+            break;
+        case 5:
+            if (D_80062D7C & 0x20) {
+                D_800F57D4 = 0;
+            }
+            break;
+        }
+    }
+}
 
 void func_800E078C(void) {}
 
