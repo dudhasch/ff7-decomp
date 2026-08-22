@@ -725,7 +725,36 @@ void func_800A56B0(s16 arg0) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5750);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5990);
+// Pick a random usable battle item and announce it; returns its id, or 0xFFFF
+// when nothing is usable.
+s32 func_800A5990(void) {
+    u16 usable[0x140];
+    s32 count;
+    s32 i;
+    s32 id;
+    s32 flags;
+    s32 pick;
+    s32 result;
+
+    result = 0xFFFF;
+    count = 0;
+    for (i = 0; i < 0x140; i++) {
+        id = D_801671B8[i].id;
+        flags = D_801671B8[i].unk4;
+        if (id != 0xFFFF && !(flags & 9)) {
+            usable[count] = id;
+            count++;
+        }
+    }
+    if (count != 0) {
+        pick = usable[func_80014BA8(count)];
+        if (pick >= 0x80 && pick < 0x100) {
+            func_800A7254(0, 0, 0x10, pick);
+            result = pick;
+        }
+    }
+    return result;
+}
 
 const u8 D_800A0240[] = {
     0xA8, 0x54, 0x0A, 0x80, 0xA8, 0x54, 0x0A, 0x80, 0xA8, 0x54, 0x0A, 0x80,
