@@ -992,7 +992,21 @@ void func_800E58B0(void) {
     D_800F5760 = 10;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E58CC);
+// The source table is the MAGIC overlay's load slot, addressed as a literal:
+// the target's `lui t1,0x801b` carries no %lo half at all, which only a
+// compile-time-known address produces.  splat renders the same two words as
+// %hi/%lo(func_801B0000) because 0x801B0000 happens to carry that label, so
+// checkfn reports two rows of symbol naming here; the encoded bytes
+// (3c09801b / 8c420000) are identical either way.  See CLAUDE.md.
+void func_800E58CC(void) {
+    s32 i;
+    s32* src = (s32*)0x801B0000;
+
+    for (i = 0; i < 3; i++) {
+        D_800F5778[D_80163604 * 3 + i] =
+            src[D_80163600 * 21 + i * 7 + D_80163604];
+    }
+}
 
 static u8 func_800E593C(void) { return D_800F381C[D_80163604]; }
 
