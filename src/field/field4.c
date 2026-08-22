@@ -1338,7 +1338,7 @@ extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
  *     146 rows. The scaled subscript folds the symbol into the address
  *     register and the whole `$at` form is lost -- CLAUDE.md's
  *     scaled-subscript rule, seen from the wrong side.
- 
+
  * Re-measured at 100 rows / +3, with the head's store grouping read against
  * the target rather than guessed. Two things are now settled:
  *   - the *order* of the 44 `g_FieldState->member = 0;` stores is already the

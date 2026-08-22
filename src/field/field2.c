@@ -4503,6 +4503,20 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  * both together. Walking `models` in the third loop rather than indexing it
  * is 48 and turns -1 into +1, so the spilled pointer the target reloads at
  * 0x38(sp) is not simply `models` advanced.
+
+ * 37 -> 32 on a second permuter find, same class as the first:
+ * `words = 3;` immediately above the statement, with the mask reading the
+ * local. The store is dead -- `words` is overwritten by the very next
+ * statement -- so it emits nothing and only raises the local's reference
+ * count, which is what the target's register assignment there needs. The
+ * declaration reorder the same candidate carried (`pmodels` after `block`) is
+ * exactly inert.
+ *
+ * Run rating, for the next pass: base 580 -> best 355 over 98,144 candidates
+ * on ten workers, worth five real rows. That is a *tenth* of the yield of the
+ * FieldBattleCheck run that matched in 3,150. Both finds here are
+ * perm_temp_for_expr on an existing local, so weight that pass and stop early
+ * if nothing appears in the first few thousand.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
@@ -4551,7 +4565,8 @@ u8* LoadLocalFieldModelAndInitAll(
     } else {
         s = buf;
         d = (u32*)D_800E0204;
-        words = (buf[0] >> 2) + ((buf[0] & 3) != 0);
+        words = 3;
+        words = (buf[0] >> 2) + ((buf[0] & words) != 0);
         n = words / 4;
         for (w = 0; w < n; w++) {
             d[0] = s[0];
