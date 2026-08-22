@@ -683,7 +683,27 @@ void func_80015CA0(GzHeader* src, s32* dst) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015D14);
+/* A bump allocator over the 0x1000-word arena at D_80062E44; when the
+ * request does not fit it resets the cursor and retries. The recursion has to
+ * go through a local -- `return func_80015D14(size);` is a bare CALL_EXPR in
+ * the return, which gcc 2.6.3 turns into a jump back to the top and costs the
+ * whole frame. */
+void* func_80015D14(u32 size) {
+    u32 cur;
+    u32 next;
+    void* p;
+
+    cur = D_80062D54;
+    next = cur + ((size + 3) >> 2);
+    if (next <= 0x1000) {
+        D_80062D54 = next;
+        p = (void*)(D_80062E44 + cur * 4);
+    } else {
+        D_80062D54 = 0;
+        p = func_80015D14(size);
+    }
+    return p;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80015D64);
 
