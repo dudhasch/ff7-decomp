@@ -139,7 +139,172 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C2524);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C31F0);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C3948);
+extern SVECTOR D_800C7938[];
+
+/* PARKED: 68 changed / 0 inserted at the **exact** length (282 against 282).
+ * Every remaining row is a register name, and they are one 3-cycle plus one
+ * swap, repeated once per list:
+ *   target  a1=k a2=i a3=off   t2=count t3=base
+ *   ours    a1=off a2=k a3=i   t2=base  t3=count
+ * so the fix has to change these quantities' `QTY_CMP_PRI` ranking, and
+ * nothing spelled in C does.  Measured and exactly inert at 68:
+ *   - `tools/width_sweep.py`, 25 variants over 5 scalar locals: every 32-bit
+ *     alternative is inert, every narrow one costs 15 to 119 rows and the
+ *     length
+ *   - declaration order (`off`/`k`/`i` permuted)
+ *   - `base = light` moved into the `for` init list
+ *   - `gte_ldrgb(&base[off])` for `gte_ldrgb(base + off)`
+ *   - `off += 4` moved from the body into the `for` increment list
+ *   - `base = light + 0`
+ * and worse: dropping `base` and indexing `light` directly (92 rows, -4),
+ * `gte_ldrgb(src + 4)` for the ldrgb address (120 rows, -8).
+ *
+ * The lever that got it from 88 to 68 is worth keeping: the four
+ * multi-vertex lists index off `base` with `k * 4 + N`, they do **not** walk
+ * a `src` pointer.  With a walking `src += 4`, `combine_givs` bases the
+ * loop's addresses on the last offset referenced -- `src[6]`, the last store
+ * -- and since `src` is dead after the loop gcc rewrites the biv itself, so
+ * the preheader reads `addiu v1,t0,6` and every displacement in the body is
+ * 6 low.  The target has `move v1,t0`, i.e. base 0, which no store order
+ * reaches (4/5/6 is 88 rows, 6/5/4 is 96, 5/6/4 is 100, 4/6/5 is 96).
+ * Indexing off the counter leaves the addresses as `base + const` and no giv
+ * forms at all.  The four *flat* lists keep the walking pointer and do base
+ * at +6 in the target, because `light` is live into the next list and the
+ * biv cannot be rewritten -- that asymmetry is what the target states.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world2", func_800C3948);
+#else
+void func_800C3948(WorldModelPart* part, s32 arg1) {
+    u32 i;
+    u32 k;
+    s32 count;
+    s32 off;
+    u32 w;
+    u8* light;
+    u8* base;
+    u8* src;
+    u8* normals;
+    u8* scratch;
+
+    normals = (u8*)D_800C7938;
+    scratch = (u8*)0x1F800000;
+    if ((*(u32*)part->unk18 & 2) && arg1 == 0) {
+        return;
+    }
+    light = (u8*)(part->unkE + (s32)part->unk18);
+
+    w = *(u32*)&part->numPrims[0];
+
+    count = w & 0xFF;
+    for (i = 0; i < count; i++, light += 0x18) {
+        base = light;
+        for (k = 0, off = 4; k < 4; k++) {
+            gte_ldv0(normals + base[k * 4 + 7] * 8);
+            gte_ldrgb(base + off);
+            gte_nccs();
+            gte_strgb(scratch);
+            base[k * 4 + 4] = scratch[0];
+            base[k * 4 + 5] = scratch[1];
+            base[k * 4 + 6] = scratch[2];
+            off += 4;
+        }
+    }
+
+    count = (w & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, light += 0x14) {
+        base = light;
+        for (k = 0, off = 4; k < 3; k++) {
+            gte_ldv0(normals + base[k * 4 + 7] * 8);
+            gte_ldrgb(base + off);
+            gte_nccs();
+            gte_strgb(scratch);
+            base[k * 4 + 4] = scratch[0];
+            base[k * 4 + 5] = scratch[1];
+            base[k * 4 + 6] = scratch[2];
+            off += 4;
+        }
+    }
+
+    count = (w >> 16) & 0xFF;
+    for (i = 0; i < count; i++, light += 0xC) {
+        gte_ldv0(normals + light[7] * 8);
+        gte_ldrgb(light + 4);
+        gte_nccs();
+        gte_strgb(scratch);
+        light[4] = scratch[0];
+        light[5] = scratch[1];
+        light[6] = scratch[2];
+    }
+
+    count = w >> 24;
+    for (i = 0; i < count; i++, light += 0xC) {
+        gte_ldv0(normals + light[7] * 8);
+        gte_ldrgb(light + 4);
+        gte_nccs();
+        gte_strgb(scratch);
+        light[4] = scratch[0];
+        light[5] = scratch[1];
+        light[6] = scratch[2];
+    }
+
+    w = *(u32*)&part->numPrims[4];
+
+    count = w & 0xFF;
+    for (i = 0; i < count; i++, light += 8) {
+        gte_ldv0(normals + light[7] * 8);
+        gte_ldrgb(light + 4);
+        gte_nccs();
+        gte_strgb(scratch);
+        light[4] = scratch[0];
+        light[5] = scratch[1];
+        light[6] = scratch[2];
+    }
+
+    count = (w & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, light += 8) {
+        gte_ldv0(normals + light[7] * 8);
+        gte_ldrgb(light + 4);
+        gte_nccs();
+        gte_strgb(scratch);
+        light[4] = scratch[0];
+        light[5] = scratch[1];
+        light[6] = scratch[2];
+    }
+
+    count = (w >> 16) & 0xFF;
+    for (i = 0; i < count; i++, light += 0x10) {
+        base = light;
+        for (k = 0, off = 4; k < 3; k++) {
+            gte_ldv0(normals + base[k * 4 + 7] * 8);
+            gte_ldrgb(base + off);
+            gte_nccs();
+            gte_strgb(scratch);
+            base[k * 4 + 4] = scratch[0];
+            base[k * 4 + 5] = scratch[1];
+            base[k * 4 + 6] = scratch[2];
+            off += 4;
+        }
+    }
+
+    count = w >> 24;
+    for (i = 0; i < count; i++, light += 0x14) {
+        base = light;
+        for (k = 0, off = 4; k < 4; k++) {
+            gte_ldv0(normals + base[k * 4 + 7] * 8);
+            gte_ldrgb(base + off);
+            gte_nccs();
+            gte_strgb(scratch);
+            base[k * 4 + 4] = scratch[0];
+            base[k * 4 + 5] = scratch[1];
+            base[k * 4 + 6] = scratch[2];
+            off += 4;
+        }
+    }
+
+    *(u32*)part->unk18 |= 2;
+}
+#endif
 
 void func_800C3DB0(WorldModelPart* part, s32 flag) {
     u32 i;
@@ -217,7 +382,6 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C4FB4);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C5CD4);
 
-extern SVECTOR D_800C7938[];
 extern u8 D_800C752C;
 
 /* PARKED: 204 changed / 0 inserted, and **one instruction short** (292
@@ -293,7 +457,7 @@ void func_800C6104(WorldModelPart* part) {
             code = p[7];
             for (k = 0, dst = p + 4, off = 4, src = light; k < 4; k++,
                 src += 4) {
-                gte_ldv0(normals + src[7] * 8);
+                gte_ldv0(normals + base[k * 4 + 7] * 8);
                 gte_ldrgb(base + off);
                 gte_nccs();
                 gte_strgb(dst);
@@ -311,7 +475,7 @@ void func_800C6104(WorldModelPart* part) {
             code = p[7];
             for (k = 0, dst = p + 4, off = 4, src = light; k < 3; k++,
                 src += 4) {
-                gte_ldv0(normals + src[7] * 8);
+                gte_ldv0(normals + base[k * 4 + 7] * 8);
                 gte_ldrgb(base + off);
                 gte_nccs();
                 gte_strgb(dst);
@@ -383,7 +547,7 @@ void func_800C6104(WorldModelPart* part) {
             code = p[7];
             for (k = 0, dst = p + 4, off = 4, src = light; k < 3; k++,
                 src += 4) {
-                gte_ldv0(normals + src[7] * 8);
+                gte_ldv0(normals + base[k * 4 + 7] * 8);
                 gte_ldrgb(base + off);
                 gte_nccs();
                 gte_strgb(dst);
@@ -401,7 +565,7 @@ void func_800C6104(WorldModelPart* part) {
             code = p[7];
             for (k = 0, dst = p + 4, off = 4, src = light; k < 4; k++,
                 src += 4) {
-                gte_ldv0(normals + src[7] * 8);
+                gte_ldv0(normals + base[k * 4 + 7] * 8);
                 gte_ldrgb(base + off);
                 gte_nccs();
                 gte_strgb(dst);
