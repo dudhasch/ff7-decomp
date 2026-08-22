@@ -4617,6 +4617,27 @@ a near-miss, in rough order of frequency:
   destination being the long-lived register and the load's destination dying
   immediately. `func_800A5EB0` in `src/battle/battle.c` needs
   `idx = D_800F4304++;`, and no spelling of the two-statement form reaches it.
+* **A local aggregate initialiser's blob can be the *front* of a file-scope
+  `const` object, and only that front may be deleted.** CLAUDE.md already says
+  to grep the unit's file-scope constants before unparking a function with a
+  local aggregate initialiser. The case it does not cover is the commoner one:
+  the blob and some unrelated bytes were merged into a single `const` array
+  when the function was still `INCLUDE_ASM`, because splat had no reason to
+  split them. `func_800A784C` in `src/battle/battle.c` copies 10 bytes from
+  `D_800A0290` and **4** bytes from a 36-byte `D_800A029C`; deleting the whole
+  of the latter moves `D_800A02C0` by 32 bytes and fails the overlay SHA-1,
+  and keeping it emits the 4 bytes twice. Split it: delete the front, and
+  re-declare the tail under its own address-derived name. Two details decide
+  whether it links and lands:
+  * the tail object has to be declared **after** the function, because gcc
+    emits a file-scope const at its declaration point and the function's
+    constant pool during `final` for that function -- declared above, the
+    tail lands *ahead* of the blobs and every later offset is wrong;
+  * grep `asm/` for the old symbol first. If a still-`INCLUDE_ASM` function
+    references it, the tail cannot simply be renamed and the address needs a
+    line in `config/sym_extern.us.txt`; if nothing references it (which is the
+    usual case, since the owner was the function you just wrote), the rename
+    is free.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

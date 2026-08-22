@@ -1239,11 +1239,35 @@ void BATTLE_ResolveLimitActionIndex(void) {
     }
 }
 
-const s16 D_800A0290[] = {0, 56, 72, 96, 256};
-const s32 D_800A029C[] = {
-    0x140D0302, 0x3D3CFFFF, 0x41403F3E, 0xFFFFFF42, 0xFFFFFFFF,
-    0x43424140, 0x47464544, 0xFF444843, 0xFFFFFFFF};
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A784C);
+// Remap the action's per-category index into the single shared name table:
+// look the attack id up in the scene's table, then find which category range
+// it falls in and record the category and the offset within it.  The two
+// tables are the function's own .rodata blobs (formerly D_800A0290 and the
+// first word of D_800A029C) -- they are copied to the frame because they are
+// plain locals, not statics.
+void func_800A784C(void) {
+    g_CurrentAction->absoluteActionIndex =
+        D_800F5F44.attackIDs[g_CurrentAction->relativeActionIndex];
+    if (g_CurrentAction->unkC == 0x20) {
+        u16 base[5] = {0, 56, 72, 96, 256};
+        u8 category[4] = {2, 3, 13, 20};
+        u32 i;
+
+        for (i = 0; i < 4; i++) {
+            if (g_CurrentAction->absoluteActionIndex < (s32)base[i + 1]) {
+                g_CurrentAction->unk28 = category[i];
+                g_CurrentAction->unk98 =
+                    g_CurrentAction->absoluteActionIndex - base[i];
+                break;
+            }
+        }
+    }
+}
+
+// The tail of the old D_800A029C: nothing references these 32 bytes, but they
+// have to stay so that D_800A02C0 keeps its address.
+const s32 D_800A02A0[] = {0x3D3CFFFF, 0x41403F3E, 0xFFFFFF42, 0xFFFFFFFF,
+                          0x43424140, 0x47464544, 0xFF444843, 0xFFFFFFFF};
 
 void func_800A7940(void) {
     g_CurrentAction->unk80 = 0x400000;
