@@ -519,6 +519,36 @@ a near-miss, in rough order of frequency:
   `lh` plus an `andi`, which is a third wrong answer. Check who else uses the
   field first — both of the above had few enough users to retype outright,
   and `make build` is the arbiter.
+
+  **Before retyping anything, check that the *expression* is not the reason.**
+  The load opcode for a global is not decided by its declaration alone:
+  `D_80162080++` on an `extern s16` compiles to `lhu`, because only the low
+  16 bits reach the `sh` and combine's `force_to_mode` narrows the load, while
+  `D_80162080 == 0` on the same declaration keeps `lh`. So one unit can want
+  `lhu` at one site and `lh` at another with a single signed declaration, and
+  an `lhu` in the target is *not* by itself evidence that a scalar global is
+  unsigned. Retyping it to `u16` matched the function under test and silently
+  broke a sibling that had been matching for months.
+
+  That failure mode is worth as much as the rule, because nothing in the
+  per-function tooling can see it: `checkfn` and `variant_eval` are both
+  scoped to the function you name, so a header retype that fixes yours and
+  breaks a neighbour reads as MATCH on both runs. `make build` fails with
+  every object still exactly the right *size*, which reads like a link
+  problem rather than a codegen one. The two commands that find it in under a
+  minute:
+
+  ```shell
+  for f in build/us/src/<ovl>/*.o; do cmp -s $f expected/$f || echo $f; done
+  mipsel-linux-gnu-objdump -dr <ours> | grep -vE '^$|<LM[0-9]+>:' > /tmp/a
+  mipsel-linux-gnu-objdump -dr <expected> | grep -vE '^$|<LM[0-9]+>:' > /tmp/b
+  diff /tmp/a /tmp/b
+  ```
+
+  Strip the `LM` debug labels: `-g -gcoff` emits one every few instructions in
+  a *C* function and none in an assembled `.s`, so an unfiltered diff of a
+  half-decompiled unit is thousands of lines of nothing. What is left is one
+  row per real difference, with the relocation naming the symbol.
 * **A range test written with `&&` is folded; nested `if`s are not.**
   `x < 6 && x >= 4` becomes `(unsigned)(x - 4) < 2` — one instruction where
   the target has two `slti` against the same register. `fold_range_test` only

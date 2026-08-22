@@ -209,9 +209,49 @@ static void func_800B3AB8(void) {
     D_80166F64 = 3;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B3B84);
+extern s16 D_800FA9CA;
+extern s16 D_800FA9CC;
+void func_800B3C50(void);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B3C50);
+// fourth link of the chain, same shape as func_800B3AB8 one slot along
+void func_800B3B84(void) {
+    s16* s0;
+    u8** dst;
+    s16 v1;
+    s16 cmp;
+
+    s0 = &D_800FA9CA;
+    v1 = *s0;
+    dst = &D_800F8384[v1];
+    *dst = D_80103200 + v1 * 0xF000;
+    func_800B5E64(*s0);
+    func_800B5C1C(*s0);
+    cmp = D_800FA9CC;
+    if (cmp != 0xC8) {
+        DS_read(*&D_800E8068[cmp].loc, *&D_800E8068[cmp].len,
+                (u_long*)0x801B0000, func_800B3C50);
+        func_800B7FB4();
+        return;
+    }
+    D_80166F64 = 3;
+}
+
+extern s16 D_800FA9CE;
+
+// last link of the chain: unpack and stop
+void func_800B3C50(void) {
+    s16* s0;
+    u8** dst;
+    s16 v1;
+
+    s0 = &D_800FA9CE;
+    v1 = *s0;
+    dst = &D_800F8384[v1];
+    *dst = D_80103200 + v1 * 0xF000;
+    func_800B5E64(*s0);
+    func_800B5C1C(*s0);
+    D_80166F64 = 3;
+}
 
 static void func_800B3CD0(void) {
     Yamada* y;
@@ -929,14 +969,86 @@ static void func_800BBDF8(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BBEAC);
+extern void (*D_80161EF0[])(void);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BBF7C);
+// Four near-clone registration helpers: claim the first free callback slot at
+// or after the reserved prefix, stamp the current phase into the parallel
+// record array, bump the population count and return the slot index. A full
+// table is fatal -- the error code is the only thing that distinguishes them.
+s32 func_800BBEAC(void (*func)(void)) {
+    s16 i;
 
-s32 func_800BC04C(void (*cb)(void));
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC04C);
+    for (i = 0; i < 100; i++) {
+        if (D_80161EF0[i] == NULL && i >= D_8015169C) {
+            D_80161EF0[i] = func;
+            D_80162978[i].D_80162978 = D_8015169C;
+            D_80162080++;
+            return i;
+        }
+    }
+    PadStop();
+    ResetGraph(1);
+    StopCallback();
+    SystemError(0x61, 1);
+}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC11C);
+extern void (*D_80163B48[])(void);
+extern u16 D_80163B7C;
+
+s32 func_800BBF7C(void (*func)(void)) {
+    s16 i;
+
+    for (i = 0; i < 10; i++) {
+        if (D_80163B48[i] == NULL && i >= D_801590D0) {
+            D_80163B48[i] = func;
+            D_801620AC[i].D_801621AC = D_801590D0;
+            D_80163B7C++;
+            return i;
+        }
+    }
+    PadStop();
+    ResetGraph(1);
+    StopCallback();
+    SystemError(0x61, 2);
+}
+
+extern void (*D_80163B84[])(void);
+extern u16 D_80163C78;
+
+s32 func_800BC04C(void (*func)(void)) {
+    s16 i;
+
+    for (i = 0; i < 60; i++) {
+        if (D_80163B84[i] == NULL && i >= D_801590D4) {
+            D_80163B84[i] = func;
+            D_801621F0[i].D_801621F0 = D_801590D4;
+            D_80163C78++;
+            return i;
+        }
+    }
+    PadStop();
+    ResetGraph(1);
+    StopCallback();
+    SystemError(0x61, 4);
+}
+
+// same shape without the reserved prefix
+s32 func_800BC11C(void (*func)(void)) {
+    s16 i;
+
+    for (i = 0; i < 0x10; i++) {
+        if (D_800FA978[i] == 0) {
+            D_800FA978[i] = (s32)func;
+            D_800F7ED8[i].D_800F7ED8 = D_800F8360;
+            D_800FA9BC++;
+            return i;
+        }
+    }
+    PadStop();
+    ResetGraph(1);
+    StopCallback();
+    SystemError(0x61, 3);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC1E0);
 
