@@ -1177,7 +1177,46 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E4180);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E4394);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E4A64);
+/* 24 changed / 1 inserted / -1 instruction (72 against 73).  Landed so far:
+ * "s32 col" (an s8 local lets combine fold the sign-extension into the *4 as
+ * sll 0x18 / sra 0x16 where the target has lb + sll 2) and a
+ * "Unk80026448* menu" pointer local, which is what puts &D_800F92E2 in a
+ * sixth callee-saved register and grows the frame from 0x28 towards the
+ * target-s 0x40.  Measured: baseline 29 rows/-3, col->s32 alone 28/-4,
+ * menu pointer alone 28/0, both 24/-1.  Still one instruction short and the
+ * frame is 0x30 against 0x40, so a local this body does not declare is
+ * missing; the two "move s3,a1" / "move s2,v0" copies in the target-s loop
+ * preheader say x and count are copied into callee-saved registers there
+ * rather than materialised into them, which is the same missing-local
+ * signal. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800E4A64);
+#else
+void func_800E4A64(void) {
+    Unk80166F78* row;
+    Unk80026448* menu;
+    s16 i;
+    s32 x;
+    s32 count;
+    s32 col;
+
+    menu = &D_800F92E2;
+    col = D_800F92E2.unkF;
+    row = D_80166F78[D_80158CFC];
+    func_80026B5C(9);
+    x = col * 4;
+    count = 3;
+    if (x != 0) {
+        count = 4;
+    }
+    for (i = 0; i < count; i++) {
+        func_80026F44(8, x + (i * 0x10 + 6),
+                      func_80015248(9, row[menu->unk2 + i].unk0, 8), 7);
+    }
+    func_80026A34(0, 1, 0x3E, 0);
+    func_800D9BF4(0x13);
+}
+#endif
 
 static void func_800E4B88(void) {
     s32 i;
