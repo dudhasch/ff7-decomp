@@ -824,7 +824,28 @@ done:
 }
 
 s32 func_800A5EB0(s32, s16*);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A5EB0);
+
+// Decode one string into the D_800F3A80 arena and register where it landed.
+// Returns the D_800F4280 slot it was filed under.
+s32 func_800A5EB0(s32 arg0, s16* arg1) {
+    u8 buf[0x100];
+    s32 len;
+    s32 idx;
+    s32 i;
+
+    len = func_800A5E0C(buf, (u8*)arg0, (u16*)arg1);
+    if (D_800F4300 + len > 0x800) {
+        D_800F4300 = 0;
+    }
+    idx = D_800F4304++;
+    D_800F4280[idx] = D_800F4300;
+    D_800F4304 &= 0x3F;
+    for (i = 0; i < len; i++) {
+        D_800F3A80[D_800F4300 + i] = buf[i];
+    }
+    D_800F4300 += len;
+    return idx;
+}
 
 s8* func_800A5F90(s32 arg0) { return &D_800F3A80[D_800F4280[arg0]]; }
 

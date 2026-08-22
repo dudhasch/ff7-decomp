@@ -4602,6 +4602,21 @@ a near-miss, in rough order of frequency:
   further down the `.c`: gcc 2.6.3 accepts the redeclaration silently, so a
   file-local `extern` next to an already-matching function will quietly
   decide which behaviour that function gets.
+* **`x = g++` emits a copy insn; `x = g; g = x + 1;` does not.** The two are
+  the same program and gcc 2.6.3 compiles them differently, because
+  `expand_increment` for a post-increment computes the old value into its own
+  temp, stores `temp + 1`, and returns *the temp* -- so the enclosing
+  assignment then emits a real `(set (reg x) (reg temp))`. Written as two
+  statements the load's destination *is* `x` and there is no copy at all.
+  `local_alloc` will not coalesce that copy away when the two pseudos are of
+  different classes: the temp dies in the entry block and is block-local, `x`
+  is live to the return and is a global allocno, and `block_alloc` only
+  combines quantities it owns. So the copy survives to the object and costs
+  one instruction plus the register renaming behind it. The tell is exact --
+  a `move` out of the register a global was just loaded into, with the *copy's*
+  destination being the long-lived register and the load's destination dying
+  immediately. `func_800A5EB0` in `src/battle/battle.c` needs
+  `idx = D_800F4304++;`, and no spelling of the two-statement form reaches it.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

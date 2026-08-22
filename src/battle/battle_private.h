@@ -346,7 +346,9 @@ extern u8 D_8009D898[]; // source record, 0x440 stride
 extern s32 D_800F3A1C;     // write index into D_800F3A20
 extern s16 D_800F3A20[16]; // ring buffer, see func_800A56B0
 extern s8 D_800F3A80[];
-extern u16 D_800F4280[];
+extern u16 D_800F4280[]; // ring of D_800F3A80 offsets, one per queued string
+extern s32 D_800F4300;   // write cursor into D_800F3A80
+extern s32 D_800F4304;   // write index into D_800F4280, wrapped at 0x40
 typedef struct {
     u8 unk0;
     s8 unk1;
