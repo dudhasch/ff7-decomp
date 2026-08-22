@@ -4486,6 +4486,23 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  * that sum's `srl` before its `andi` where this body does the mask first --
  * neither spelling above reaches it. And the second loop's index arithmetic
  * lands in different registers, which is downstream of the same choice.
+
+ * 46 -> 37 on a dead conditional at the bottom of the parts loop:
+ * `if (!models && !models) { }`. `models` is a pointer that is provably
+ * non-null there and the test is pure, so jump_optimize and flow delete all
+ * of it -- the length is unchanged at -1 -- and what survives is the basic
+ * block it ends, which is a scheduling boundary inside the unrolled copy.
+ * decomp-permuter's `perm_ins_block`, re-measured with variant_eval; its own
+ * score moved 1055 -> 580 for it, which on this function means nothing on its
+ * own (see the note below).
+ *
+ * Also measured on the way and all exactly 46: `words = ((buf[0] & 3) != 0) +
+ * (buf[0] >> 2)` (the target shifts first and we mask first, and neither
+ * operand order nor splitting the statement reaches it -- the split is 66),
+ * the `s`/`d` copy pointers in either declaration or assignment order, and
+ * both together. Walking `models` in the third loop rather than indexing it
+ * is 48 and turns -1 into +1, so the spilled pointer the target reloads at
+ * 0x38(sp) is not simply `models` advanced.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
@@ -4585,6 +4602,8 @@ u8* LoadLocalFieldModelAndInitAll(
                 parts[(rec->partIndex + j) * 8 + 7] = src[7];
                 parts[(rec->partIndex + j) * 8 + 6] = src[6] + fixup;
                 src += 8;
+                if (!models && !models) {
+                }
             }
             anims = (s32*)(entry->modelData + entry->animationOffset);
             n = rec->animCount;
