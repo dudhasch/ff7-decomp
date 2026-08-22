@@ -365,5 +365,17 @@ extern s32 D_8010B494;
 extern u8 D_8010D9B8[];
 extern s32 D_80116274;
 extern Unk800E5768* D_800E5768;
+extern Unk800E5768* D_800E5764;
+extern u8 D_800E582C[];
+extern s32 D_800E5A2C;
+extern u8* D_800E5A30;
+extern WorldChunkHeader* D_80109D5C;
+extern WorldTriangle* D_80109D60;
+extern s32 D_8010B4A0;
+extern s8 D_801159E8[];
+extern u8 D_80115A14[];
+extern s16 D_80116288;
+extern s16 D_8011628C;
+extern s16 D_800832A0;
 
 #endif
