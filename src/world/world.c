@@ -2423,7 +2423,16 @@ void func_800B64D8(s32 arg0) {
     SystemAkaoExecute();
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B650C);
+void func_800B650C(void) {
+    *D_8009A000 = 0xF1;
+    SystemAkaoExecute();
+    *D_8009A000 = 0xE4;
+    *(u32*)((u8*)D_8009A000 + 4) = 0;
+    SystemAkaoExecute();
+    *D_8009A000 = 0xBC;
+    *(u32*)((u8*)D_8009A000 + 4) = 0;
+    SystemAkaoExecute();
+}
 
 void func_800B6570(s32 arg0) {
     *D_8009A000 = 0xC0;
