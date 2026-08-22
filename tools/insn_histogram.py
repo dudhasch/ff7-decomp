@@ -45,8 +45,29 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ALIAS = {"move": "addu", "li": "ori", "b": "beq", "negu": "subu", "not": "nor",
-         "nop": "nop"}
+# objdump prints an alias where the `.s` spells the real mnemonic, and the
+# alias is ambiguous: `li` is `ori rD,$zero,K` for a constant that fits
+# unsigned and `addiu rD,$zero,-K` for one that does not, and `move` is
+# `addu rD,rS,$zero` or `or rD,rS,$zero` -- splat emits 264 of the first and 32
+# of the second in the field overlay alone. Folding by name credits every
+# negative `li` to `ori` and invents an `addiu` deficit of the same size, which
+# reads exactly like two constants materialised against a missing `addiu`.
+# `FieldMain` reported `ori +2 / addiu -1 / nop -1` on one such `addiu $a0,
+# $zero,-0x1`; decoded, it is `ori +1 / nop -1`, which is one known cluster.
+# Decode the encoding instead. The `.s` side needs no folding at all -- splat
+# emits none of these aliases.
+BY_OP = {0x09: "addiu", 0x0D: "ori", 0x0F: "lui"}
+BY_FUNCT = {0x21: "addu", 0x23: "subu", 0x25: "or", 0x27: "nor"}
+
+
+def unalias(mnem, word):
+    """objdump's alias -> the mnemonic splat writes, decided by the encoding."""
+    if mnem == "b":
+        return "beq"
+    if mnem not in ("li", "move", "negu", "not"):
+        return mnem
+    op = word >> 26
+    return BY_FUNCT.get(word & 0x3F, mnem) if op == 0 else BY_OP.get(op, mnem)
 SYMCFG = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*0x([0-9A-Fa-f]+)\s*;")
 AUTONAME = re.compile(r"^(?:D|jtbl|func)_([0-9A-Fa-f]{8})$")
 HIREF = re.compile(r"%hi\(\s*([A-Za-z_]\w*)\s*"
@@ -125,7 +146,7 @@ def ours_ops(obj, func, addr, names):
             continue
         mm = re.match(r"\s*([0-9a-f]+):\s+([0-9a-f]{8})\s+(\S+)", line)
         if mm:
-            ops.append(mm.group(3))
+            ops.append(unalias(mm.group(3), int(mm.group(2), 16)))
             word[int(mm.group(1), 16)] = int(mm.group(2), 16)
             continue
         rm = re.match(r"([0-9a-f]+):\s+(R_MIPS_\S+)\s+(\S+)", line.strip())
@@ -192,8 +213,8 @@ def main(argv):
         os.unlink(backup)
 
     tgt, thi = target_ops(src, func, addr, names)
-    co = collections.Counter(ALIAS.get(x, x) for x in ours)
-    ct = collections.Counter(ALIAS.get(x, x) for x in tgt)
+    co = collections.Counter(ours)
+    ct = collections.Counter(tgt)
     print("length ours %d, target %d  (%+d instructions)"
           % (len(ours), len(tgt), len(ours) - len(tgt)))
     table("opcodes (objdump aliases folded to the .s spelling)", co, ct, limit)
