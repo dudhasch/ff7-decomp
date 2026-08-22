@@ -1044,7 +1044,45 @@ s32 func_800D35D8(u8* arg0, s32* arg1, s32 arg2) {
     return bits;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3658);
+// Read one variable-length signed coefficient out of the bitstream: a
+// 3-bit magnitude class, then that many value bits, recentred and scaled.
+// Falls out of the switch with no return on the impossible n > 7.
+//
+// `case 1 ... case 6` has to be spelled out rather than written `default`:
+// three case ranges make `balance_case_nodes` build the tree whose root test
+// is the target's `slti v0,s0,7`, where a default gives a linear compare
+// chain and is 16 instructions short. And case 0's constant is `0xFFFF`, not
+// `0xFFFF0000` -- combine reassociates `(0xFFFF << arg2) << 16` into the
+// target's `lui 0xffff` / `sllv`, while the pre-shifted constant makes the
+// `(s16)` cast provably zero and gcc folds the whole arm into `return 0`.
+s32 func_800D3658(u8* arg0, s32* arg1, s32 arg2) {
+    s32 n;
+    s32 v;
+
+    if (func_800D35D8(arg0, arg1, 1) == 0) {
+        return 0;
+    }
+    n = func_800D35D8(arg0, arg1, 3) & 7;
+    switch (n) {
+    case 0:
+        return (s16)(0xFFFF << arg2);
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+        v = func_800D35D8(arg0, arg1, n);
+        if (v >= 0) {
+            v += 1 << (n - 1);
+        } else {
+            v -= 1 << (n - 1);
+        }
+        return (s16)(v << arg2);
+    case 7:
+        return (s16)(func_800D35D8(arg0, arg1, 0xC - arg2) << arg2);
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D376C);
 
