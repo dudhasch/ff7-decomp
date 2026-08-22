@@ -2510,6 +2510,26 @@ a near-miss, in rough order of frequency:
   already diagnosed the tail as "a load in the wrong place" and had gone
   looking at the *types* of the two locals instead. When a diff is denser than
   the target, check what the qualifiers survive.
+* **sched2 will not reorder two `volatile` MEMs against each other, so a
+  member-wise `(volatile T*)` cast is the way to pin a store order that no
+  source order reaches.** A run of constant stores to one hoisted base is a
+  scheduling tie: `expand` emits them in source order and sched2 then issues
+  whichever is ready, so a target that stores `0(s3)` before `4(s3)` while
+  every spelling of the source emits `4(s3)` first reads as a residue with no
+  lever. `*(volatile u16*)&g_FieldStateData.fadeType = 1;` is the lever, and
+  it costs nothing: same instructions, same length, and the address is still
+  hoisted because only the MEM is volatile. Worth 7 rows in `FieldMain` in
+  `src/field/field.c`, on a cluster whose park note recorded all 24
+  permutations of the six stores as measured and the dimension as exhausted —
+  which it was, in the dimension it varied.
+
+  Two things about the spelling. It has to be **member-wise**: the
+  whole-object form `((volatile FieldState*)&obj)->fadeType` makes the base
+  volatile too, so cse cannot fold the address and the hoisted register goes
+  — +7 instructions on that same function. And a qualifier belongs to an
+  *object*, not to a statement: casting the first two stores, the first three
+  and all six measure identically, so write all of them and say in the
+  comment that the fade block is what a vblank handler reads.
 * **A struct member read through a `(volatile T*)` cast gets the global-volatile
   treatment without touching the header.** `((volatile FieldState*)g_FieldState)
   ->fadeAdjust` loads `lhu` and leaves the `sll`/`sra` as separate insns, where
@@ -3975,6 +3995,19 @@ a near-miss, in rough order of frequency:
   order. The cheap habit: before spending a budget on a parked function,
   re-measure two or three of the note's own rejected entries. If they still
   agree, the note is live; if any has moved, re-run the whole list.
+
+  **And a rejection measured twice, at two different times, agreeing with
+  itself is not evidence either.** `FieldMain`'s note recorded un-naming `ev`
+  — dropping the pointer local and writing the address at all seventeen use
+  sites — as 81 rows in one session and 73 in the next, and concluded from
+  the pair that the local was right. Both numbers were taken against a body
+  whose fade block was not yet `volatile`; against the body that is, the same
+  change is **8 rows and closes the cluster**, an 11-row win the note had
+  written off twice. Two agreeing measurements only agree about the bodies
+  they were taken on, and those two differed in nothing relevant to the
+  lever. So the re-measurement that matters is the one taken **after** the
+  session's own first landed change, not the one taken before it: re-run the
+  rejected list every time the body moves, not once per session.
 * **Read the allocno arithmetic *forwards*: it does not only tell you when to
   stop, it tells you what the fix has to deliver.** This file already records
   the priority formulae as a stopping criterion -- work out which term you can

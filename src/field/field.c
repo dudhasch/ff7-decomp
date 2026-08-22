@@ -309,6 +309,91 @@ extern s16 D_80071E3C;
  * and a red `make build`. This alone was 8 of the 84 rows this note used to
  * quote. Nothing else in the overlay names D_800A0000.
  *
+ * =====================================================================
+ * **27 rows / 4 insertions -> 8 / 1, at the exact 786.** Two changes, and the
+ * second of them is a spelling this note had measured twice and rejected
+ * twice -- at 81 rows and then at 73 -- because both measurements were taken
+ * against a program the first change had not been applied to. Read that as
+ * the standing rule rather than as a fact about `ev`: **a rejected spelling
+ * is only rejected against the body it was measured on**, and the two
+ * numbers agreeing with each other is not evidence, because they were taken
+ * against two bodies that differed only in ways unrelated to the lever.
+ *
+ *   - **the fade block is written through `(volatile T*)` casts** (cluster 2,
+ *     7 rows). The note below calls that dimension exhausted after all 24
+ *     source orders of the six stores, every one of which emits `sh v0,4(s3)`
+ *     before `sh s2,0(s3)`, and concludes it is sched2's tie-break between
+ *     two ready stores. It is -- and sched2 may not reorder two *volatile*
+ *     MEMs against each other, which is a knob the source has and the store
+ *     order does not. `*(volatile u16*)&g_FieldStateData.fadeType = 1;` and
+ *     friends is **27 -> 20**, and casting the pre-loop `fadeType = 0` store
+ *     the same way is **20 -> 19**. Two things about the spelling are
+ *     load-bearing: it has to be the *member-wise* cast, since
+ *     `((volatile FieldState*)&g_FieldStateData)->fadeType` makes the whole
+ *     base volatile, costs the hoisted `s3` and is **+7 instructions**; and
+ *     only the first two stores need it (1, 2, 3 and all 6 casts all measure
+ *     20, so all six is kept -- one qualifier per object, not per store).
+ *     The same cast applied to the `(D_800965EC == 1 || == 3)` guard's fade
+ *     accesses is 20, i.e. a row worse, so it stops at the two blocks that
+ *     write the fade state unconditionally.
+ *   - **`ev` is not a variable** (cluster 1, 11 rows, and it closes the
+ *     cluster outright). Dropping the local and writing
+ *     `((volatile u8*)&g_FieldStateData.fadeType - 0x4B)` at all seventeen
+ *     use sites is **19 -> 8**: gcc then makes the address an ordinary loop
+ *     invariant, `move_movables` hoists it into the preheader as
+ *     `addiu s1,s3,-0x4b` derived from the fade base's own hoist, and the
+ *     five `beq` offsets, the `v0`/`v1` swap in the pre-loop block and the
+ *     `li s4,0xd` / fade-base ordering all go with it. This is CLAUDE.md's
+ *     un-naming lever (`FieldModelBsxTdbModify`, `AddBackgroundToRender`'s
+ *     wrap tests) and it reads as a style regression: seventeen copies of a
+ *     nine-token expression where a `volatile u8* ev` would do. The target
+ *     says otherwise, and the whole of the "no in-loop position for `ev`
+ *     satisfies both requirements" analysis below is answered by there being
+ *     no assignment at all.
+ *
+ * Everything the earlier sweeps had rejected was re-measured against the
+ * 19-row body before `ev` was un-named, and the spread is worth keeping
+ * because it shows how far a stale rejection can be off: `ev` at the loop
+ * top 87 at +7, after the `== 1 || == 3` block 65 at +1, after the
+ * `!= 5 && != 0xD` block 65 at +1, after the ClearImage guard 13, before
+ * `func_800128B8()` 20, the two pre-loop statements swapped 20 -- and
+ * un-named **8**. The one the note had called the shape "that would let cse
+ * hoist it as a movable derived from the `&D_8009AC40` movable, which is
+ * what the target's preheader shows" was right about the mechanism and wrong
+ * about the number, by 65 rows.
+ *
+ * Also measured against the 19-row body and rejected: the fade block reached
+ * through `D_8009AC40` rather than through `g_FieldStateData` is *exactly
+ * inert* when every fade access moves together (27 at the time) and **+7
+ * instructions** for any mixture of the two symbols, so the target's
+ * relocation naming that address is a `.s` fact and not a source one; the
+ * first `if`'s six statements written through `ev` the way the `*ev == 1`
+ * and `g_FieldNextModule == 5` arms write theirs -- the sibling-asymmetry
+ * reading, and the most plausible-looking hypothesis of the session -- is
+ * +4 instructions and 93 rows, its read alone 28, its two stores alone +5.
+ *
+ * The residue is **8 rows / 1 insertion at the exact 786**, and it is
+ * clusters 3 and 4 below and nothing else. Re-swept at this base:
+ *   - cluster 3 (the rain fill loop, 4 rows): `i`/`fill` swapped 12, `fill`
+ *     hoisted above the if/else 55 at -1, `i` hoisted 49 at -1, the arms
+ *     inverted 14, the `do`/`while` as a `for` 12, `fill` as a giv
+ *     (`(&D_8009A057)[i - 0xF]`) 42 at +1, `i = 0xF` duplicated into both
+ *     arms inert, an empty `do { } while (0); ` after the if/else inert.
+ *     Two inert results on constructs that end a basic block say the residue
+ *     is reorg's, not sched2's: reorg copies the join's `li v1,0xf` into the
+ *     `j`'s delay slot and redirects past it, where the target leaves the
+ *     slot a `nop`.
+ *   - cluster 4 (the `*ev == 1` arm, 4 rows): the `preloadId` read moved
+ *     after the 0x63 store inert, moved between the store and the `+1` read
+ *     inert, `preloadId` dropped and `D_80071A5C` read inline at the compare
+ *     inert, the 0x63 store non-volatile 34 at -1, the `+1` read
+ *     non-volatile 34 at -1, the `+1` read before the 0x63 store 34 at -1,
+ *     the compare before the `g_CurrentFieldIndex` store 15, a `u16` local
+ *     for the saved index 35 at -1, a barrier between the store and the read
+ *     34 at +5, `preloadId` read through a `volatile s16*` 32 at +2.
+ *   - `width_sweep.py` over all six scalar locals, 30 variants: **flat**.
+ *     Nothing ties 8 and the best alternatives are 15.
+ *
  * The residue is **33 rows / 6 insertions**, measured with that object
  * deleted. Measured with it still in place it reads 40/6, and the extra seven
  * are the `.rodata` offsets the object itself causes: it is 8 bytes that the
@@ -737,7 +822,6 @@ MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
 
 void FieldMain(void) {
     RECT clip = {0, 0, 480, 472};
-    volatile u8* ev;
     s8* fill;
     s32 fillVal;
     s32 i;
@@ -791,8 +875,7 @@ void FieldMain(void) {
     D_8011409C[0].dtd = 1;
     D_8011409C[1].dtd = 1;
     func_800128B8();
-    g_FieldStateData.fadeType = 0;
-    ev = (volatile u8*)&g_FieldStateData.fadeType - 0x4B;
+    *(volatile u16*)&g_FieldStateData.fadeType = 0;
     if (D_800965EC != 1 && D_800965EC != 2 && D_800965EC != 3 &&
         D_800965EC != 5 && D_800965EC != 0xD) {
         ClearImage(&clip, 0, 0, 0);
@@ -827,7 +910,7 @@ void FieldMain(void) {
                 D_8007EBC8 = 0;
                 D_8009C6D8 = 0;
                 D_8007173C = 0;
-                *ev = 0;
+                *((volatile u8*)&g_FieldStateData.fadeType - 0x4B) = 0;
             }
         }
         while (D_80095DD4 != 0) {
@@ -835,12 +918,12 @@ void FieldMain(void) {
         while (DrawSync(1) != 0) {
         }
         if (D_800965EC != 0xD) {
-            g_FieldStateData.fadeType = 1;
-            g_FieldStateData.fadeSpeed = 0x10;
-            g_FieldStateData.fadeAdjust = 0x100;
-            g_FieldStateData.fadeRed = 0;
-            g_FieldStateData.fadeGreen = 0;
-            g_FieldStateData.fadeBlue = 0;
+            *(volatile u16*)&g_FieldStateData.fadeType = 1;
+            *(volatile s16*)&g_FieldStateData.fadeSpeed = 0x10;
+            *(volatile s16*)&g_FieldStateData.fadeAdjust = 0x100;
+            *(volatile s16*)&g_FieldStateData.fadeRed = 0;
+            *(volatile s16*)&g_FieldStateData.fadeGreen = 0;
+            *(volatile s16*)&g_FieldStateData.fadeBlue = 0;
         }
         if (D_800965EC == 0 || D_800965EC == 1 || D_800965EC == 3 ||
             D_800965EC == 6 || D_800965EC == 8 || D_800965EC == 7 ||
@@ -900,13 +983,19 @@ void FieldMain(void) {
         PutDispEnv(&g_FieldDispEnv[(s16)D_80075DEC]);
         PutDrawEnv(&g_FieldDrawEnv[(s16)D_80075DEC]);
         D_800965EC = 1;
-        if (*ev == 0xA || *ev == 0x1A || *ev == 5) {
+        if (*((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 0xA ||
+            *((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 0x1A ||
+            *((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 5) {
             break;
         }
-        if (*ev == 1) {
+        if (*((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 1) {
             preloadId = D_80071A5C;
-            *(volatile u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
-            fieldId = *(volatile u16*)(ev + 1);
+            *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType - 0x4B) +
+                             0x63) = (u16)g_CurrentFieldIndex;
+            fieldId =
+                *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType -
+                                  0x4B) +
+                                 1);
             g_CurrentFieldIndex = fieldId;
             if (fieldId != preloadId) {
                 StopFieldMapPreload();
@@ -914,18 +1003,26 @@ void FieldMain(void) {
             if ((u32)((u16)g_CurrentFieldIndex - 1) < 0x40) {
                 g_FieldNextModule = 3;
                 func_800129D0();
-                *(volatile u16*)(ev + 0x4B) = 3;
+                *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType -
+                                  0x4B) +
+                                 0x4B) = 3;
                 D_80071A58 = 3;
-                *(volatile u16*)(ev + 0x4D) = 0;
+                *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType -
+                                  0x4B) +
+                                 0x4D) = 0;
                 D_8007E768 = 0;
                 D_80095DD4 = 1;
                 break;
             }
         }
-        if (*ev == 0xC) {
-            *(volatile u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
-            exitId = *(volatile u16*)(ev + 1);
-            exitKind = ev[0xF1];
+        if (*((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 0xC) {
+            *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType - 0x4B) +
+                             0x63) = (u16)g_CurrentFieldIndex;
+            exitId =
+                *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType -
+                                  0x4B) +
+                                 1);
+            exitKind = ((volatile u8*)&g_FieldStateData.fadeType - 0x4B)[0xF1];
             g_CurrentFieldIndex = exitId;
             switch (exitKind) {
             case 0:
@@ -952,14 +1049,17 @@ void FieldMain(void) {
             }
             break;
         }
-        if (*ev == 2 || *ev == 0xD) {
+        if (*((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 2 ||
+            *((volatile u8*)&g_FieldStateData.fadeType - 0x4B) == 0xD) {
             break;
         }
         if (g_FieldNextModule == 5) {
             func_800129D0();
-            *(volatile u16*)(ev + 0x4B) = 0xD;
+            *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType - 0x4B) +
+                             0x4B) = 0xD;
             D_80071A58 = 0xD;
-            *(volatile u16*)(ev + 0x4D) = 0;
+            *(volatile u16*)(((volatile u8*)&g_FieldStateData.fadeType - 0x4B) +
+                             0x4D) = 0;
             D_8007E768 = 0;
             D_80095DD4 = 1;
             break;
