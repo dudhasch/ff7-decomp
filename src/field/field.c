@@ -1306,10 +1306,33 @@ extern s16 D_801144D0;
  * DR_MODE whenever a run asks for a different texture page. `pairs` collects
  * the two per-sprite parameter bytes the animation code later edits in place.
  *
- * 26 changed / 11 inserted, down from 174/23. Eleven levers got it there and
- * several of them contradict what this note used to say, so read the rejected
- * list at the bottom as history, not as evidence. Levers 8-10 in particular
- * deleted three levers that were each real when they were found.
+ * **40 changed / 10 inserted, at 397 instructions against the target's 395,
+ * and that is deliberate.** The body here is two `nop`s long and scores two
+ * rows worse than the 45-row body it replaces, and it is still the better
+ * one, because the *alignment-free* comparison collapsed from seven mismatch
+ * categories to one:
+ *
+ *     old body (45 rows, 395):  sw +3  sh -3  lw +3  lh -2  lhu -1
+ *                               move -2  nop +2
+ *     this body (50 rows, 397): nop +2
+ *
+ * Frame size, every stack slot offset, every access width, every `%hi`
+ * materialisation and every opcode count now agree with the target. What is
+ * left is one scheduling artefact, at two identical sites -- see lever 14.
+ * Read `tools/insn_histogram.py`, not the row count, when judging a change to
+ * this function: the row count is dominated by whichever cluster happens to
+ * be misaligned and it pointed the wrong way for three sessions.
+ *
+ * **Do not unpark this at 397.** The two extra instructions would shift every
+ * symbol after it in the overlay. The body is here as documentation and as
+ * permuter input; it costs the build nothing while it is pinned.
+ *
+ * Levers 1-7 below are unchanged and still hold. Lever 8 is **withdrawn** --
+ * it was a pair of frame hacks that existed only to buy a frame size that
+ * levers 12-13 now buy for free, and while they were in place they forced the
+ * three memory-resident values into the wrong stack slots, which is what made
+ * the note's "not reachable" verdict on those slots look true. Levers 12-14
+ * are new.
  *
  * 1. The four run walks are `for (;;)` loops left by `goto`, not backward
  *    gotos. This note previously concluded the opposite, and it had the
@@ -1388,40 +1411,134 @@ extern s16 D_801144D0;
  * iteration. Layer 1 must keep its literals: hoisting a `white` there as well
  * costs 51 rows.
  *
- * 8. `u8 unusedLocals[0x10];` plus a never-dereferenced `&sprite34Count`.
- *    This is the *restored* lever, and the story of why it was deleted and put
- *    back is the most useful thing in this note. Declared locals are allocated
- *    during expand and reload's spills after them, so a declared local always
- *    sits below the spills; taking a scalar's address moves it into the
- *    declared pool, but not at its declaration point -- `put_var_into_stack`
- *    runs when the ADDR_EXPR is expanded, which is after every aggregate has
- *    already taken a slot. So the pad lands at 0x18 and `sprite34Count` at
- *    0x28, which is where the target has it, with the other two slots 0x18
- *    high. The frame is 0x78, exact, and the pad pays for it.
+ * 8. **Withdrawn.** `u8 unusedLocals[0x10];` plus a never-dereferenced
+ *    `&sprite34Count`. The pair bought the target's 0x78 frame -- declared
+ *    locals are allocated during expand and reload's spills after them, so a
+ *    declared local always sits below the spills, and taking a scalar's
+ *    address moves it into the declared pool -- and the note that stood here
+ *    concluded, from a full eleven-cell grid, that "no combination reaches
+ *    the target's offsets at the right length", and that the 0x10 the target
+ *    reserves above its three slots "is not expressible in C".
  *
- *    Deleting both levers puts the three slots at 0x18 / 0x20 / 0x28 -- the
- *    target's own offsets, in the target's own order -- and that is what made
- *    the fit look like a discovery. It is not: the frame is then 0x10 short,
- *    and the body is two instructions long. The full grid, on an otherwise
- *    identical body: pad and address-taking 43 changed / 4 inserted at exactly
- *    395 instructions; the pad alone 57/10 at 397; the address-taking alone
- *    66/4 at 395; neither 68/10 at 397; a 0x18 pad with the address-taking
- *    66/4 at 395. The address-taking is what holds the length, and the pad is
- *    what holds the frame, and no combination reaches the target's offsets at
- *    the right length.
+ *    Both claims were true of the grid and false of the function. The grid
+ *    swept the two frame hacks against each other while holding the *guard*
+ *    (lever 13) and `spriteCount`'s *width* (lever 12) at values that were
+ *    themselves wrong, and the guard turns out to add exactly the missing
+ *    0x10 of frame by itself. With levers 12-13 in, deleting both hacks gives
+ *    frame 0x78 with the three memory-resident values at 0x18 / 0x20 / 0x28
+ *    -- the target's offsets, in the target's order -- and the fourteen rows
+ *    of "not reachable" stack offset go away. This is the second time a fully
+ *    swept dimension on this function turned out to have been swept with
+ *    something else held wrong.
  *
- *    The 0x10 the target reserves above its three slots is not expressible in
- *    C, and that is worth stating rather than re-deriving. Nothing is
- *    allocated above reload's spills, so a dead local cannot go there; an
- *    aggregate always lands below them; and declaring the other two values
- *    addressable so that all three sit in the declared pool in the target's
- *    order -- `modes` at 0x18, `spriteCount` at 0x20, `sprite34Count` at 0x28,
- *    the pad above them -- is a catastrophe, because the target's `modes` and
- *    `spriteCount` are reload spills and forcing them to memory adds a load
- *    and a store at every use: 144/21 with the pad, 144/21 without, 125/22
- *    with only `modes` and `sprite34Count`, 103/6 with only `spriteCount` and
- *    `sprite34Count`. Roughly fourteen of the 43 remaining rows are the two
- *    high slots, and they are the price of a correct length.
+ *    The grid itself, re-measured on the old base before the withdrawal, so
+ *    that the history is not lost: with the pad and the address-take,
+ *    `s32 spriteCount` 45, `s16` 47, `u16` 47; with the address-take alone,
+ *    68 / 70 / 70; with the pad alone, 65 / 67 / 67, all at 397; with
+ *    neither, 78 / 78 / 78, all at 397. Every cell of it is a local minimum
+ *    of the wrong function.
+ *
+ *    Two facts from the old grid do survive, and they bound where a future
+ *    frame hack can go. Declared-pool slots are packed at the type's own
+ *    alignment while reload's spill slots are rounded to 8: address-taking
+ *    `tpages`, `spriteCount` and `sprite34Count` in that order puts them at
+ *    0x18 / 0x1C / 0x1E, not 0x18 / 0x20 / 0x28, so the target's 8-byte
+ *    spacing is itself proof that all three are reload spills. And an
+ *    aggregate declared in an inner block *is* allocated where the block is
+ *    reached, after any scalar whose address was taken earlier -- but since
+ *    reload's spills come after every declared local, there is still no way
+ *    to put dead frame *above* a spill slot. Padding the declared pool to
+ *    force 0x18 / 0x20 / 0x28 by hand (two `s32` fillers between the three
+ *    address-taken values, a trailing pad in an inner block, five pad sizes)
+ *    reproduces the offsets exactly and measures 144 rows at every pad size,
+ *    because an address-taken pointer is a MEM at every use and gcc reloads
+ *    it more often than the target does. Address-taking `tpages` alone --
+ *    the one combination that gets all three offsets right with a single
+ *    hack, since a 4-byte declared slot at 0x18 leaves the two spills at
+ *    0x20 and 0x28 -- is 102, and adding `&sprite34Count` after it 121,
+ *    before it 122.
+ *
+ * 12. `spriteCount` is `u16`, not `s32`. It is a spilled pseudo, and reload
+ *    spills in the pseudo's own mode, so the width of the *declaration*
+ *    decides whether the counter's three stores and three loads come out
+ *    `sh`/`lhu` or `sw`/`lw`. That is the whole of the old body's
+ *    `sw +3 / sh -3 / lw +3` cluster, which read as an allocation problem
+ *    and was a declaration. `s16` is byte-identical here; `u16` is what the
+ *    target's `lhu` at the layer-2 and layer-3 entries says it is.
+ *    `tools/width_sweep.py` had swept this dimension and reported `s32` as
+ *    the winner by two rows -- true, and true only while lever 8's pad was
+ *    holding the counter in a slot at the wrong offset.
+ *
+ * 13. Layers 3 and 4 store `run[1]` *before* reading `run[2]`:
+ *
+ *        run[1] = sprite34Count;
+ *        count = run[2];
+ *        if (count != 0) {
+ *
+ *    Two things come out of the swap. The target's guard is
+ *    `lh v0,4(s4) / lhu t0,0x28(sp) / move s3,v0 / beqz v0 / sh t0,2(s4)` --
+ *    an `lh` into a scratch register, a copy into the counter, and the test
+ *    on the scratch -- where the other order narrows the load to `lhu`
+ *    straight into the counter and pays a `nop`. That is CLAUDE.md's "a value
+ *    the target copies with `move` out of a register it just loaded" idiom,
+ *    worth `lh +2 / move +2 / nop -2` across the two sites. The second thing
+ *    is what nobody was looking for: the swap also **adds 0x10 to the
+ *    frame**, which is exactly what lever 8's pad was there to supply.
+ *    Testing `run[2]` rather than `count` in the guard is inert -- the two
+ *    spellings give byte-identical objects -- so write the readable one.
+ *
+ *    The old note recorded this dimension as closed, with
+ *    `run[1] = sprite34Count; count = run[2]; if (count != 0)` measured at
+ *    65/4 against 43/4. That number was taken with lever 12 wrong. On the
+ *    old base the six guard spellings measure: re-reading `run[2]` in the
+ *    test with the old statement order 79 (at 401), the swap with the
+ *    re-read 67, the swap with the plain test 67, `count` assigned inside
+ *    the arm 82, `run[1]` moved inside the arm 80 and 80, against 45 for the
+ *    old spelling -- so on that base every one of them looks like a
+ *    regression, and on the corrected base two of them are the answer.
+ *    Re-run a "closed" dimension after any change to a declaration.
+ *
+ * 14. **What is left**: two `nop`s, one each in the layer-3 and layer-4 tile
+ *    loops, in the load-delay slot of
+ *
+ *        lbu   $v0, 0x5($v0)     ; D_8007EBD4->v
+ *        addiu $a0, $s3, -0x1    ; --count, which the target issues here
+ *        sb    $v0, -0x1($s0)    ; sprt->v0
+ *
+ *    Everything else in those blocks is instruction-for-instruction right;
+ *    the two schedules differ by a single swap. sched2 ranks by the longest
+ *    dependence path to the end of the block, and the spilled
+ *    `sprite34Count++` is a three-insn `lhu`/`addiu`/`sh` chain whose load
+ *    latency outranks the four-insn `addiu`/`move`/`sll`/`bnez` decrement
+ *    chain, so ours issues the counter first and the target issues the
+ *    decrement first. Nothing in the source reaches it, which is the
+ *    signature of a `perm_ins_block` / `perm_temp_for_expr` residue: the
+ *    permuter is the tool for it, and with the histogram this clean the
+ *    scratch's base score should be low enough for `--stop-on-zero` to be
+ *    reachable.
+ *
+ *    Measured against it and rejected, all on this body:
+ *      - every position of `sprite34Count++` among the layer-3/4 loop's six
+ *        tail statements: before `pairs[0]` 50, current 50, after `pairs[1]`
+ *        50, after `D_8007EBD4++` 50, after `sprt++` 48 *at 399*, after
+ *        `pairs += 2` 48 *at 399*. The two 48s buy two rows with two more
+ *        `nop`s each -- the same trap as the withdrawn lever 11.
+ *      - every position of `spriteCount++` in the layer-1/2 loops: ahead of
+ *        the tile bump 56, between the two bumps 53, current 50, after
+ *        `pairs += 2` 49 -- all at 397, so none of them recovers a `nop`.
+ *      - all five non-identity permutations of `D_8007EBD4++`, `sprt++` and
+ *        `pairs += 2`: **exactly 50, every one.** sched2 reorders the three
+ *        bumps regardless of source order, so that block is inert and is not
+ *        worth another sweep.
+ *      - `do { } while (0);` barriers in the layer-3/4 body: after
+ *        `pairs[0]` 44 rows *at 403*, after `sprite34Count++` 46 *at 399*,
+ *        after the clut store 48 *at 399*, after `sprt->v0` 54, after
+ *        `pairs[1]` 58, after `sprt->h` 59. The 44 is the most expensive
+ *        false positive this function has to offer -- eight `nop`s for six
+ *        rows. Removing layer 4's existing barrier is 55, so that one stays.
+ *      - store order in the layer-3/4 body: `v0` before `u0` 58, `w`/`h`
+ *        before `u0`/`v0` 61, `w`/`h` between `v0` and `clut` 63, `u0`/`v0`
+ *        first 82, `x0`/`y0` last 84. The order here is the target's.
  *
  * 9-11, all three withdrawn. A body built on the deleted-lever base reached
  *    26 changed / 11 inserted, against 43/4 here, and every one of those rows
@@ -1459,27 +1576,13 @@ extern s16 D_801144D0;
  *    46/4, between the packet bump and `pairs += 2` 43/4 (the current
  *    spelling), after `pairs += 2` 43/5.
  *
- * What is left is three clusters, and they are worth naming separately
- * because two of them are the same cluster twice:
- *
- *   - fourteen rows of stack offset, `0x30`/`0x38` against the target's
- *     `0x18`/`0x20`. Not reachable -- see lever 8.
- *   - twenty-two rows in two identical copies, one per layer, of the loop
- *     guard:
- *
- *         want: lh   v0,4(s4) / lhu t0,0x28(sp) / move s3,v0 / beqz v0
- *         got:  lhu  v0,0x28(sp) / lhu s3,4(s4) / nop / beqz s3
- *
- *     The target loads `run[2]` *signed* into a scratch register, copies it
- *     to the counter and tests the scratch; ours narrows the load to `lhu`
- *     straight into the counter and pays a `nop`. That is CLAUDE.md's
- *     "a value the target copies with `move` out of a register it just
- *     loaded" idiom, and every spelling it prescribes has now been measured
- *     above without producing it. Whatever separates the two loads in the
- *     original is not the position of the assignment.
- *   - the layer-1/2 counter read-modify-write landing before `addiu s7,s7,0xe`
- *     where the target has it after. Every source position of the increment
- *     has been swept, twice, on two different bases.
+ * **Everything from here down was written against the pre-lever-12 body and
+ * is history, not evidence.** It described three residual clusters -- the
+ * fourteen rows of stack offset "not reachable", the twenty-two rows of loop
+ * guard, and the layer-1/2 counter read-modify-write. The first two are gone
+ * (levers 12-13); the third went with them. Only lever 14 is left. The
+ * numbers below are still useful as *relative* evidence within each
+ * paragraph, and one of them -- the arm-inversion sweep -- is still live.
  *
  * Read off the target's own layer-3 body rather than off the diff, the tail is
  *
@@ -1591,7 +1694,10 @@ extern s16 D_801144D0;
  * 47-variant cross-product over `count`/`spriteCount`/`sprite34Count`/`white`
  * then closes the dimension: 45 is the floor, `count` must stay `s16` (every
  * `s32 count` variant is **-4 instructions** and 110 rows or worse), and
- * `sprite34Count` and `white` are free at any width.
+ * `sprite34Count` and `white` are free at any width. (45 was the floor *of
+ * that base only*; lever 12 reverses the `spriteCount` half of it. The
+ * `count` half stands -- `s16` is still right, for the `sll a0,a0,0x10` in
+ * the target's loop test.)
  *
  * The frame-pad and address-take pair was re-swept afterwards, because
  * changing a counter's width is exactly the sort of thing that makes a
@@ -1601,10 +1707,22 @@ extern s16 D_801144D0;
  * against 45 for the pairing already here. So CLAUDE.md's note that the two
  * lock each other still holds at the new width.
  *
+ * -- and that conclusion is the one lever 8 above withdraws. The sweep was
+ * honest and the dimension was genuinely exhausted; it was exhausted with
+ * the guard held wrong, and the guard is what supplies the frame the pad was
+ * buying. Two exhaustive sweeps of the same two knobs, a session apart, both
+ * concluding "the pair is load-bearing", and both wrong for the same reason:
+ * when a swept dimension will not move, suspect the thing you are holding
+ * fixed, not the sweep.
+ *
  * What is left reads as three spills: `sw +3 / lw +3` against `sh -3`, plus
  * `nop +2`, `lh -2`, `addu -2`, `lhu -1`. The target keeps in halfwords what
  * this body spills as words, and no width reaches it -- which points at
- * *which* values are in memory rather than how wide they are.
+ * *which* values are in memory rather than how wide they are. (It was the
+ * width after all: `spriteCount` is a spilled pseudo and reload spills in
+ * the pseudo's mode. The reason no width reached it *here* is that the pad
+ * had put the counter in the declared pool's shadow at 0x38, where its
+ * offset was wrong whatever its width. See lever 12.)
  *
  *   - `D_801144C8 = spriteCount` deferred to the layer-4 entry: it does flip
  *     the allocation on its own (147/22, before the loop change was found) but
@@ -1633,12 +1751,9 @@ void FieldBackgroundInitPackets(
     s16* run;
     s16 count;
     u8 white;
-    s32 spriteCount;
+    u16 spriteCount;
     u16 sprite34Count;
-    u16* addrOfSprite34Count;
-    u8 unusedLocals[0x10];
 
-    addrOfSprite34Count = &sprite34Count;
     spriteCount = 0;
     sprite34Count = 0;
     D_8011448C = 0;
@@ -1741,8 +1856,8 @@ layer3:
             tpages++;
             modes++;
         } else {
-            count = run[2];
             run[1] = sprite34Count;
+            count = run[2];
             if (count != 0) {
                 do {
                     SetSprt(sprt);
@@ -1785,8 +1900,8 @@ layer4:
             tpages++;
             modes++;
         } else {
-            count = run[2];
             run[1] = sprite34Count;
+            count = run[2];
             if (count != 0) {
                 do {
                     SetSprt(sprt);
