@@ -259,7 +259,32 @@ static void func_800DDC34(s32 arg0, s16 arg1) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDCE8);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDE90);
+void func_800D93E4(s32);
+void func_800DDCE8(void);
+
+void func_800DDE90(s32 arg0) {
+    s16 i;
+
+    if (D_80062D99 != 0) {
+        func_800DDCE8();
+    }
+    if ((D_800F514D != 0) && (D_8009CBDC[D_800F38A0] == 0xFF)) {
+        for (i = 1; i < 0x20; i++) {
+            if (D_800F514C[i] != 0) {
+                func_800D9F5C(i);
+            }
+        }
+    }
+    D_800F5628 = 0;
+    for (i = 0; i < 0x20; i++) {
+        if ((i == 0) || ((D_800F514C[i] != 0) && !(D_80062D78 & 0x80))) {
+            if (D_800F514C[i] != 0) {
+                func_800DDC34(arg0, i);
+            }
+        }
+    }
+    func_800D93E4(arg0);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDFEC);
 
