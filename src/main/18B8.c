@@ -484,7 +484,15 @@ void func_80014934(void) {
     func_80015C3C(0x801B0000, D_8009C738, KERNEL_INIT);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014980);
+/* A TIM: flags at +4, CLUT length at +8, then the CLUT's RECT at +0xC and its
+ * data at +0x14, followed by the pixel block laid out the same way. */
+void func_80014980(u8* tim) {
+    if (*(s32*)(tim + 4) & 8) {
+        LoadImage((RECT*)(tim + 0xC), (u_long*)(tim + 0x14));
+        tim += (*(u32*)(tim + 8) >> 2) * 4;
+    }
+    LoadImage((RECT*)(tim + 0xC), (u_long*)(tim + 0x14));
+}
 
 void func_800149E0(void) { DrawSync(0); }
 
