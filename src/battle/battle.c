@@ -2008,9 +2008,92 @@ void func_800ADBBC(void) {
         func_800AD804(BATTLE_ApplySadnessReduction(var_v1 >> 0xD), temp_s0)));
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800ADC70);
+/* PARKED: 10 changed / 0 inserted at the exact length -- an identical
+ * instruction stream on a rotated global-allocno set, shared with its clone
+ * func_800ADD2C below.
+ *
+ *   want: lw a0,%lo(g_BattleState+0x60)(at) / lui a1,%hi(g_CurrentAction)
+ *         mult a0,v0 / sra a0,v1,5 / sw a0,0x214(a1)
+ *   got:  lw v1,...                         / lui a0,%hi(g_CurrentAction)
+ *         mult v1,v0 / sra a1,v1,5 / sw a1,0x214(a0)
+ *
+ * global_alloc ranks by floor_log2(n_refs)*n_refs/live_length*size and hands
+ * out the lowest free register, and cc1's -dl dump gives every term:
+ *
+ *   n   (the product)          6 refs /  7 insns -> 6.86
+ *   act (the pre-if load)      4 refs /  6 insns -> 5.33
+ *   act (the join reload)      4 refs / 10 insns -> 3.20
+ *   r   (the shifted result)   3 refs /  4 insns -> 3.00
+ *   hp                         3 refs /  6 insns -> 2.00
+ *
+ * The target's assignment needs `hp` allocated before the join reload, i.e.
+ * a priority above 3.20, which means 4 references (2*4/6*4 = 5.33) or a live
+ * length of 3 -- hp has exactly two defs and one use and its range spans the
+ * join by construction, so neither term is reachable.  The other way round
+ * is to drop the join reload to 3 references, but the target reads unk48,
+ * unkAC and unk214 through it and reloads it precisely because the join has
+ * two predecessors, so that is not reachable either.
+ *
+ * Measured and flat at 10 rows, exact length: `hp * unk48` against
+ * `unk48 * hp`; `n` merged into `hp`; the multiplier hoisted into its own
+ * statement; a named `act` local for the pre-if reads; and a do-while(0)
+ * reference multiplier around either arm, both arms, or the multiply (which
+ * is the only construct that adds a reference without emitting an
+ * instruction -- it does not move this one).  Worse: the two shifts written
+ * as two stores (11), as an if/else on `unkAC == 0` (16, +4 instructions).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800ADC70);
+#else
+void func_800ADC70(void) {
+    s32 hp;
+    s32 n;
+    s32 r;
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800ADD2C);
+    if (g_CurrentAction->unk6C & 1) {
+        hp = g_BattleState.combatant[g_CurrentAction->unk208].curHP;
+    } else {
+        hp = g_BattleState.combatant[g_CurrentAction->unk208].unk28;
+    }
+    n = hp * g_CurrentAction->unk48;
+    if (n < 0) {
+        n += 0x1F;
+    }
+    r = n >> 5;
+    if (g_CurrentAction->unkAC != 0) {
+        r = n >> 6;
+    }
+    g_CurrentAction->unk214 = r;
+}
+#endif
+
+/* PARKED: identical to func_800ADC70 above -- same 10 rows, same cause, same
+ * measured-and-flat list.  See the note there.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800ADD2C);
+#else
+void func_800ADD2C(void) {
+    s32 hp;
+    s32 n;
+    s32 r;
+
+    if (g_CurrentAction->unk6C & 1) {
+        hp = g_BattleState.combatant[g_CurrentAction->unk208].maxHP;
+    } else {
+        hp = g_BattleState.combatant[g_CurrentAction->unk208].unk2A;
+    }
+    n = hp * g_CurrentAction->unk48;
+    if (n < 0) {
+        n += 0x1F;
+    }
+    r = n >> 5;
+    if (g_CurrentAction->unkAC != 0) {
+        r = n >> 6;
+    }
+    g_CurrentAction->unk214 = r;
+}
+#endif
 
 s32 func_800AD804(s32, s32);
 s32 func_800AD73C(s32);

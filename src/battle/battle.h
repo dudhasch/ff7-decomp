@@ -96,8 +96,8 @@ typedef struct {
     /* 0x22 */ s16 unk22;
     /* 0x24 */ u16 unk24; // enemy id, copied from the formation entry
     /* 0x26 */ s16 unk26;
-    /* 0x28 */ s16 unk28;
-    /* 0x2A */ s16 unk2A;
+    /* 0x28 */ u16 unk28; // read `lhu` in func_800ADC70
+    /* 0x2A */ u16 unk2A; // read `lhu` in func_800ADD2C
     /* 0x2C */ u32 curHP;
     /* 0x30 */ u32 maxHP;
     /* 0x34 */ u32 unk34[4];
