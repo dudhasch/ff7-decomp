@@ -267,6 +267,15 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80036298);
 // NOTE: please do not decompile any of these functions.
 // Please refer to psyz/decomp for decompiled PSX SDK functions:
 // https://github.com/Xeeynamo/psyz/tree/main/decomp
+//
+// SUPERSEDED 2026-08-22, by the repository owner: this note is read as a
+// pointer to prior art, not as a prohibition, and the SDK region below is
+// open work. The one condition is provenance -- every body here must be
+// written from the target `.s` against the prototypes in `include/psxsdk/`,
+// never copied from psyz. The functions landed so far were written that way.
+// Leaving the original note in place because it records where an independent
+// decompilation of the same library lives, which is worth knowing when a
+// function will not fall.
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _SpuInit);
 
