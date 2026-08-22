@@ -9,7 +9,7 @@
 typedef struct EndingTask {
     /* 0x00 */ struct EndingTask* prev;
     /* 0x04 */ struct EndingTask* next;
-    /* 0x08 */ void (*fn)(struct EndingTask*);
+    /* 0x08 */ void (*fn)();
     /* 0x0C */ u16 id;
     /* 0x0E */ u8 state;
     /* 0x0F */ u8 prio;
@@ -70,6 +70,12 @@ typedef struct EndingActor {
 
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
+extern u8 D_800A6532[];
+extern u8 D_800A6534[];
+extern u8 D_800A6538[];
+extern u8 D_800A653C[];
+extern u8 D_800A653D[];
+extern u8 D_800A653E[];
 extern u8 D_800A6588[];
 extern u8 D_800A658A[];
 extern u8 D_800A658C[];
@@ -88,6 +94,9 @@ extern u32 D_800AF3C0;
 extern u32 D_800AF3C4;
 extern EndingTask D_800AF3C8;
 extern EndingTask* D_800AF3CC;
+extern EndingTask D_800A762C;
+extern u8 D_800A763C[];
+extern u8 D_800A765C[];
 extern EndingTask D_800AF3D8;
 extern u32 D_800AF3EC;
 extern u32 D_800AF3F0;
@@ -150,13 +159,73 @@ void func_800A09DC(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0AB8);
+s32 func_800A0AB8(void) {
+    s32 i;
+    s32 off;
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0BA8);
+    /* The increments are the other way round from func_800A09DC's identical
+     * walk: with no `if` in the body there is no branch delay slot for reorg
+     * to steal `i++` into, so the written order is the emitted order and
+     * `i++, off += 0x88` puts the counter at the loop top instead. */
+    for (i = 0, off = 0; i < 0x20; off += 0x88, i++) {
+        *(s16*)(D_800A652C + off) = 0;
+        *(s16*)(D_800A6532 + off) = 0;
+        *(s16*)(D_800A6534 + off) = 0;
+        *(s32*)(D_800A6538 + off) = 0;
+        *(s16*)(D_800A6588 + off) = 0;
+        *(s16*)(D_800A658A + off) = 0;
+        *(s16*)(D_800A658C + off) = 0;
+        *(u8*)(D_800A653C + off) = 0;
+        *(u8*)(D_800A653D + off) = 0;
+        *(u8*)(D_800A653E + off) = 0;
+    }
+    func_800A3178(&D_800A762C, 4, 0x80, func_800A09DC);
+    return 1;
+}
+
+s32 func_800A0BA8(void) {
+    s32 slot = *D_800A6528++;
+    s32 file = *D_800A6528++;
+    s32 off = slot * 0x88;
+
+    *(s16*)(D_800A652C + off) = 7;
+    *(s16*)(D_800A6532 + off) = 0;
+    *(s16*)(D_800A6534 + off) = 0;
+    *(u_long**)(D_800A6538 + off) = func_80034D18((u_long*)0x800D0000, file);
+    *(s16*)(D_800A6588 + off) = 0;
+    *(s16*)(D_800A658A + off) = 0;
+    *(s16*)(D_800A658C + off) = 0;
+    *(u8*)(D_800A653C + off) = 0;
+    *(u8*)(D_800A653D + off) = 0;
+    *(u8*)(D_800A653E + off) = 0;
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0CAC);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0E68);
+void func_800A0E68(void) {
+    s32 i;
+    s32 off;
+    EndingActor* actor;
+
+    AddPrim(D_800AF3E8, (void*)(D_800AF408 * 16 + (s32)D_800A763C));
+    AddPrim(D_800AF3E8, (void*)(D_800AF408 * 16 + (s32)D_800A765C));
+    for (i = 0; i < 0x20; i++) {
+        off = i * 0x88;
+        if (*(u16*)(D_800A652C + off) & 1) {
+            s32 v = *(u16*)(D_800A652C + off + 0x5E) - 1;
+
+            actor = (EndingActor*)(off + (s32)D_800A652C);
+            actor->model.trans.vy = v;
+            if (*(s16*)(D_800A652C + off + 0x5E) == -0x10) {
+                *(s16*)(D_800A652C + off) = 0;
+            }
+            func_800A34C4(actor);
+            func_800A343C(actor);
+            D_800AF3FC = func_800A358C(D_800AF3E8, 0, D_800AF3FC, actor);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0F90);
 
@@ -529,7 +598,32 @@ void func_800A310C(void) {
     D_800AF3D8.next = NULL;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A3178);
+void func_800A3178(EndingTask* task, u16 id, u8 prio, void (*fn)()) {
+    EndingTask* n = &D_800AF3C8;
+
+    do {
+        if (n->prio < prio) {
+            task->id = id;
+            task->fn = fn;
+            task->state = 2;
+            goto insert;
+        }
+        n = n->next;
+    } while (n->next != NULL);
+    if (n->prio >= prio) {
+        return;
+    }
+    task->id = id;
+    task->fn = fn;
+    task->state = 2;
+insert:
+    task->prio = prio;
+    task->next = n;
+    task->prev = n->prev;
+    n->prev = task;
+    n = task->prev;
+    n->next = task;
+}
 
 void func_800A3210(void) {
     EndingTask* t;
