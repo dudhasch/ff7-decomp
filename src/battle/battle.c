@@ -2284,7 +2284,17 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0910);
 
 int func_800B0B8C(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0B94);
+void func_800B0B94(s32 arg0) {
+    s32 arg1;
+
+    if (arg0 < 4) {
+        arg1 = (g_BattleState.combatant[arg0].unk14 >> 2) +
+               g_BattleState.combatant[arg0].unkF;
+    } else {
+        arg1 = g_BattleState.combatant[arg0].unkF;
+    }
+    func_800B1218(arg0, arg1, 4);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0C14);
 

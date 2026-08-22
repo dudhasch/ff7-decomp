@@ -80,13 +80,13 @@ typedef struct {
     /* 0x0C */ s8 unkC;
     /* 0x0D */ u8 unkD;
     /* 0x0E */ s8 unkE;
-    /* 0x0F */ s8 unkF;
+    /* 0x0F */ u8 unkF;  // read `lbu` in func_800B0B94
     /* 0x10 */ s8 unk10; // cached "Near Death" display flag; see func_800B10B4
                          // for the live check
     /* 0x11 */ u8 unk11;
     /* 0x12 */ s8 unk12;
     /* 0x13 */ s8 unk13;
-    /* 0x14 */ s8 unk14;
+    /* 0x14 */ u8 unk14; // read `lbu` + `srl` in func_800B0B94
     /* 0x15 */ s8 unk15;
     /* 0x16 */ s8 unk16;
     /* 0x17 */ u8 unk17;
