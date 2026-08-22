@@ -2475,7 +2475,35 @@ void func_800B6348(u32* hdr) {
 
 static void func_800B63E0(s32 arg0) { D_801159DC = arg0; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B63F0);
+void func_800B63F0(s32 arg0) {
+    s32 cmd;
+    s32 prev;
+    s32 off;
+    s32 val;
+    s16* akao;
+
+    if (D_801159DC != 0) {
+        akao = D_8009A000;
+        if (arg0 != 1) {
+            if (D_801159E0 == 1) {
+                cmd = 0x14;
+            } else {
+                cmd = 0x10;
+            }
+            *akao = cmd;
+        } else {
+            *akao = 0x18;
+        }
+        off = arg0 * 4;
+        val = *(s32*)((u8*)&D_801159BC + off);
+        *D_8009A008 = 4;
+        *D_8009A004 = val;
+        SystemAkaoExecute();
+    }
+    prev = D_801159E0;
+    D_801159E0 = arg0;
+    D_80116510 = prev;
+}
 
 void func_800B64A0(void) { func_800B63F0(D_801159E0); }
 
