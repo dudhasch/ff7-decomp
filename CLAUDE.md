@@ -2073,6 +2073,12 @@ a near-miss, in rough order of frequency:
   eighty-one rows had not. The widths are a small finite cross-product
   (`s16`/`u16`/`s32`/`u32` per local) and `variant_eval` scores the whole
   sweep in one run, so there is no reason to sample it.
+  `tools/width_sweep.py` does exactly that -- every alternative width for
+  every scalar local of one function, scored and sorted by length first --
+  and it is cheap enough to run before reading a single diff row.
+  `FieldCalcPointOnLine`'s 150 variants over 30 locals come back flat in
+  about a minute, which closes a whole dimension that
+  `perm_randomize_internal_type` would otherwise spend a search on.
 * **A park note's numbers are only true of the body they were measured on,
   and the body moves.** This file already says to re-check a note's
   *diagnosis*; the stronger version is that its **rejected-spellings list
@@ -3933,6 +3939,7 @@ resolve to the same address, and the overlay SHA-1s are the proof.
 | `tools/asm_widths.py` | Per-symbol access width from a target `.s` — what an m2c seed's byte offsets have to be cast to |
 | `tools/psx_jtbl_align.py` | Jump-table alignment fixup for units whose `.rodata` base is 4 mod 8 |
 | `tools/affected_overlays.py` | Changed files → the overlays CI has to rebuild |
+| `tools/width_sweep.py` | Every alternative width for every scalar local of one function, scored |
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
 | `tools/permuter_scratch.sh` | Build a permuter scratch and prove it is scoreable before searching |
 | `tools/unpark.py` | Make one `MASPSX_OVERRIDE`'d body the live one, for import or measurement |

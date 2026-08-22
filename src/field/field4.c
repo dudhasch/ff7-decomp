@@ -110,6 +110,10 @@ extern u8 D_800DF114;
  * four load-delay slots filled for them, which is the same trade
  * `FieldDebugRenderPage` makes at a larger scale.
  *
+ * The width dimension is closed: `tools/width_sweep.py` scores all 25
+ * alternatives for the five scalar locals and every one is 181 rows at +1,
+ * so nothing here is declared at the wrong width.
+ *
  * Loop 1's two cursors were re-tested against that reading, because the diff
  * shows the target with a single `move t4,t1` where this build emits two
  * copies of the same base -- and `c1[k * 4 + 4]` and `n1[7]` are the same

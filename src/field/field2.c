@@ -182,7 +182,13 @@ typedef struct {
  * `perm_randomize_internal_type`, and all three of those spaces are the ones
  * enumerated above. A run here would re-cover proven-flat ground, which is
  * the exact profile of the runs in this repo that returned nothing after
- * 100,000 candidates. */
+ * 100,000 candidates.
+ *
+ * The width dimension is now closed mechanically as well as by argument:
+ * `tools/width_sweep.py` scores all 150 alternatives for the 30 scalar
+ * locals and every one measures **exactly 60 rows at the exact length**.
+ * That is the same space `perm_randomize_internal_type` would search, and
+ * it is flat. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
