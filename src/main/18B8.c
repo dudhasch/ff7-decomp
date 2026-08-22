@@ -1075,7 +1075,49 @@ void func_8001C484(s32 arg0) {
     D_80062E94 = 0x14;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C498);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001C498);
+#else
+/* PARKED at 7 rows / +1 instruction. Reads controller port A's 32-byte buffer:
+ * byte 0 is the status (0xFF = nothing plugged in), byte 1 the pad type (0x41
+ * = digital), bytes 2-3 the button bits, active-low, hence the `nor`.
+ *
+ * The residue is two coupled placements and nothing else. The target keeps the
+ * result in $v0 with **two** separate `move v0,zero` sites -- one stolen into
+ * the first `beq`'s delay slot, one in its own block at the second failure --
+ * and issues `nor v0,v1,v0` in the delay slot of the `j` to a shared epilogue
+ * whose own delay slot holds the `andi v0,v0,0xffff`. Every body written here
+ * either collapses the two zero sites into one (and then loses 2 instructions)
+ * or puts the `andi` in the `j`'s delay slot and leaves the `nor` standing on
+ * its own (+1 instruction).
+ *
+ * Measured, all on the same load order (unk2 then unk3[0], which every
+ * spelling produces because fold puts the shift first):
+ *   three `return`s, `~((unk2 << 8) | unk3[0])`              7 rows, +1
+ *   three `return`s, `~(unk3[0] | (unk2 << 8))`              7 rows, +1
+ *   s32 return with an explicit (u16) cast on the value      7 rows, +1
+ *   u16 `buttons` local, nested ifs, single return           7 rows, -2
+ *   `hi` named local so the nor keeps source operand order   7 rows, +1
+ *   ... same, with nested ifs                                7 rows, -2
+ *   u16 `buttons`, two `goto out` with buttons = 0          10 rows
+ *   s32 `buttons`, two `goto out` with buttons = 0           9 rows
+ *   u16 `buttons`, `goto out`, named `hi`                   10 rows
+ * The named-local lever for the `nor`'s operand order is exactly inert, which
+ * says fold is not what decides it. The two shapes sit at +1 and -2, so this
+ * is the paired-lever shape: whatever produces the target's second zero site
+ * has to be crossed with whatever moves the `andi` to the epilogue, and
+ * neither alone reaches it. perm_ins_block on the second failure arm is the
+ * next thing to try. */
+u16 func_8001C498(void) {
+    if (D_800696AC.padABuffer == 0xFF) {
+        return 0;
+    }
+    if (D_800696AC.unk1 != 0x41) {
+        return 0;
+    }
+    return ~((D_800696AC.unk2 << 8) | D_800696AC.unk3[0]);
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C4E8);
 
