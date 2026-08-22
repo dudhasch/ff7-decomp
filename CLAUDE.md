@@ -533,6 +533,37 @@ a near-miss, in rough order of frequency:
   invariant hoisting and no strength reduction inside that loop, so check the
   inner loops still look right after the change; here the real loops are the
   inner `do`/`while`s and only the outer walks are gotos.
+
+  **Run the other way -- the *target* has the test twice and you have one --
+  no spelling of the loop reaches it, because the transformation has a
+  precondition on the test's contents.** `duplicate_loop_exit_test` starts
+  from `next_nonnote_insn (loop_start)` and gives up unless that insn is
+  already the exit `JUMP_INSN`, so it fires only on a loop whose guard needs
+  no set-up: everything the test computes must be live before
+  `NOTE_INSN_LOOP_BEG`. A guard that reloads two globals and subtracts, like
+  `FieldDebugRenderPage`'s `while (y < PageY[page] + PageH[page] - 8)`,
+  leaves those loads at the top of the loop and the pass never runs, in every
+  spelling -- `while`, `for(;;){break}`, `for(;;){goto after}` and a backward
+  `goto` measured 758, 758, 762 and 759 rows there. So a `j +N / beqz -N`
+  imbalance in `insn_histogram.py` is a statement about *what the guard
+  recomputes*, not about how the loop is written, and the loop-shape sweep
+  that seems to be indicated is a whole dimension of nothing.
+* **A byte offset assigned once and used across the whole function is a
+  global allocno; the target's caller-saved register says it was several
+  variables.** The `$at` addressing idiom above leaves the scaled offset in a
+  register at every access, so which register it gets is repeated on every
+  row of the diff -- `addu at,at,s1` against the target's `addu at,at,t7`,
+  ninety times. `$t7` is caller-saved, which `global_alloc` never hands to a
+  value that spans basic blocks, so the original had a *block-local* offset:
+  the same `page * 0x17A` written into a fresh local at each block head. One
+  variable assigned six times is still one pseudo and still global, so
+  re-assigning it more often does not help -- the locals have to be
+  different. Which of the assignments want their own is not derivable and not
+  uniform: all 32 subsets of `FieldDebugRenderPage`'s five re-assignments
+  were scored and they range over 753 to 802 rows and -4 to +3 instructions,
+  with the best at the exact length being a three-of-five split whose
+  neighbours in the table are 5 and 8 rows worse. Sweep the subset; it is one
+  batch and the reasoning does not narrow it.
 * **`f(x, cond ? 1 : 0)` folds to a shift; the target's branch means two
   calls.** `SetSemiTrans(p, (tile->flags & 0x80) ? 1 : 0)` compiles to
   `srl a1,a1,0x7` — one instruction, no branch. Where the target tests the bit
@@ -1417,6 +1448,16 @@ a near-miss, in rough order of frequency:
   to the emitted code. Worth 35 rows across two sites in
   `FieldDebugRenderString`; it does not apply when the two halves are separate
   statements assigning locals, which come out in source order.
+
+  The same swap fires on a sum where only *one* side carries a constant, and
+  there it is easier to miss because the arithmetic still reads correct.
+  `x + (w - 2)` is folded to `(x - 2) + w`: same value, but the constant has
+  moved to the other load's chain, so the two `lhu`s are emitted in the
+  opposite order and the `addu`'s operands swap with them. Read which of the
+  two globals the target loads *first* and put that one first with the
+  constant on it -- `(w - 2) + x`. Five sites and 17 rows in
+  `FieldDebugRenderPage`, at no change in length, which is what makes it look
+  like scheduling noise.
 * **A `u8` tested through a local and used through the pointer gives one load
   for the tests and a fresh load per use.** `c = *p; if (c < A) x = *p + 1;
   else if (c >= B) x = *p + 2; else x = *p + 3;` compiles to one `lbu` for both

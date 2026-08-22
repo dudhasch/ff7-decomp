@@ -2241,10 +2241,10 @@ void FieldDebugRender(u_long* ot) {
 
 extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
 
-/* **806 changed / 95 inserted, length 1337 against 1341 (-4 instructions)**,
- * down from 955 rows. Read the residue paragraph at the end before the
- * history: the exact 1341 this note used to report was two errors of fifteen
- * instructions each cancelling, and it hid both of them.
+/* **754 changed / 101 inserted, at the exact 1341**, down from 806 at -4
+ * instructions. Read this whole note before measuring: every sweep below was
+ * re-run against the current body, and the two that the previous note flagged
+ * as open are now closed by mechanism rather than by sampling.
  *
  * The durable half is the types, which the m2c seed could not give. Three
  * primitive arrays, all read straight off the field offsets rather than
@@ -2265,152 +2265,109 @@ extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
  *
  * They are declared `u8[]` in field_private.h because FieldDebugInitBuffers,
  * which matches, walks them as bytes; so the types go on at the use site as
- * casts rather than in the header. The seed also needed
- * FieldDebugRenderString's prototype hoisted -- m2c emits
- * `? FieldDebugRenderString(...)` for a callee defined later in the unit,
- * which is a parse error, and gcc 2.6.3 keeps generating code after it.
+ * casts rather than in the header.
  *
- * Earlier corrections, all program rather than codegen, each still standing:
+ * Corrections that landed in earlier sessions, all program rather than
+ * codegen, each still standing:
  *
  * 1. **m2c's offsets are in bytes and the page arrays are `s16[]`,** so every
  *    `*(g_FieldDebugPageY + off)` was double-scaled. The byte-offset form
  *    CLAUDE.md records for the sibling debug functions --
  *    `*(s16*)((u8*)SYM + off)` -- is what the target has, and its `$at` macro
  *    expansions are **389 of the function's 1341 instructions**. 53 sites.
- * 2. **The five index temporaries m2c emits are one variable.** Worth 28
- *    instructions. Both extremes were worse: recomputing `off` at each of the
- *    five blocks measured +27 *at the time*, and writing `page * 0x17A`
- *    inline at all 93 uses is -77, because the inline form is a scaled
- *    subscript and gcc then folds the symbol into the address register,
- *    deleting the `$at` expansions that are a third of the function. See (D)
- *    below -- the first of those two numbers has since reversed sign.
- * 3. `s32` for the row cursor rather than `s16`, worth 13.
- * 4. Six m2c packet-pointer temporaries: `temp_a0_2`, `temp_a0_7`,
+ * 2. `s32` for the row cursor rather than `s16`, worth 13 instructions.
+ * 3. Six m2c packet-pointer temporaries: `temp_a0_2`, `temp_a0_7`,
  *    `temp_a0_9` are exactly inert and were deleted; `var_v1`, `var_v1_2`,
- *    `var_v0_3` cost 10-11 instructions each and two of the three are kept,
- *    which is what the length agrees with. Only the three m2c named `var_`
- *    -- the ones it emitted because an `if`/`else` reaches the same packet
- *    from two arms -- cost anything, which is the "same packet reached two
- *    ways" idiom read as a *readout* of the arms.
- *
- * `pageIdx` is deliberate. The target keeps the raw `s16` parameter in `$s5`
- * and a separate sign-extended copy in `$s4`, passes the copy to the call
- * (`addu $a0, $s4, $zero`) and recomputes the sign extension from `$s5` for
- * each offset. Routing the call through an `s32` local reproduces the split.
- *
- * ----------------------------------------------------------------------
- * This session: 955 -> 806 rows on four changes. The first three are
- * corrections, not codegen choices.
- *
- * A. **`u8 unusedLocals[0x30]` is `[0x28]`.** The target's frame is 0x88 with
- *    s0-s5 and ra saved from 0x68; ours was 0x90 saving from 0x70, so every
- *    prologue and epilogue offset read 8 high and nothing else did. 955 ->
- *    **939**, length unchanged.
- *
- * B. **otSlot1/2/3/7/8 computed the wrong address.** `D_800E41C8` is
- *    `u_long[2][7]`, so `(g_FieldDebugRb * 0x1C) + pageWord + D_800E41C8` is
- *    pointer arithmetic on a `u_long(*)[7]` and scales the integer sum by 28
- *    a *second* time -- `sll 3 / subu / sll 2` after the sum, three
- *    instructions per site computing a byte the function never wants. The
- *    target's own form is `rb*28 + page*4 + base`, so the fix is the integer
- *    sum CLAUDE.md's `n + (s32)p` bullet prescribes:
- *    `(s32*)((g_FieldDebugRb * 0x1C) + pageWord + (s32)D_800E41C8)`.
- *    939 -> **913 rows and -15 instructions**. otSlot4/5/6 already used the
- *    correct `&(*D_800E41C8)[page + rb * 7]` spelling and were left.
- *
- * C. **The packets are addressed by byte offset, not by scaled subscript.**
- *    `((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]`
- *    computes `(rb*24 + rrect) * 24`; the target computes `rb*576` and
- *    `rrect*24` separately and adds. Written
+ *    `var_v0_3` cost 10-11 instructions each and two of the three are kept.
+ * 4. **`u8 unusedLocals[0x28]`**, not `[0x30]`: the target's frame is 0x88
+ *    with s0-s5 and ra saved from 0x68.
+ * 5. **otSlot1/2/3/7/8 are an integer sum**, `(s32*)((g_FieldDebugRb * 0x1C)
+ *    + pageWord + (s32)D_800E41C8)`; as pointer arithmetic on a
+ *    `u_long(*)[7]` the sum is scaled by 28 a second time. -15 instructions.
+ * 6. **The packets are addressed by byte offset, not by scaled subscript**:
  *    `*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 + g_FieldDebugRRect *
- *    0x18)` -- 36 LINE_F3 sites, and 9 TILE sites at 0xC0/0x10 -- gcc even
- *    picks the target's own decompositions, `(x<<3 + x)<<6` for 576 and
- *    `(x<<1 + x)<<3` for 24. 913 -> **780 rows**, and it takes **eleven of
- *    the fourteen excess load-delay `nop`s** with it, which is the largest
- *    single effect measured on this function. This is CLAUDE.md's
- *    scaled-subscript-versus-pre-scaled-byte-offset rule applied to a
- *    *packet* rather than to a page header.
- *
- * D. **`off = page * 0x17A;` is re-assigned at five more block heads.** The
- *    target expands `page * 0x17A` **six** times and this body had one. They
- *    are countable without reading a diff row: each expansion ends
- *    `sll <r>,<r>,6 / subu`, and the target's .s has exactly six such pairs,
- *    at 0x38754 (function top), 0x38850 (the `PageRow != 0` test), 0x38FC8
- *    (the `else` arm, after the headRow division), 0x39234 (the frame-line
- *    block after the if/else), 0x39534 (after the pkt5 addPrim) and 0x3983C
- *    (the TILE block). Adding the five is +25 instructions and costs 26 rows:
- *    780 at -29 -> **806 at -4**, with `subu` exact and `sll` within 3.
- *    Priced individually on the finished body they are +6, +7, +5, +5 and +4
- *    and they are exactly additive, so any subset is reachable -- three of
- *    them hit the exact 1341 at 924 rows on the pre-C body, and that is
- *    **not** the right answer, it is the same errors-cancelling trick this
- *    note used to report. All six are in the target, so all six are here.
+ *    0x18)`, 36 LINE_F3 sites and 9 TILE sites. -133 rows and eleven of the
+ *    fourteen excess load-delay `nop`s.
+ * 7. **`off = page * 0x17A;` is re-assigned at five more block heads**, which
+ *    is the target's six `sll <r>,<r>,6 / subu` pairs at 0x38754, 0x38850,
+ *    0x38FC8, 0x39234, 0x39534 and 0x3983C.
  *
  * ----------------------------------------------------------------------
- * Measured and rejected this session. Each sweep varied one dimension and
- * held the other three at the values above; re-run any of them after a change
- * to A-D, because every number in the paragraph above moved at least once.
+ * This session, 806 at -4 -> 754 at the exact length, on two changes:
  *
- *   - *`y`'s width*, the only local whose sweep still moves the length.
- *     `u8` is **792 rows at the exact 1341** and `u16` is 793 at -1, against
- *     806 at -4 for the `s32` that is here. **Both are wrong and neither was
- *     taken.** The target's own code says so: it loads PageY with `lhu`, adds
- *     2, copies to `$s2` and then emits `sll 16 / sra 16` at every use --
- *     a *sixteen*-bit sign extension, which no `u8` or `u16` local produces
- *     (`andi 0xff` / `andi 0xffff`). `s16`, which is what that pattern means,
- *     measures 808 at **+9**. So there is a lever coupled to `y` that has not
- *     been found, and taking the row count here would bury it. This is
- *     CLAUDE.md's `FieldEntityMovementUpdate` warning in its exact form: the
- *     sweep measures and does not check semantics, and `y` runs to the bottom
- *     of a 240-line screen.
+ * A. **The x1/x2 width sums are written `(w - 2) + x`, not `x + (w - 2)`.**
+ *    fold moves the constant onto the *first* operand of a flat sum, so
+ *    `*(s16*)((u8*)D_800E0748 + off) + (*(s16*)((u8*)D_800E074C + off) - 2)`
+ *    comes out as `(x - 2) + w` -- same value, but the two `lhu`s are
+ *    emitted the other way round and the `addu`'s operands swap. The target
+ *    loads D_800E074C first and subtracts from *it*. Five sites, **17 rows**,
+ *    length unchanged.
+ * B. **Three of the five `off` re-assignments want their own local.** The
+ *    target addresses every page-header field off `$t7`, a *caller-saved*
+ *    register, so its byte offset is a block-local quantity; one variable
+ *    assigned six times is a global allocno and takes `$s1`, which is one row
+ *    per `$at` expansion across ~90 sites. All 32 subsets of the five
+ *    re-assignments were measured: `off2`/`off3`/`off5` split out and #1, #4
+ *    and #6 sharing `off` is 758 at the exact length, against 789 for none of
+ *    them and 775 for all five (+3 instructions). The subset is not
+ *    guessable -- neighbouring subsets score 763 at -4 and 766 at +1 -- so
+ *    take the table, not the reasoning.
+ * C. `lastRowY` is `s32`, not `s16` (`lastRow * 0xA` fed into `(s16)` casts,
+ *    so no truncation is wanted). 758 -> 754, length unchanged.
+ *
+ * ----------------------------------------------------------------------
+ * Closed dimensions. Re-run any of them after a change to A-C.
+ *
+ *   - *`y`'s width crossed with the loop's shape*, which the previous note
+ *     flagged as the one open coupling ("there is a lever coupled to `y`
+ *     that has not been found"). All eight combinations were measured on the
+ *     current body: `s32` beats `s16` by 8 rows in every shape, and `while`,
+ *     `for(;;){break}`, `for(;;){goto after}` and a backward `goto` are 758,
+ *     758, 762 (-3) and 759 (-3). Nothing cancels; the coupling does not
+ *     exist. The target's `lhu` / `addiu 2` / `move $s2` / per-use `sll 16 /
+ *     sra 16` still reads exactly like an `s16` local, and an `s16` local
+ *     still costs **+13 instructions** here, so that pattern is coming from
+ *     something else in the function.
+ *   - *the full width sweep*, 165 variants over 33 scalar locals, re-run
+ *     after A and B. `lastRowY` is the only one that moves the count at the
+ *     exact length; everything else is 758 or worse.
  *   - *the PageY load spelling in the loop guard and in the `y` initialiser*,
- *     `(s16) * (u16*)(...)` in one, in the other and in both: **exactly
- *     inert** (806) in every combination, and inert on top of every `y`
- *     width. The target's shared `lhu` is not reachable by respelling the
- *     load.
- *   - *the row loop's shape*: `while (y < ...)` and
- *     `for (;;) { if (y >= ...) break; }` are **byte-identical**. The target
- *     evaluates its guard once in the preheader and again on the back edge
- *     (`beqz` out, fall through) where this body jumps into a single bottom
- *     test (`j`), which is the whole of the `j +3 / beqz -2` in the histogram
- *     -- and no spelling of the loop reaches it.
- *   - *statement order* of `rowText = ...` and `y = ...`, which the target
- *     emits the other way round: **exactly inert**, alone and crossed with
- *     every `y` width.
- *   - *the full width sweep*, 150 variants over 30 scalar locals, re-run
- *     after C and D. Apart from `y` nothing is at the exact length: the next
- *     best are `pageIdx u8` at +1 and `nextRect1 u8`/`s8` at -1, both worse
- *     in rows.
+ *     `(s16) * (u16*)(...)` in either or both: exactly inert.
+ *   - *statement order* of `rowText = ...` and `y = ...`: exactly inert.
  *
- * The residue, by `insn_histogram.py` (which now resolves relocation addends,
- * so its interior rows are trustworthy -- an earlier reading of this function
- * was not):
+ * The residue, by `insn_histogram.py`:
  *
- *     addu 297 306  -9      lui  214 206  +8
+ *     lui  214 206  +8      addu 298 306  -8
  *     lhu   54  49  +5      sra   13  17  -4
- *     j      9   6  +3      sll  205 208  -3
+ *     nop   34  31  +3      sll  205 208  -3
+ *     j      9   6  +3      and   30  32  -2
  *     lh    87  84  +3      beqz   3   5  -2
- *     lw    29  31  -2      and   30  32  -2
- *     nop   33  31  +2      or    15  16  -1
  *
  *     g_FieldDebugRb     0x800E1024  36 33 +3
  *     g_FieldDebugRRect  0x800E41BC  30 28 +2
  *     g_FieldDebugRLines 0x800E41C0  16 14 +2
  *
- * Three things to work from, in order of size. **One**: we materialise
- * `g_FieldDebugRb`, `RRect` and `RLines` two or three times too often, and
- * the shape of it is visible around the TILE block -- the target holds RRect
- * in `$t1` across the packet stores and the `+= 1` that follows them, where
- * this body reloads it after the stores. A store through
- * `*(LINE_F3*)(SYM + reg)` is `(plus (symbol) (reg))`, which
- * `memrefs_conflict_p` cannot disambiguate from a scalar global, so cse drops
- * every global at that point; CLAUDE.md's fix (read the globals into locals
- * *before* the store and use those after) is the thing to try, and it has not
- * been tried here. **Two**: `and -2 / or -1 / lw -2` is one more
- * read-modify-write of an ot slot than this body performs -- count the
- * addPrim expansions against the target before assuming it is scheduling.
- * **Three**: `j +3 / beqz -2` is the row loop's guard duplication above, for
- * which no lever is known.
+ * Three things to work from, in order of size. **One**: `lui +8` against
+ * `addu -8` is the same eight instructions counted twice -- we rebuild three
+ * globals' addresses where the target already has them in a register. It is
+ * *three* sites for `g_FieldDebugRb` out of 36, so this is not "cache the
+ * global", it is a specific handful of blocks; the shape is visible around
+ * the TILE block, where the target holds RRect in `$t1` across the packet
+ * stores and the `+= 1` that follows them and this body reloads it after the
+ * stores. A store through `*(LINE_F3*)(SYM + reg)` is `(plus (symbol) (reg))`,
+ * which `memrefs_conflict_p` cannot disambiguate from a scalar global, so cse
+ * drops every global at that point; CLAUDE.md's fix is to read the globals
+ * into locals *before* the store and use those after, and the subset of
+ * blocks that wants it has to be swept the way B's was. **Two**: `and -2 /
+ * or -1` is one more read-modify-write of an ot slot than this body performs
+ * -- count the addPrim expansions against the target before assuming it is
+ * scheduling. **Three**: `j +3 / beqz -2` is the row loop reaching a single
+ * bottom test through a `j` where the target has the exit test duplicated
+ * (once in the preheader, once on the back edge). That is
+ * `duplicate_loop_exit_test`, which in gcc 2.6.3 requires the first insn
+ * after `NOTE_INSN_LOOP_BEG` to be the exit jump; all four loop spellings
+ * above leave loads there instead, so the lever is in *what the guard
+ * recomputes*, not in how the loop is written.
  *
  * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
@@ -2420,6 +2377,9 @@ void FieldDebugRenderPage(s16 page) {
     s32 pageIdx;
     u8 unusedLocals[0x28];
     s32 off;
+    s32 off2;
+    s32 off3;
+    s32 off5;
     s16 row;
     s32 y;
     u8* rowText;
@@ -2434,7 +2394,7 @@ void FieldDebugRenderPage(s16 page) {
     s32 pktOff8;
     s32 pktOff2;
     s32 bufOff3;
-    s16 lastRowY;
+    s32 lastRowY;
     s32 bufOff4;
     s32 pktOff6;
     s32 bufOff1;
@@ -2486,45 +2446,45 @@ void FieldDebugRenderPage(s16 page) {
             y += 0xA;
         }
         if (*(s16*)((u8*)g_FieldDebugPageRow + off) != 0) {
-            off = page * 0x17A;
+            off2 = page * 0x17A;
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
+                .x0 = (s16)(*(s16*)((u8*)D_800E0748 + off2) + 2);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
                 .y0 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA) +
                       0xA);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                            (*(s16*)((u8*)D_800E074C + off) - 2));
+                .x1 = (s16)((*(s16*)((u8*)D_800E074C + off2) - 2) +
+                            *(s16*)((u8*)D_800E0748 + off2));
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
                 .y1 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA) +
                       0xA);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                            (*(s16*)((u8*)D_800E074C + off) - 2));
+                .x2 = (s16)((*(s16*)((u8*)D_800E074C + off2) - 2) +
+                            *(s16*)((u8*)D_800E0748 + off2));
             pageWord = page * 4;
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
                 .y2 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA));
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA));
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .r0 = (s8)(*(g_FieldDebugPageR + off) | 0x3F);
+                .r0 = (s8)(*(g_FieldDebugPageR + off2) | 0x3F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .g0 = (s8)((u8) * (g_FieldDebugPageG + off) >> 1);
+                .g0 = (s8)((u8) * (g_FieldDebugPageG + off2) >> 1);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .b0 = (u8) * (g_FieldDebugPageB + off);
+                .b0 = (u8) * (g_FieldDebugPageB + off2);
             bufOff1 = g_FieldDebugRb * 0x240;
             pktOff1 = g_FieldDebugRRect * 0x18;
             pkt1 = &D_800E3B28[bufOff1 + pktOff1];
@@ -2537,28 +2497,28 @@ void FieldDebugRenderPage(s16 page) {
                        ((s32)(bufOff1 + (pktOff1 + D_800E3B28)) & 0xFFFFFF);
             line2 = &(*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                                   nextRect1 * 0x18));
-            line2->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
+            line2->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off2) + 2);
             line2->y0 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA) +
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA) +
                       0xA);
-            line2->x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
+            line2->x1 = (s16)(*(s16*)((u8*)D_800E0748 + off2) + 2);
             line2->y1 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA));
-            line2->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                              (*(s16*)((u8*)D_800E074C + off) - 2));
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA));
+            line2->x2 = (s16)((*(s16*)((u8*)D_800E074C + off2) - 2) +
+                              *(s16*)((u8*)D_800E0748 + off2));
             g_FieldDebugRRect = nextRect1;
             line2->y2 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA));
-            line2->r0 = (s8)((*(g_FieldDebugPageR + off) * 4) | 0x7F);
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA));
+            line2->r0 = (s8)((*(g_FieldDebugPageR + off2) * 4) | 0x7F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .g0 = (s8)(*(g_FieldDebugPageG + off) | 0x3F);
+                .g0 = (s8)(*(g_FieldDebugPageG + off2) | 0x3F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .b0 = (s8)((*(g_FieldDebugPageB + off) * 2) | 0x3F);
+                .b0 = (s8)((*(g_FieldDebugPageB + off2) * 2) | 0x3F);
             bufOff2 = g_FieldDebugRb * 0x240;
             pktOff2 = g_FieldDebugRRect * 0x18;
             pkt2 = &D_800E3B28[bufOff2 + pktOff2];
@@ -2570,20 +2530,20 @@ void FieldDebugRenderPage(s16 page) {
                        ((s32)(bufOff2 + (pktOff2 + D_800E3B28)) & 0xFFFFFF);
             tilePkt1 = &(*(TILE*)(D_800E3FA8 + g_FieldDebugRb * 0xC0 +
                                   g_FieldDebugRLines * 0x10));
-            tilePkt1->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
+            tilePkt1->x0 = (s16)(*(s16*)((u8*)D_800E0748 + off2) + 2);
             g_FieldDebugRRect += 1;
             tilePkt1->y0 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                      ((*(s16*)((u8*)g_FieldDebugPageRow + off) - 1) * 0xA));
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off2) +
+                      ((*(s16*)((u8*)g_FieldDebugPageRow + off2) - 1) * 0xA));
             tilePkt1->h = 0xA;
-            tilePkt1->w = (s16)(*(s16*)((u8*)D_800E074C + off) - 4);
-            tilePkt1->r0 = (s8)((*(g_FieldDebugPageR + off) * 2) | 0x7F);
+            tilePkt1->w = (s16)(*(s16*)((u8*)D_800E074C + off2) - 4);
+            tilePkt1->r0 = (s8)((*(g_FieldDebugPageR + off2) * 2) | 0x7F);
             (*(TILE*)(D_800E3FA8 + g_FieldDebugRb * 0xC0 +
                       g_FieldDebugRLines * 0x10))
-                .g0 = (s8)((u8) * (g_FieldDebugPageG + off) >> 1);
+                .g0 = (s8)((u8) * (g_FieldDebugPageG + off2) >> 1);
             (*(TILE*)(D_800E3FA8 + g_FieldDebugRb * 0xC0 +
                       g_FieldDebugRLines * 0x10))
-                .b0 = (s8)(*(g_FieldDebugPageB + off) | 0x3F);
+                .b0 = (s8)(*(g_FieldDebugPageB + off2) | 0x3F);
             bufOff3 = g_FieldDebugRb * 0xC0;
             pktOff3 = g_FieldDebugRLines * 0x10;
             pkt3 = &D_800E3FA8[bufOff3 + pktOff3];
@@ -2595,46 +2555,46 @@ void FieldDebugRenderPage(s16 page) {
             *otSlot3 = (*otSlot3 & 0xFF000000) |
                        ((s32)(bufOff3 + (pktOff3 + D_800E3FA8)) & 0xFFFFFF);
         } else {
-            headRowId = *(s16*)((u8*)g_FieldDebugPageHeadRow + off);
+            headRowId = *(s16*)((u8*)g_FieldDebugPageHeadRow + off2);
             if (headRowId != 0) {
                 lastRow = headRowId - 1;
             } else {
                 lastRow =
-                    ((*(s16*)((u8*)g_FieldDebugPageH + off) + 2) / 10) - 1;
+                    ((*(s16*)((u8*)g_FieldDebugPageH + off2) + 2) / 10) - 1;
             }
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x0 = (s16)(*(s16*)((u8*)D_800E0748 + off) + 2);
-            off = page * 0x17A;
+                .x0 = (s16)(*(s16*)((u8*)D_800E0748 + off2) + 2);
+            off3 = page * 0x17A;
             lastRowY = lastRow * 0xA;
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
                 .y0 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + lastRowY + 0xA);
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off3) + lastRowY + 0xA);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x1 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                            (*(s16*)((u8*)D_800E074C + off) - 2));
+                .x1 = (s16)((*(s16*)((u8*)D_800E074C + off3) - 2) +
+                            *(s16*)((u8*)D_800E0748 + off3));
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
                 .y1 =
-                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + lastRowY + 0xA);
+                (s16)(*(s16*)((u8*)g_FieldDebugPageY + off3) + lastRowY + 0xA);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                            (*(s16*)((u8*)D_800E074C + off) - 2));
+                .x2 = (s16)((*(s16*)((u8*)D_800E074C + off3) - 2) +
+                            *(s16*)((u8*)D_800E0748 + off3));
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .y2 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) + lastRowY);
+                .y2 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off3) + lastRowY);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .r0 = (s8)(((u8) * (g_FieldDebugPageR + off) >> 1) | 0x3F);
+                .r0 = (s8)(((u8) * (g_FieldDebugPageR + off3) >> 1) | 0x3F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .g0 = (s8)((*(g_FieldDebugPageG + off) * 4) | 0x7F);
+                .g0 = (s8)((*(g_FieldDebugPageG + off3) * 4) | 0x7F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .b0 = (s8)(*(g_FieldDebugPageB + off) | 0x3F);
+                .b0 = (s8)(*(g_FieldDebugPageB + off3) | 0x3F);
             bufOff4 = g_FieldDebugRb * 0x240;
             pktOff4 = g_FieldDebugRRect * 0x18;
             pkt4 = &D_800E3B28[bufOff4 + pktOff4];
@@ -2697,34 +2657,34 @@ void FieldDebugRenderPage(s16 page) {
         *(s32*)pkt5 = (s32)((*(s32*)pkt5 & 0xFF000000) | (*otSlot5 & 0xFFFFFF));
         *otSlot5 = (*otSlot5 & 0xFF000000) |
                    ((s32)(bufOff5 + (pktOff5 + D_800E3B28)) & 0xFFFFFF);
-        off = page * 0x17A;
+        off5 = page * 0x17A;
         line3 = &(*(
             LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 + nextRect2 * 0x18));
-        line3->x0 = (u16) * (D_800E0748 + off);
-        line3->y0 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off) +
-                          *(s16*)((u8*)g_FieldDebugPageH + off));
-        line3->x1 = (u16) * (D_800E0748 + off);
-        line3->y1 = (u16) * (g_FieldDebugPageY + off);
-        line3->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off) +
-                          *(s16*)((u8*)D_800E074C + off));
+        line3->x0 = (u16) * (D_800E0748 + off5);
+        line3->y0 = (s16)(*(s16*)((u8*)g_FieldDebugPageY + off5) +
+                          *(s16*)((u8*)g_FieldDebugPageH + off5));
+        line3->x1 = (u16) * (D_800E0748 + off5);
+        line3->y1 = (u16) * (g_FieldDebugPageY + off5);
+        line3->x2 = (s16)(*(s16*)((u8*)D_800E0748 + off5) +
+                          *(s16*)((u8*)D_800E074C + off5));
         g_FieldDebugRRect = nextRect2;
-        line3->y2 = (u16) * (g_FieldDebugPageY + off);
+        line3->y2 = (u16) * (g_FieldDebugPageY + off5);
         if (page == (u8)g_FieldDebugCurPage) {
-            line3->r0 = (s8)((*(g_FieldDebugPageR + off) * 4) | 0x7F);
+            line3->r0 = (s8)((*(g_FieldDebugPageR + off5) * 4) | 0x7F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .g0 = (s8)((*(g_FieldDebugPageG + off) * 4) | 0x7F);
+                .g0 = (s8)((*(g_FieldDebugPageG + off5) * 4) | 0x7F);
             blueLine = &(*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                                      g_FieldDebugRRect * 0x18));
-            blueVal = (*(g_FieldDebugPageB + off) * 4) | 0x7F;
+            blueVal = (*(g_FieldDebugPageB + off5) * 4) | 0x7F;
         } else {
-            line3->r0 = (s8)((*(g_FieldDebugPageR + off) * 2) | 0x3F);
+            line3->r0 = (s8)((*(g_FieldDebugPageR + off5) * 2) | 0x3F);
             (*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                          g_FieldDebugRRect * 0x18))
-                .g0 = (s8)((*(g_FieldDebugPageG + off) * 2) | 0x3F);
+                .g0 = (s8)((*(g_FieldDebugPageG + off5) * 2) | 0x3F);
             blueLine = &(*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 +
                                      g_FieldDebugRRect * 0x18));
-            blueVal = (*(g_FieldDebugPageB + off) * 2) | 0x3F;
+            blueVal = (*(g_FieldDebugPageB + off5) * 2) | 0x3F;
         }
         blueLine->b0 = blueVal;
         bufOff6 = g_FieldDebugRb * 0x240;
