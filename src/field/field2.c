@@ -5569,6 +5569,63 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
  * `uv[v >> 24]`, which produce byte-identical address arithmetic to the four
  * `*(u16*)(... + (s32)uv)` casts at every site -- is 259 at the exact length,
  * and 284 combined with the `||` form. It does not touch (c).
+ *
+ * **247 -> 198 at the exact 727, by crossing (a) with (c) -- which the
+ * paragraph above says has to happen and which no earlier pass did.** Both
+ * halves read as regressions alone and that is the whole point: (a) is 272 at
+ * **731** and (c) is 268 at **723**, and together they are **235 at 727**.
+ * (b) is inert on top of either. Landed as:
+ *
+ *   - (a) `if (GetGraphType() == 1 || GetGraphType() == 2)` with the BIG arm
+ *     first, at all four textured loops -- the target's own block order.
+ *   - (c) the last UV read of each textured loop shifts `v` **in place**. The
+ *     target's `srl $v1,$v1,0x18` writes `v`'s own register, so `v >>= 24;`
+ *     as its own statement ahead of `p->u3` (and `v >>= 15;` ahead of `p->u2`
+ *     in the three-vertex loops, which have no u3).
+ *
+ * Two more, worth 235 -> 198 together and independent of each other:
+ *
+ *   - **The final UV address, base included, is assigned back to `v`.**
+ *     Shifting in place is only half of it: the target keeps the whole chain
+ *     in `v`'s register (`srl v1 / sll v1,v1,0x1 / addu v1,v1,a3`) so the
+ *     *previous* vertex's `lhu` issues in its shadow, where a fresh
+ *     destination serialises them. `v = (v >> 24) * 2 + (s32)uv;` then
+ *     `*(u16*)&p->u3 = *(u16*)v;` is **-28 rows**. Note the half-measure is
+ *     much worse than either end: keeping the chain in `v` but leaving the
+ *     base out of it (`v >>= 24; v <<= 1;` then `v + (s32)uv`) is 294 rows
+ *     and **-6 instructions**.
+ *   - **`uOff` is assigned before `vOff` at both divisions.** The target
+ *     emits `q * 4` ahead of `q * 32`, which is source order, and this body
+ *     had them the other way round. **-9 rows**, and *both* divisions have to
+ *     swap: reverting either one alone is 221 and 222.
+ *
+ * The two clusters that remain are a paired lever again, and this time both
+ * halves are closed by mechanism rather than by exhaustion. The histogram is
+ * `srl -4 / andi +4` plus `sra +1 / nop -1`:
+ *
+ *   - `andi +4` is `t & 0xC0` computed **three** times per loop where the
+ *     target computes it twice (once in each branch's delay slot). Hoisting
+ *     it to a local ahead of the `if` is the obvious fix and is **+12
+ *     instructions** -- the local is live across both `GetGraphType()` calls
+ *     and spills, which is the note's earlier +8 re-measured at this
+ *     baseline and worse, not better.
+ *   - `srl -4` is combine's `simplify_shift_const` folding
+ *     `((t >> 4) & 0x100) >> 4` to `srl 8 / andi 0x10` where the target keeps
+ *     `srl 4 / andi 0x100 / srl 4`. Four further spellings on top of the six
+ *     the note already lists are **exactly inert**: the two halves as
+ *     separate statements, `((t & 0x1000) >> 4) >> 4`, `/ 16`, and
+ *     `>> 2` twice. An empty `do { } while (0);` between the halves is inert
+ *     too, and that is a *mechanism*: `jump_optimize` deletes the unreferenced
+ *     exit label long before combine runs, so an empty barrier is a
+ *     scheduling boundary and never a combine one. Hoisting `t >> 4` to a
+ *     local ahead of the `if` -- which would put the def in another basic
+ *     block, where combine cannot link it -- is +20.
+ *   - `sra +1 / nop -1` is reorg: the target's `bgez v1` / `nop` has the
+ *     quotient in the *dividend's* own register, so copying the `sra` up into
+ *     the delay slot would clobber the value the fall-through still needs;
+ *     ours puts them in different registers and reorg takes the copy.
+ *     `q = texY; q = q / 4;` to force the coalesce is exactly inert (cse
+ *     folds the copy), so this is an allocation coin-flip, not a spelling.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
@@ -5608,11 +5665,11 @@ u8* FieldModelCreatePktsForPart(
     part->pkts = pkts;
 
     q = texY / 4;
-    vOff0 = q * 32;
     uOff0 = (texY - q * 4) * 64;
+    vOff0 = q * 32;
     q = texY / 8;
-    vOff1 = q * 32;
     uOff1 = (texY - q * 8) * 32;
+    vOff1 = q * 32;
 
     for (pass = 0; pass < 2; pass++) {
         out = pkts;
@@ -5635,18 +5692,19 @@ u8* FieldModelCreatePktsForPart(
             *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
             *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
             *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
-            *(u16*)&p->u3 = *(u16*)((v >> 24) * 2 + (s32)uv);
+            v = (v >> 24) * 2 + (s32)uv;
+            *(u16*)&p->u3 = *(u16*)v;
             f = *texIdx++;
             t = texInfo[f & 0xF];
             shift = (t & 0x3F) != 2;
             p->clut =
                 ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
-            if (GetGraphType() != 1 && GetGraphType() != 2) {
-                tp = ((t & 0xC0) * 2) | (f & 0x60);
-                tpBit = ((t >> 4) & 0x100) >> 4;
-            } else {
+            if (GetGraphType() == 1 || GetGraphType() == 2) {
                 tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
                 tpBit = (t >> 7) & 0x20;
+            } else {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
             }
             p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
             n = t & 0x3F;
@@ -5686,18 +5744,19 @@ u8* FieldModelCreatePktsForPart(
             v = poly[4];
             *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
             *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
-            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            v = ((v >> 15) & 0x1FE) + (s32)uv;
+            *(u16*)&p->u2 = *(u16*)v;
             f = *texIdx++;
             t = texInfo[f & 0xF];
             shift = (t & 0x3F) != 2;
             p->clut =
                 ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
-            if (GetGraphType() != 1 && GetGraphType() != 2) {
-                tp = ((t & 0xC0) * 2) | (f & 0x60);
-                tpBit = ((t >> 4) & 0x100) >> 4;
-            } else {
+            if (GetGraphType() == 1 || GetGraphType() == 2) {
                 tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
                 tpBit = (t >> 7) & 0x20;
+            } else {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
             }
             p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
             n = t & 0x3F;
@@ -5734,18 +5793,19 @@ u8* FieldModelCreatePktsForPart(
             *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
             *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
             *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
-            *(u16*)&p->u3 = *(u16*)((v >> 24) * 2 + (s32)uv);
+            v = (v >> 24) * 2 + (s32)uv;
+            *(u16*)&p->u3 = *(u16*)v;
             f = *texIdx++;
             t = texInfo[f & 0xF];
             shift = (t & 0x3F) != 2;
             p->clut =
                 ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
-            if (GetGraphType() != 1 && GetGraphType() != 2) {
-                tp = ((t & 0xC0) * 2) | (f & 0x60);
-                tpBit = ((t >> 4) & 0x100) >> 4;
-            } else {
+            if (GetGraphType() == 1 || GetGraphType() == 2) {
                 tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
                 tpBit = (t >> 7) & 0x20;
+            } else {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
             }
             p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
             n = t & 0x3F;
@@ -5783,18 +5843,19 @@ u8* FieldModelCreatePktsForPart(
             v = poly[2];
             *(u16*)&p->u0 = *(u16*)((v & 0xFF) * 2 + (s32)uv);
             *(u16*)&p->u1 = *(u16*)(((v & 0xFF00) >> 7) + (s32)uv);
-            *(u16*)&p->u2 = *(u16*)(((v >> 15) & 0x1FE) + (s32)uv);
+            v = ((v >> 15) & 0x1FE) + (s32)uv;
+            *(u16*)&p->u2 = *(u16*)v;
             f = *texIdx++;
             t = texInfo[f & 0xF];
             shift = (t & 0x3F) != 2;
             p->clut =
                 ((((t * 2) >> 23) + (texY & -shift)) << 6) | ((t >> 16) & 0x3F);
-            if (GetGraphType() != 1 && GetGraphType() != 2) {
-                tp = ((t & 0xC0) * 2) | (f & 0x60);
-                tpBit = ((t >> 4) & 0x100) >> 4;
-            } else {
+            if (GetGraphType() == 1 || GetGraphType() == 2) {
                 tp = ((t & 0xC0) * 8) | ((f * 4) & 0x180);
                 tpBit = (t >> 7) & 0x20;
+            } else {
+                tp = ((t & 0xC0) * 2) | (f & 0x60);
+                tpBit = ((t >> 4) & 0x100) >> 4;
             }
             p->tpage = tp | tpBit | ((t & 0xF00) >> 8);
             n = t & 0x3F;

@@ -991,6 +991,21 @@ a near-miss, in rough order of frequency:
   lists two entries at -1 and +1, cross them before moving on -- it is one
   extra measurement and it was worth 20 rows here.
 
+  **Do the cross even when the note has already computed that it must be
+  done**, because writing the sentence and running the pair are different
+  acts. `FieldModelCreatePktsForPart` in `src/field/field2.c` carried a park
+  note that decomposed its exact length into three clusters, priced each alone
+  (+4, +4, -4), and stated outright that "the three fixes move the length by
+  +4, +4 and -4 and each reads as a regression alone ... Fixing (a) alone
+  therefore *costs* 4; it has to land with (b) or (c)". Nobody had crossed
+  them. (a) alone is 272 rows at **731**, (c) alone is 268 at **723**, and
+  (a)+(c) is **235 at the exact 727** -- 247 -> 235 for one measurement that
+  the note had already specified. Treat "these two must be crossed" in a note
+  as an unpaid debt, not as a finding; it is the cheapest work in the file.
+  The corollary is worth as much: with the pair landed, the *next* two
+  clusters were another such pair, so decomposing an exact length tends to
+  hand you a chain rather than a single answer.
+
 * **A parked function whose `.rodata` blob is carried as a file-scope object
   measures worse than it will be when it lands, and the queue does not know
   it.** A local aggregate initialiser emits its constant into the unit's
@@ -3459,6 +3474,21 @@ a near-miss, in rough order of frequency:
   it. So an "exactly inert" result closes the *scheduling* dimension only —
   re-test with the barrier placed between a definition and its use before
   concluding a local cannot be moved.
+
+  **It is never a *combine* barrier, though, and that is a mechanism rather
+  than a measurement.** `jump_optimize` runs long before combine and deletes a
+  `CODE_LABEL` nothing references, so the empty loop's exit label is gone by
+  the time `combine_instructions` computes its basic blocks — the loop NOTEs
+  survive (which is why the scheduler still sees a boundary) and the block
+  split does not. So a residue that is combine folding two insns together
+  cannot be reached by dropping a barrier between them: on
+  `FieldModelCreatePktsForPart` an empty `do { } while (0);` between
+  `tpBit = (t >> 4) & 0x100;` and `tpBit >>= 4;` is **exactly inert**, along
+  with every other spelling of the pair. To deny combine a merge you need the
+  def and the use in genuinely different basic blocks, which costs a branch,
+  or a second use of the intermediate — and on MIPS a *subscript* is not a
+  second use, since `p[0]` is a displacement off the base and never
+  materialises the address at all.
 
   **And it is a register-allocation probe, which is its most useful third
   use: it can tell you a residue is reachable before you know how.** Moving
