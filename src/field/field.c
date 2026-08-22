@@ -394,6 +394,34 @@ extern s16 D_80071E3C;
  *   - `width_sweep.py` over all six scalar locals, 30 variants: **flat**.
  *     Nothing ties 8 and the best alternatives are 15.
  *
+ * Both clusters are now closed by *mechanism* rather than by exhaustion, and
+ * the two verdicts are different:
+ *
+ *   - **cluster 3 belongs to reorg and nothing in the source reaches it.**
+ *     Five more basic-block boundaries -- at the rain join before `i = 0xF`,
+ *     at the end of the then arm, `fillVal` moved to the join, `fillVal`
+ *     moved below `fill`, and both `i` and `fill` duplicated into the two
+ *     arms so the join has no first insn at all -- are **exactly 8, every
+ *     one**. An empty `do { } while (0); ` cannot change an allocno's rank
+ *     or a reference count; all it does is end a basic block, so a sweep of
+ *     them that is inert at every placement says the residue is not a
+ *     scheduling or a block-layout fact. What is left is
+ *     `fill_slots_from_thread` copying the join's `li v1,0xf` into the `j`'s
+ *     delay slot and redirecting past it, which it may do because `v1` is
+ *     dead on the fall-through path -- and `v1` is dead there in the target
+ *     too. Park it and say so.
+ *   - **cluster 4 is one RTL insn in the wrong slot, and the registers are
+ *     already right.** `tools/qty_pri.py` names both quantities and both
+ *     match the target: the `D_80071A5C` load is `pri 10.667, 4 refs / life
+ *     3 -> $v1` and the `g_CurrentFieldIndex` load `pri 4.000, 4 refs / life
+ *     4, size 2 -> $v0`. So this is not the `FieldBackgroundInitPackets`
+ *     anti-dependence shape -- nothing is holding `$v1` -- it is sched2
+ *     picking the other of two ready insns. Note that `lh v1,%lo(D_80071A5C)`
+ *     is *one* RTL insn that maspsx expands to `lui`+`lh`, so what has to
+ *     move is a single insn across two volatile MEMs, and the three boundary
+ *     placements that would force it (before the read, after it, after the
+ *     whole group) cost +5, +7 and +2 instructions.
+ *
  * The residue is **33 rows / 6 insertions**, measured with that object
  * deleted. Measured with it still in place it reads 40/6, and the extra seven
  * are the `.rodata` offsets the object itself causes: it is 8 bytes that the
