@@ -1570,7 +1570,40 @@ static void func_800AA4FC(void) {
     g_CurrentAction->unk214 *= var_s0;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AA574);
+/* Score the acting character's eight equipped materia: for each slot, take the
+ * AP it carries capped at the top level threshold for that materia id, and sum
+ * them.  The total, in units of 10000 AP, scales unkC4 into unk48. */
+void func_800AA574(void) {
+    s32* slot;
+    s32 total;
+    s32 i;
+    s32 j;
+    s32 ap;
+    s32 cap;
+    u32 raw;
+    u16* level;
+
+    total = 0;
+    slot = (s32*)D_800F5E60[g_CurrentAction->actorId].partyMember;
+    for (i = 0; i < 8; i++, slot++) {
+        raw = slot[0x10];
+        if (raw != -1) {
+            ap = raw >> 8;
+            cap = 0;
+            level = (u16*)&D_800730D0[(raw & 0xFF) * 0x14];
+            for (j = 0; j < 4; j++) {
+                if (level[j] != 0xFFFF) {
+                    cap = level[j] * 0x64;
+                }
+            }
+            if (cap < ap) {
+                ap = cap;
+            }
+            total += ap;
+        }
+    }
+    g_CurrentAction->unk48 = total / 10000 * g_CurrentAction->unkC4 / 16 + 1;
+}
 
 void func_800AA688(void) {
     s32 var_a0;
