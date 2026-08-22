@@ -1,1 +1,2 @@
 func_800BD124 = 0x800BD124;
+func_800BFCAC = 0x800BFCAC; // size:0xB5C

@@ -76,9 +76,13 @@ u8* func_800BFBF0(WorldModel* model, u8* buf, s32 arg2) {
     return buf;
 }
 
+/* 727 instructions, and it used to be two: spimdisasm split it in the middle
+ * of an expression at 0x800C02F4, which had no prologue, carried this
+ * function's epilogue, and branched backwards into it.  `worklist.py` counted
+ * both halves as work.  `config/symbols.world.txt` now pins this function's
+ * size at 0xB5C so splat emits one `.s`; see CLAUDE.md, "A `.s` with no
+ * prologue is not a function". */
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800BFCAC);
-
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C02F4);
 
 void func_800C0808(WorldTimGroup* group) {
     RECT rect;

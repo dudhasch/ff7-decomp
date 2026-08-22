@@ -4819,6 +4819,45 @@ full build is red. Only run `make build` once the diff is clean.
 silently drops a function. If you cannot match a function, revert your changes to
 that function and leave the `INCLUDE_ASM` in place.
 
+**A `.s` with no prologue is not a function, and the work list cannot tell.**
+spimdisasm splits functions on its own heuristics and it gets it wrong: in
+`src/world/world2.c`, `func_800BFCAC.s` ended with `andi $v0,$v0,0x3f` and no
+`jr $ra`, and `func_800C02F4.s` began with `or $v1,$v1,$v0` and no
+`addiu $sp`, carried the *other* function's epilogue, and branched backwards
+into it (`bnez $v0, .L800BFD80`). They are one 727-instruction function that
+splat had rendered as a 402-instruction one plus a 325-instruction one, and
+`worklist.py` counted both as actionable work. Nothing else complains --
+the bytes are right, the overlay's SHA-1 is right, and the halves diff
+perfectly against themselves.
+
+Three tells, any one of which is conclusive:
+
+* the `.s` has no `addiu $sp, $sp, -N` at the top, or no `jr $ra` at the
+  bottom (`head -6` / `tail -4` is the whole check)
+* a branch target rendered as `.L800…` that lies outside the file's own
+  address range -- so the two `.s` reference each other's labels
+* no callers: `grep -rl "jal *<name>" asm/ src/` finds nothing, and the
+  function is not an obvious entry point
+
+The fix is to pin the real function's size in the overlay's symbol config,
+which is read by splat only:
+
+```
+func_800BFCAC = 0x800BFCAC; // size:0xB5C
+```
+
+`// ignore:true` on the *spurious* symbol is **not** enough on its own -- it
+suppresses the second `.s` but leaves the split, so the merged file then has
+an undefined reference to the label that lived in the file that no longer
+exists. With the size pinned, splat emits one `.s` and keeps the interior
+`glabel`, so `config/sym_ovl_export.us.txt` does not churn and every other
+overlay links unchanged. Delete the stale `asm/us/<ovl>/nonmatchings/<unit>/
+<spurious>.s` by hand -- splat does not remove it -- and drop its
+`INCLUDE_ASM` line from the `.c`.
+
+Check for this before picking any function whose rank score is 1.000 and
+whose caller search comes up empty; both halves of this pair scored 1.000.
+
 **Scope a rename by owner, not by name.** A struct member or a local is not
 a symbol, so renaming one cannot change codegen -- but only if the thing being
 renamed is really the one you meant. `unk10` occurs in six unrelated structs
