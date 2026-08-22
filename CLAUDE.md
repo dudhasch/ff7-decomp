@@ -966,6 +966,40 @@ a near-miss, in rough order of frequency:
   `addiu -0xf0`. Two bodies of the same length are comparable by rows only
   when both compute the target's arithmetic; a lower count reached by leaving
   a fold in place is a local minimum with no path out of it.
+* **The same lever runs the other way: a named local also stops fold
+  *distributing* a multiply over a difference onto a symbol's addend.**
+  `*(s16*)((u8*)SYM + (arg0 - 4) * 12)` does not compile to a subtraction and
+  a multiply -- fold rewrites it as `arg0 * 12 - 0x30` and folds the `-0x30`
+  onto the symbol, so the address comes out `%lo(SYM-0x30)` with a bare
+  `arg0 * 12` index. Same byte, three instructions in a different order, and
+  every spelling of the sum reaches it: `-0x30 + arg0 * 12` written
+  explicitly measures identical, because both trees fold to the same thing.
+  `k = arg0 - 4;` on its own line is a VAR_DECL fold cannot see through, so
+  the subtraction stays its own insn and the symbol keeps its own address.
+  The tell is an addend on the `%lo` that the target does not have, with an
+  `addiu <reg>,<param>,-N` in the target that your build has nowhere.
+  `func_800B8FCC` in `src/battle/battle1.c` matched on this alone, from 7
+  rows.
+* **A `lui`/`%lo(reg)` pair that splat prints as `%hi/%lo(<symbol>)` may be a
+  plain constant, and the target tells you which.** splat disassembles a
+  *linked* overlay, so it has no relocations -- it pairs a `lui` with a later
+  `%lo`-shaped use heuristically and prints the symbol whose address the two
+  halves add up to. A bare `lui a0,0x801b` feeding `lw v0,0(a0)` is therefore
+  rendered `lui a0,%hi(func_801B0000)` / `lw v0,%lo(func_801B0000)(a0)`, and
+  writing C that names the symbol cannot reproduce it. The give-away is the
+  target adding that same register straight back as a pointer value
+  (`addu a0,v0,a0`): a real symbol reference has to become an address through
+  an `addiu %lo` first, so no correct compiler emits it, whereas a constant
+  whose low half is zero needs exactly one `lui` and can be added as-is.
+  Reach for the literal -- `(u_long*)0x801B0000` -- and expect `checkfn` to
+  report the operand as rows it cannot alias away; the bytes are identical
+  and the overlay SHA-1 is the arbiter. `func_800BB4F8` and `func_800B5CD4`
+  in `src/battle/battle1.c` are both this, at 3 and 5 such rows.
+  Two corroborating signs in the same function: splat prints an *unpaired*
+  `lui` as `lui $a1, (0x801B0000 >> 16)`, so a function that shows both
+  spellings of one address is telling you gcc materialised the constant twice
+  rather than that two different objects are involved; and the symbol form
+  costs an extra `addiu` that shows up as a length overrun, not as noise.
 * **A chained assignment stores right to left.** `m[0][0] = m[1][1] =
   m[2][2] = 0x1000;` is `m[0][0] = (m[1][1] = (m[2][2] = 0x1000))`, so the
   stores come out `m[2][2]`, `m[1][1]`, `m[0][0]` — descending. A target that
@@ -3923,6 +3957,18 @@ a near-miss, in rough order of frequency:
   of the local before concluding the local itself is wrong. That note had
   rejected the one alternative it tried and concluded "the local is right" —
   it was right, and in the wrong place.
+
+  The cheapest form of the same lever is a local for an *index*, and it is
+  worth reaching for whenever the two hoisted constants are simply in the
+  wrong order. `arg1[3 - i] = (t - q * 10) * 8 + 0x98;` after a `q = t / 10;`
+  records the division's magic multiplier as a movable before the `3`, since
+  `scan_loop` sees the division's insns first; `j = 3 - i;` as the loop
+  body's first statement records the `3` first and nothing else moves.
+  `func_800C2F20` in `src/battle/battle1.c` matched on that one line from 2
+  rows, and the alternatives that look equivalent are not — writing the store
+  before the division (so `expand_assignment` computes `&arg1[3 - i]` first)
+  measures 20 rows, because it also changes where the quotient's live range
+  starts.
 * **A rotation of two or three registers inside one basic block is caused by a
   value that is not in the block.** When the whole residue is `$v0`/`$a0`
   trading places across a lookup — same opcodes, same order, same count — the

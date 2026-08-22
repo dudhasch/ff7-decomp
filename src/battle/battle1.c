@@ -330,7 +330,22 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5AAC);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5C1C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5CD4);
+void func_8001C3CC(u8*, u_long*, s32);
+
+// The overlay staged at 0x801B0000 begins with a table of self-relative
+// offsets; entry [0] selects which of them holds the payload size. NOTE the
+// base is a plain constant, not a symbol: the target keeps only the lui in
+// $s0 and adds it back with `addu`, which no symbol reference can produce
+// (a symbol would need an addiu %lo). splat pairs the lui/lw heuristically
+// and prints it as %hi/%lo(func_801B0000); the linked bytes are identical,
+// so checkfn reports those operands as rows it cannot alias away.
+s32 func_800B5CD4(s32 arg0) {
+    u_long* p;
+
+    p = (u_long*)0x801B0000;
+    func_8001C3CC(D_800F8390[arg0], (u_long*)0x801B0000, p[p[0]]);
+    return p[p[0]];
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5D38);
 
@@ -631,7 +646,25 @@ static void func_800B8E48(s32 arg0) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B8EE4);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B8FCC);
+extern s16 D_800F7E08[];
+
+// `k` has to be its own local: written inline, fold distributes
+// (arg0 - 4) * 12 into arg0 * 12 - 0x30 and folds the -0x30 onto the symbol,
+// which is a different (and equally correct) address computation.
+void func_800B8FCC(s32 arg0) {
+    s32 idx;
+    s32 k;
+    Unk800F57D0* p;
+
+    if (D_80151200[arg0].D_80151232 == 6) {
+        idx = 6;
+    } else {
+        k = arg0 - 4;
+        idx = *(s16*)((u8*)D_800F7E08 + k * 12);
+    }
+    p = (Unk800F57D0*)D_800F8384[idx];
+    func_800C7C4C(arg0, p->unk8 + 0x68, p + 1, p);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B905C);
 
@@ -764,7 +797,14 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB2A8);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB430);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB4F8);
+// See func_800B5CD4 for why the 0x801B0000 base is a literal and not the
+// func_801B0000 symbol splat prints.
+void func_800BB4F8(void) {
+    u_long* p;
+
+    p = (u_long*)0x801B0000;
+    func_800D2980((u_long*)(p[p[0]] + (s32)p), 0, 0, 0);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB538);
 
@@ -919,7 +959,7 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC538);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC630);
 
-void func_800BCA58(s32);
+void func_800BCA58(s16);
 void func_800C1104();
 static void func_800BC72C(void) {
     func_800C1104();
@@ -947,7 +987,29 @@ static void func_800BC81C(s16 arg0, s16 arg1) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC8B0);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BCA58);
+extern u16 D_80151844[];
+extern u16 D_80151846[];
+extern u16 D_80151848[];
+extern u16 D_801518A4[];
+extern u16 D_801518A6[];
+extern u16 D_801518A8[];
+extern s16 D_80158D02;
+extern s16 D_80158D04;
+extern s16 D_801031EA;
+extern s16 D_801031EC;
+
+// two parallel 14-byte-stride records; publish slot arg0 of each
+void func_800BCA58(s16 arg0) {
+    s32 off;
+
+    off = arg0 * 14;
+    D_80158D00 = *(u16*)((u8*)D_80151844 + off);
+    D_80158D02 = *(u16*)((u8*)D_80151846 + off);
+    D_80158D04 = *(u16*)((u8*)D_80151848 + off);
+    D_801031E8 = *(u16*)((u8*)D_801518A4 + off);
+    D_801031EA = *(u16*)((u8*)D_801518A6 + off);
+    D_801031EC = *(u16*)((u8*)D_801518A8 + off);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BCB1C);
 
@@ -1030,7 +1092,13 @@ void func_800C0254(s16 arg0, s16 arg1) {
     *(s32*)0x1F800008 += sp[2];
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C0314);
+s32 func_800C0314(s32 arg0, s32 arg1) {
+    if (D_801518E4[(u8)arg1].D_801518E6 == 1 &&
+        D_80151200[(u8)arg1].D_80151230 > 0) {
+        return arg0;
+    }
+    return arg0 + D_80151200[(u8)arg1].D_80151230;
+}
 
 // magnitude of (arg0 - arg1) via GTE sqrt
 static s16 func_800C03B8(s16 arg0, s16 arg1) {
@@ -1229,7 +1297,34 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2928);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2C1C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2F20);
+// render arg0 as four base-10 digit glyph ids (0x98 = '0') into arg1[0..3],
+// most significant first, then strip the leading zeroes and report how many
+// digits are left. `j` must be its own local: it is what makes the 3 in
+// `3 - i` the first loop-invariant move_movables records, which is the order
+// the target hoists the two constants in.
+s32 func_800C2F20(s32 arg0, s16* arg1) {
+    s32 i;
+    s16 n;
+    s32 t;
+    s32 q;
+    s32 j;
+
+    n = arg0;
+    for (i = 0; i < 4; i++) {
+        j = 3 - i;
+        t = n;
+        q = t / 10;
+        n = q;
+        arg1[j] = (t - q * 10) * 8 + 0x98;
+    }
+    for (i = 0; i < 3; i++) {
+        if (arg1[i] != 0x98) {
+            return (u8)(4 - i);
+        }
+        arg1[i] = 0;
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2FD4);
 
