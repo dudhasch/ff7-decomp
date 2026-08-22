@@ -15,11 +15,17 @@
 # one. An invalid body can score BETTER than the correct program -- an allocno
 # whose live range runs back to function entry perturbs the whole conflict
 # graph -- so a good row count is not evidence of a valid program.
-# Sources to audit: any given on the command line, else every unit known to
-# carry parked bodies. Add a unit here when you park your first body in it.
+# Sources to audit: any given on the command line, else every unit that
+# actually carries a parked body, discovered from the tree. It used to be a
+# hand-maintained list with "add a unit here when you park your first body in
+# it" -- so a unit stayed silently unaudited until someone remembered, and two
+# agents appending to it in the same session produced a merge conflict whose
+# obvious resolution (take one side) would have dropped the other unit back
+# out of the audit. Deriving it cannot drift.
 srcs="$*"
-[ -n "$srcs" ] || srcs="src/field/field.c src/field/field2.c src/field/field3.c
-src/field/field4.c src/field/field5.c src/world/world2.c src/main/1255C.c"
+if [ -z "$srcs" ]; then
+  srcs=$(grep -l MASPSX_OVERRIDE src/*/*.c 2>/dev/null | tr '\n' ' ')
+fi
 
 for src in $srcs; do
   [ -f "$src" ] || continue
