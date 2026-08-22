@@ -749,6 +749,16 @@ a near-miss, in rough order of frequency:
   that every spelling of the stored *value* -- a named local, a cast, `-x - 1`
   for `~x` -- measures exactly the same.
 
+* **`MEM_IN_STRUCT_P` is set by an ARRAY_REF as well as a COMPONENT_REF, so
+  `((s32*)p)[k]` is not the non-struct spelling it looks like.** Every
+  aliasing bullet here turns on that flag, and there is exactly one way to
+  clear it: a plain INDIRECT_REF on a cast pointer, `*(s32*)((u8*)p + 4)`.
+  Rewriting `outEdge->vx` as `((s32*)outEdge)[0]` to stop a load being shared
+  measured *exactly* inert in `FieldEntityWalkmechCross` for this reason. The
+  same fact read forwards is the cheaper fix: to stop a struct load floating
+  above a run of raw `*(s32*)0xNNNN` stores, spell the stores as an array
+  (`scratch[12]`) rather than the load as a cast -- same effect, and the
+  array indexing is usually what the original wrote anyway.
 * **A store's struct-ness decides whether a later load may float above it.**
   The companion to the aliasing bullet above, run forwards instead of
   backwards: `true_dependence` lets a `MEM_IN_STRUCT_P` load move past a store
@@ -1140,6 +1150,21 @@ a near-miss, in rough order of frequency:
   survives. Write the guard as `if (cond) goto skip;` in both arms with the
   clamp after them. The tell is a constant materialised where the target
   or-s into a register.
+* **A tail that several arms share is cross-jumped into one, and the way out
+  is to give each arm its own local for the value it stores.** The standing
+  bullet below says the only lever is the ref count of the index; that is
+  true when the arms genuinely store the *same* pseudo, and the commoner case
+  is that they need not. Three arms ending `D_801144CC = N; D_80113F28 =
+  *triId;` merge into a single store site because the second statement is
+  register-identical in all three; written `triN = *triId; D_801144CC = N;
+  D_80113F28 = triN;` with one `triN` per arm, each arm reloads into its own
+  register and gcc merges only the arms that happen to agree -- which is what
+  a target with more `%hi` references to a symbol than your source has store
+  sites is telling you. `FieldEntityWalkmechCross` in `src/field/field2.c`
+  needed it, and where the read sits matters: before the neighbouring store
+  it is worth three instructions more than after it. Count the target's
+  `%hi`/`%lo` pairs per symbol first -- six against four is three store sites
+  against two, and that is a fact about cross-jumping, not about registers.
 * **Two switch arms that end in the same store are cross-jumped into one —
   and the only lever is the ref count of the index.** gcc runs `jump_optimize`
   with cross-jumping *after* reload, so two arms merge exactly when their
@@ -1924,6 +1949,16 @@ a near-miss, in rough order of frequency:
   work on first: length is a hard invariant, so a body of the wrong size
   cannot match however few rows differ, and a "better" row count bought by
   adding an instruction is a step backwards.
+
+  It cuts the other way too, and that is the more expensive mistake because
+  it looks like diligence. `FieldEntityWalkmechCross`' park note recorded
+  "99 changed / **+4 instructions**" -- the 4 was the insertion count, and the
+  body was **11 instructions short**. Every lever that would fix it therefore
+  *adds* instructions and reads as a regression by rows: the note had measured
+  the one that mattered (a flat integer address sum, 148 rows against 141) and
+  rejected it on exactly that evidence. Ranking by length instead took the
+  same function from 99 rows to 34 at the exact 291. When a note quotes two
+  numbers, check which one is the length before believing either.
 
   The two metrics disagree often enough to reverse a day's work. Three levers
   on `FieldBackgroundInitPackets` — a re-read loop guard, a moved counter and
