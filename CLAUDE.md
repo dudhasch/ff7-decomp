@@ -1966,6 +1966,26 @@ a near-miss, in rough order of frequency:
   will do it by pushing the real values into the wrong slots, which is the
   `FieldBackgroundInitPackets` trap in the bullet above seen from the frame
   side.
+
+  **And "the pad's position among them changes anything" is false in general
+  -- it is true only of a pad among values that are all reload spills.** A
+  declared pad *is* a declared local, so everything declared after it moves by
+  its size, and putting it in the wrong place is worth the whole stack layout.
+  `FieldBGUpdateDrawenv` in `src/field/field2.c` carried
+  `u8 unusedLocals[0x18];` ahead of its `SVECTOR pos; DVECTOR screen;` and read
+  `screen` at `0x30(sp)`/`0x32(sp)` where the target reads `0x18`/`0x1a` --
+  exactly the pad. Moved *after* them it is **536 rows to 488**, with the
+  prologue, the frame size and all six saved-register offsets ceasing to
+  differ. Two things fall out of the same measurement. The size is derivable
+  rather than guessable: delete the pad, read the frame (`0x68` against the
+  target's `0x70`), and the answer is 8 -- 0x18 was three times too big and
+  had been fitted against a different fault. And the pad's *alignment* is a
+  second knob: `[2]`, `[4]` and `[8]` all give 488 while `[1]` and a bare
+  `s32 unusedLocal;` give 509, because a byte-aligned pad lets `expand_decl`
+  pack what follows differently. So sweep position first, then size, then
+  alignment -- and expect the length to get *worse* when the position is
+  fixed, since a mis-sized pad is exactly the kind of thing that holds two
+  cancelling errors in place.
 * **A spilled pseudo is spilled in its own mode, so a counter's declared
   width decides `sh`/`lhu` against `sw`/`lw` at every one of its uses.** When
   a value lives on the stack because reload put it there -- not because its

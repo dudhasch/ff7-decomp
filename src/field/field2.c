@@ -814,6 +814,51 @@ typedef struct {
  * are the fifteen `lhu` above) is the object to read the widths off next.
  * The `nop +8 / addu +8` is a separate cluster and has not been read.
  *
+ * **536 -> 488 rows: the frame pad was in the wrong *place*, and its size was
+ * wrong too.** `u8 unusedLocals[0x18];` was declared *ahead* of `pos` and
+ * `screen`, which pushed every declared local up by 0x18 -- the target reads
+ * `screen` at `0x18(sp)`/`0x1a(sp)` and this body read it at `0x30`/`0x32`,
+ * exactly the pad. Declared *after* them the whole declared-local pool lands
+ * where the target has it, and the prologue, the frame and all six
+ * saved-register offsets stop differing. The size follows from the same
+ * measurement rather than from a guess: with no pad the frame is `0x68`
+ * against the target's `0x70`, so the pad is **8 bytes** and 0x18 was three
+ * times too big.
+ *
+ * Two details that are not guessable and cost nothing to record. The pad's
+ * *alignment* matters as much as its size -- `[2]`, `[4]` and `[8]` all give
+ * 488 while `[1]` and a bare `s32 unusedLocal;` give **509**, because a
+ * byte-aligned pad lets `expand_decl` pack the locals after it differently.
+ * And placing it after the three `copy*` locals, or at the very end of the
+ * declaration list, is the same 488 -- only being *ahead of `pos`* was wrong.
+ * Note the length went -1 -> **-2** with the fix: the old pad was masking one
+ * instruction, which is the "an exact length can be errors cancelling" shape
+ * one step down.
+ *
+ * Three dimensions closed by measurement at the new baseline, so nobody
+ * re-runs them:
+ *   - **`FieldCamera`'s widths are not the `lh`/`lhu` cluster.** The note
+ *     above nominates them as the next job; all seven combinations of
+ *     `centerOfsX`/`centerOfsY`/`screenDist` over `s16`/`u16`/`s32`/`u8`
+ *     measure 536-537 (635 for `u8`) and **the length never moves at all**.
+ *     The struct is used nowhere but this function, so this is exhaustive.
+ *   - **The `u16` view on the scroll members is +1 per site.** The eight
+ *     `((s32)(scrollNN << 0x10) >> 0x14)` sites written
+ *     `((s32)((u16)scrollNN << 0x10) >> 0x14)` -- CLAUDE.md's
+ *     `FieldUpdateAnimationState` idiom, which is what produces a target's
+ *     `lhu`/`sll 16`/`sra 20` triple -- is **+4 instructions per group**:
+ *     490 at +2 for the first four sites, 491 at +2 for the second four, 493
+ *     at +6 for all eight.
+ *   - **Nor is it `screen`.** The same view applied to `screen.vx`/`screen.vy`
+ *     in the four layer expressions is 509-512, and a plain `(u16)` cast
+ *     (which is a different program -- the multiply goes unsigned) is 509.
+ *
+ * So `lhu -9 / sll -9` against `lh +6` survives all three, and the remaining
+ * table is that plus `nop +8 / addu +6`. Whatever loads a halfword unsigned
+ * and widens it by hand nine times is not `FieldCamera`, not `FieldBgScroll`
+ * and not `screen`; the next pass should find the nine sites in the diff
+ * before nominating a fourth struct.
+ *
  * The width dimension was swept (80 variants over 16 scalar locals) and
  * nothing clearly safe improves it. `copyY2` as `s16` reads +27 -> +21
  * instructions at 840 rows against 811, i.e. better by length and worse by
@@ -860,9 +905,9 @@ void FieldBGUpdateDrawenv(s32 arg0) {
     s16* env22;
     s16* env23;
 
-    u8 unusedLocals[0x18];
     SVECTOR pos;
     DVECTOR screen;
+    u8 unusedLocals[8];
     u16 copyY1;
     u16 copyX2;
     u16 copyY2;
