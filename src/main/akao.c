@@ -1763,7 +1763,28 @@ void func_80032D58(AKAO_TRACK* track) { track->sfx_mask = 4; }
 
 void func_80032D64(void) {}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032D6C);
+// Noise clock: bits 6-7 set means the low 6 bits are a signed-ish delta on
+// the current clock, otherwise they replace it. Sound effects keep their
+// own copy in D_80099FFA rather than the song's config.
+void func_80032D6C(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    u8 val;
+
+    val = *track->addr++;
+    if (track->type == 0) {
+        if (val & 0xC0) {
+            config->noise_clock = (config->noise_clock + (val & 0x3F)) & 0x3F;
+        } else {
+            config->noise_clock = val;
+        }
+    } else {
+        if (val & 0xC0) {
+            D_80099FFA = (D_80099FFA + (val & 0x3F)) & 0x3F;
+        } else {
+            D_80099FFA = val;
+        }
+    }
+    D_8009A13C |= 0x10;
+}
 
 // The eight LFO-parameter opcodes are one shape: read a byte, flag the change
 // in attr_mask, store it in the track, and -- when the track is already live
