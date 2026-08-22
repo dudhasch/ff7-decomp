@@ -29,7 +29,7 @@ volatile u16 D_80062E08; // set by the transfer-complete callback
 s32 D_80062F00;
 s32 D_80062F68;
 u16 D_80062F70;
-s32 D_80062F74;
+s32* D_80062F74;
 s16 D_80062F78;
 s32 D_80062F84;
 s32 D_80062F8C;
@@ -171,6 +171,20 @@ void func_80029818(s32* src, s32* data) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002988C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80029998);
+// Word-copy 0x3200 words from arg0 into the instrument-parameter staging
+// buffer D_80062F74 points at.
+void func_80029998(s32* arg0) {
+    s32* dst;
+    u16 i;
+
+    dst = D_80062F74;
+    i = 0x3200;
+    do {
+        i--;
+        *dst = *arg0;
+        arg0++;
+        dst++;
+    } while (i != 0);
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800299C8);
