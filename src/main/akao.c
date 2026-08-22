@@ -1056,9 +1056,17 @@ static void Akao81SetMonoMode(void) {
     func_8002A798();
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C884);
+void func_8002C884(Unk8002B7E0* arg0) {
+    u16 i;
+    Unk80096608* p;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C8C4);
+    D_80062FD8 = arg0->unk4;
+    for (i = 0, p = D_800966E8; i < 0x18; i++, p++) {
+        *(s32*)p |= 3;
+    }
+}
+
+void func_8002C8C4(Unk8002B7E0* arg0) { D_8009A152 = arg0->unk4; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C8DC);
 
