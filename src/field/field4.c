@@ -1671,6 +1671,36 @@ void FieldInitDefaultValues(void) {
  * top of the do-body all measure 25; `g_CurrentEntity * 64` for the shift and
  * `<< 1` for the index are both exactly inert at 16. The order is not
  * reachable from statement order or from the spelling.
+ *
+ * **Correction to the advice above: do not start from the body without
+ * `pcBase`.** That paragraph says the two bodies are "both at -1
+ * instruction"; they are not, and the difference is the whole of the length.
+ * Measured now: the body *with* `pcBase` is 15 rows at the **exact 152**, and
+ * the body without is 16 rows at **-1**. So `pcBase` is worth the instruction
+ * as well as the row, and the structurally-closer body is the one that is
+ * also the right length.
+ *
+ * `insn_histogram.py` says how close that is, and it is worth stating: the
+ * opcode counts are **identical** -- every opcode, same length -- and the
+ * `%hi` table differs only by symbol *names* at the same addresses, which
+ * `checkfn` discounts. The 15 rows are pure register naming on an
+ * instruction-for-instruction correct body, split two ways:
+ *
+ *   - **four rows** are the preheader hoist order, `lui s1,%hi(g_DebugText)`
+ *     before `lui s2,%hi(g_FieldScriptPC)` in the target and the reverse
+ *     here. This is `pcBase`'s price and it cannot be paid off by moving it:
+ *     `pcBase` is only a hoistable movable as the do-body's *first*
+ *     statement, and below the debug block, below `scripts`, or immediately
+ *     above `slot` it becomes ordinary code that cse folds away -- 51, 51 and
+ *     61 rows, all at **-2 instructions**.
+ *   - **eleven rows** are the two shifts landing in swapped registers, the
+ *     target computing `entity * 2` before `entity * 64`. Re-measured against
+ *     this body and unchanged from the note above: `slot` moved above
+ *     `scriptBase` or above `scripts` is 25, at the top of the do-body 40 and
+ *     +1.
+ *
+ * The width dimension is closed too -- 30 variants over the six scalar locals
+ * and every one is 15 rows at the exact length.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
@@ -9481,8 +9511,31 @@ s32 OpcodeFuncSolid(void) {
  * assigned after `viewOffsetMode`, after `viewOffsetStart`, or last in the
  * arm all measure exactly 12, and first in the arm 18. Every spelling of the
  * address is inert too (`g_FieldScriptPC + g_CurrentEntity`, the
- * `n + (s32)p` cast form, `pc[0] += 7`). Permuter food, and now at the exact
- * length, so score 0 is reachable. */
+ * `n + (s32)p` cast form, `pc[0] += 7`).
+ *
+ * The permuter has now had that run, from a scratch re-imported at 12 rows --
+ * the 101,000-candidate run CLAUDE.md records predates the 24 -> 12 work, so
+ * it was hill-climbing a different body. Clean scratch (no diagnostics,
+ * relocations identical, 466 bytes against 460), **base score 85**, and a
+ * `PERM_GENERAL` set enumerating a `do { } while (0);` boundary either side
+ * of each arm's `pc` assignment, that assignment one statement earlier, and
+ * three spellings of `*pc += 7` comes to **48 candidates, every one 85**. No
+ * output directory; the run terminated on its own.
+ *
+ * The analysis it forced is what settles this. Each arm holds two block-local
+ * quantities of three references each -- the PC index and the `g_FieldState`
+ * pointer -- and `block_alloc` gives `$v0` to whichever ranks first by
+ * `floor_log2(refs)*refs*size/(death-birth)`. The index is born at its `lui`
+ * and dies at the `addu`; `g_FieldState` is born at its `lui` and lives on to
+ * the two `sh`, so its range is longer, its priority lower, and it loses
+ * `$v0` -- which is this build. The target wants the reverse, so the index
+ * has to be *demoted*, i.e. given a longer range. That lever does not exist
+ * here: naming it lets cse share the load between the arms where the target
+ * reads `D_800722C4` once per arm, so `idx` at the top of each arm and `idx`
+ * before the `if` are both **-8 instructions**, a `u8` idx -3, and a named
+ * `base` pointer -7. Inline, its range is fixed by the arithmetic. Neither
+ * term of the tie is reachable from C, which by CLAUDE.md's rule makes this a
+ * park rather than permuter food. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
 #else
