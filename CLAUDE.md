@@ -819,6 +819,31 @@ a near-miss, in rough order of frequency:
   which is what the target has. Two rows and, here, the last insertion. The
   tell is a `nop` right after a global load with an unrelated short store
   sitting two slots above it.
+* **The same rule at whole-function scale: a constant store to an out
+  parameter, written before the computed ones, costs the whole allocation.**
+  `out->vy = 0;` ahead of `out->vx = <six loads and a divide>;` is not a
+  scheduling detail that sched2 will undo -- it is expanded first, so the
+  address of `out` is live before any of the source pointers are loaded, and
+  the two structure pointers the expression needs come out in each other's
+  registers for the rest of the function. Moving that one statement to sit
+  *after* the expression it precedes was worth **all 32 rows** of
+  `func_800B2638` in `src/world/world.c`, where six permutations of the three
+  local declarations had already measured exactly 32 -- which is the evidence
+  that says the residue is not declaration order even though it reads as pure
+  register naming. When a diff is a wall of naming with the opcodes in the
+  right order, look for a short store standing in front of a long one before
+  touching the declarations.
+* **A `for` whose zero-trip guard branches to `jr ra` means everything after
+  the loop is inside the guard.** gcc emits the guard as a jump to the loop's
+  own exit, i.e. to whatever statement follows the loop -- so a guard that
+  lands on the epilogue is telling you the statements you have written after
+  the loop were written *inside* the `if` in the original. It costs one row
+  and is completely invisible in the instruction stream otherwise, because
+  both spellings emit the same insns in the same order and only the branch
+  target moves. `func_800ADA64` in `src/world/world.c` needed the whole
+  copy-out block moved inside its search loop's guard; the tell is exact, and
+  reading it saved a budget that would otherwise have gone on the branch
+  polarity.
 * **`addPrim`'s first argument is used twice, and the two uses can be spelled
   differently.** `addPrim(ot, p)` expands to `setaddr(p, getaddr(ot)),
   setaddr(ot, p)`, so an ordering-table slot read out of a global appears twice
@@ -4895,6 +4920,17 @@ noticed. Measuring a parked body means unparking it first — `checkfn.py` now
 refuses to give a verdict while the name still appears in a `MASPSX_OVERRIDE`
 in that `.c`, with the same multiline-aware match the rename check uses.
 
+**A plain `INCLUDE_ASM` is the same trap with no guard on it at all.** The
+`MASPSX_OVERRIDE` refusal does not extend to a function that never left
+`INCLUDE_ASM`, and it does not need to be a deliberate park to bite: a batch
+apply script that aborts part-way -- one assertion on a header anchor that
+did not match -- writes nothing, leaves seven functions as `INCLUDE_ASM`, and
+`checkfn.py` then prints **MATCH for all seven**, because each `.s` is being
+compared against itself. Nothing in the run says the source was not written.
+The cheap habit is to make the apply step's success a *precondition* of the
+verdict -- `python3 apply.py && ninja … && checkfn …`, never `;` -- and to
+disbelieve a batch that comes back unanimously green on its first build.
+
 **And a park can be spelled the other way, which defeats every tool at once.**
 `#ifndef NON_MATCHINGS / INCLUDE_ASM(...) / #else / <body> / #endif` pins the
 bytes exactly as `MASPSX_OVERRIDE` does, but nothing named `MASPSX_OVERRIDE`
@@ -5074,10 +5110,20 @@ phrasings of one function — or run several searches in parallel —
 use `tools/variant_eval.py` instead:
 
 ```shell
-cp src/menu/cnfgmenu.c .variants/_base.c
-sha256sum .variants/_base.c | cut -d' ' -f1 > .variants/_base.sha256
+.venv/bin/python3 tools/variant_eval.py --pin src/menu/cnfgmenu.c
 .venv/bin/python3 tools/variant_eval.py .variants/my-idea.json --rows
 ```
+
+**Pin with `--pin`, never by hand.** The pin is *per source file* --
+`.variants/_base_src_world_world_c.c` for `src/world/world.c` -- so copying
+the source to `.variants/_base.c` writes a file the tool does not read, and
+the sweep silently scores against whatever that source was pinned at last.
+The two failure modes look nothing alike and neither says "stale": if the
+base predates your edits every variant reports `edit 0 matched 0 times` and
+the whole run comes back `FAILED`, which reads as a quoting problem in the
+spec; if it postdates them the edits *do* apply and you get plausible
+numbers for a body you are not holding. Re-pin after every change you land,
+which is also what makes the numbers in a park note comparable.
 
 It compiles a variant to a private temp object and diffs it with
 `diff.py -f/-F`, which takes explicit object paths and so never consults the
