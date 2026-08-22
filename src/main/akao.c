@@ -25,7 +25,7 @@
 // keeps these COMMON so the link binds to those rather than seeing two
 // definitions.
 s32 D_80062E00;
-s16 D_80062E08;
+volatile u16 D_80062E08; // set by the transfer-complete callback
 s32 D_80062F00;
 s32 D_80062F68;
 u16 D_80062F70;
@@ -88,7 +88,11 @@ static void func_80029464(s32 arg0, s32 arg1) {
     SpuRead(arg0, arg1);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800294A4);
+// Spin until the SPU transfer armed by func_800293F4 has completed.
+void func_800294A4(void) {
+    do {
+    } while (D_80062E08 != 0);
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800294BC);
 

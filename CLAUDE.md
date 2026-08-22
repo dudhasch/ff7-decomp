@@ -352,7 +352,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Twelve ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Thirteen ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -1000,7 +1000,7 @@ a near-miss, in rough order of frequency:
   reports 34 rows with `const u32 D_800A0000[]` present and **27** with it
   deleted -- a constant 7 rows that vanish the moment the function is
   unparked, which is exactly when the object must be deleted anyway (see
-  *Twelve ways a clean-looking diff lies*). So for any parked function with a
+  *Thirteen ways a clean-looking diff lies*). So for any parked function with a
   local aggregate initialiser, take the honest baseline by scoring one
   variant that deletes the object, and record both numbers in the note.
 
@@ -4837,7 +4837,7 @@ cost no instruction. When a diff shows a value in a callee- or long-lived
 register where the target uses `$v0`, count how many different things the
 source spells with that name.
 
-#### Twelve ways a clean-looking diff lies
+#### Thirteen ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -5061,6 +5061,25 @@ pinning restores every offset below it. And when a diff is nothing but branch
 rows whose two addresses differ by a constant, do not read it as a finding:
 subtract the two, divide by four, and check that against the instruction
 surplus of the functions above.
+
+**A branch back to the function's own entry, which the target `.s` spells as a
+relocation.** splat renders a branch whose destination is the function's first
+instruction as the *function symbol* rather than as a `.L` label, so
+assembling that `.s` leaves an `R_MIPS_PC16` against `func_NNNNNNNN` with
+`ffff` in the immediate field, where a C body resolves the branch internally
+and emits the final `fffd`. Both link to the same word — `(S + A - P) >> 2`
+with `A = field << 2` reproduces the resolved offset exactly — but
+`checkfn.py` compares the *unlinked* objects, so it reports the row as a
+changed instruction and, because diff.py then treats the two sides as
+reordered, usually a second row beside it. `func_800294A4` in
+`src/main/akao.c` is six instructions long, is byte-identical after linking,
+and reads as `2 changed`. The shape is unmistakable and rare: a busy-wait
+`do { } while (<volatile global>);` whose whole body is the test, so the loop
+back edge *is* the function entry. When a two-row residue on such a loop
+names the function's own symbol as a branch target on the `want` side, run
+`make build` rather than another spelling — `objdump -drz` on both objects
+shows the relocation on one side and none on the other, which is the
+confirmation.
 
 **A red `make build` that belongs to another agent's worktree.** The symptom
 is a full build that fails once with a missing object
