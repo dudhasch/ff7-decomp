@@ -401,7 +401,16 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A59A0);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5A20);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5A94);
+s32 func_800A5A94(s16 arg0) {
+    Unk800E5768* p;
+
+    for (p = D_800E5768; p != NULL; p = p->next) {
+        if (p->unk4 == arg0) {
+            break;
+        }
+    }
+    return p != NULL;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5AD8);
 
