@@ -3448,6 +3448,24 @@ a near-miss, in rough order of frequency:
   correct**. The empty form measures inert precisely because it has no
   references inside it; do not read "emits nothing" as "changes nothing".
 
+  **It multiplies only the references that `move_movables` cannot lift out of
+  it, and that excludes every address computation.** The trivial loop is a
+  real loop to `loop_optimize`, and nothing is modified on its back edge, so
+  *everything* inside it is invariant: the hoistable insns are moved into the
+  do-while's own preheader and their operands' references land back at the
+  outer depth. What keeps the deeper weight is what cannot be hoisted —
+  stores, calls, and anything reading a value set inside. So the multiplier
+  reaches a counter, a pointer that is stored through, or a value passed to a
+  call, and it cannot reach a loop-invariant constant or a `%hi`/`%lo`
+  address, which is exactly the kind of quantity an `allocno_compare` residue
+  usually names. Measured on `AddBackgroundToRender` in `src/field/field.c`:
+  one, two, three and four nested `do { } while (0); ` around the addPrim that
+  uses the layer-1 `0x124DC` offset leave that pseudo at **5 refs / 80 insns**
+  at every depth in `-dl`, while `buf` — stored through by the same addPrim —
+  goes 136 → 152. Read the dump rather than the row count after adding a
+  barrier: an unchanged `n_refs` on the quantity you meant to raise says the
+  axis is closed by mechanism, and no placement of the barrier will open it.
+
   The cost is the notes themselves. gcc's scheduler makes the insn after a
   loop note depend on everything before it, so the basic block they sit in is
   cut in two and the halves are then emitted in source order. Twenty-odd

@@ -2120,9 +2120,56 @@ extern FieldBgOtSlot D_8009ACA2;
  *
  * The five levers 1-5 below were all re-measured on the *corrected* body and
  * all still pay: without the layer-2 dead conditional 141, without the
- * layer-4 dead `else if` 85, without the layer-3 `do { } while (0);` 81,
+ * layer-4 dead `else if` 85, without the layer-3 `do { } while (0);` 73,
  * without the two mask-test assignments 116 at +1 instruction, with the
  * layer-3 mask test's operands unswapped 73.
+ *
+ * **The reference multiplier cannot reach this residue, and the reason is a
+ * mechanism rather than a measurement.** CLAUDE.md offers exactly one
+ * construct that adds references to a pseudo without emitting an instruction
+ * -- a `do { X } while (0);` with a body, whose loop notes make `flow` count
+ * everything inside at `loop_depth + 1`. Lever 4 below *is* one of those, so
+ * the construct is live on this function. It still cannot move the two
+ * quantities the ranking needs raised, because the trivial loop is a real
+ * loop to `loop_optimize`: nothing is modified on its back edge, so *every*
+ * expression inside it is invariant, `move_movables` lifts it into the
+ * do-while's own preheader, and its references land back at the outer depth.
+ * Only insns that cannot be hoisted -- stores, calls, and anything reading a
+ * value set inside -- keep the deeper weight.
+ *
+ * Measured, not inferred: wrapping layer 1's `&buf->BgDm[run[1]]` addPrim in
+ * one, two, three and four nested `do { } while (0);` leaves pseudo 96 (the
+ * 0x124DC BgDm offset, the quantity that has to reach >= 12 references) at
+ * exactly **5 refs / 80 insns** in `.lreg` at every depth, while `buf` goes
+ * 136 -> 152 and three ot-slot quantities rise with it, because the addPrim's
+ * *stores* stay inside. Same for `&D_80071A48`, unchanged at 4/146. So the
+ * specification below -- `run` at <= 16 refs, or the layer-1 constant at
+ * >= 12 -- is not merely unmet, it is unreachable by the only construct that
+ * could have met it: both of those quantities are compiler-generated address
+ * constants whose every reference is in a hoistable insn.
+ *
+ * The three sweeps that closed on this base (all >= 64, none an improvement):
+ *
+ *   - **`do { } while (0);` nesting and placement**, 21 variants. Depth on
+ *     the layer-3 0x7FFE addPrim: 0 -> 73, 1 -> **64**, 2 -> 76, 3 -> 81,
+ *     4 -> 82. The same wrapper on layer 4's 0x7FFE addPrim -- the direct
+ *     sibling the old sweep never tried -- is exactly inert (64), at depth 2
+ *     76 and depth 3 87. On the layer-3 and layer-4 sprite addPrims exactly
+ *     inert; on layer 2's first addPrim 80/2, its second 71/1, both 75/1; on
+ *     layer 1's 0x7FFE addPrim 127, its sprite addPrim 71/1 (at depth 2 75,
+ *     depth 3 70, depth 4 70); on BgDrenv4S 72, BgDrenv3S 103/1, BgDrenv3E
+ *     211/12, BgDrenv4E 202/3.
+ *   - **the sibling asymmetries between the four layers.** Layer 4's dead
+ *     `else if` (lever 3) added to layer 3's wrapX3 70, to layer 3's wrapY3
+ *     70, to layer 4's own wrapY4 77; with the other axis as the guard 76 and
+ *     83. Layer 2's dead exit conditional (lever 1) replicated at layer 3's
+ *     exit 136/1 and at layer 4's 144/17. Six alternative guards for lever 1
+ *     itself: `D_80071A48[0].y` 129/4, `.x` 129/4, `&buf->BgDm[0]` 64,
+ *     `run[0]` 133, `otSlot` 222/2, `entity` 192/1 -- so `sprite ||` is not
+ *     merely one working guard, it is the only one.
+ *   - **`run`'s own spelling**, which no earlier sweep varied even though
+ *     `run` is the quantity whose rank has to fall: `run += 3` moved into the
+ *     `for` clause is exactly inert in layers 1, 2 and 3 (64 each).
  *
  * =====================================================================
  *
