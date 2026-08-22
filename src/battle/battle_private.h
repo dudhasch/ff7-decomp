@@ -733,6 +733,35 @@ extern u16 D_80162970;
 extern u8 D_80163778[];
 extern u8 D_80163B70[];
 
+/* One selectable row of a battle command/magic/item list; the lists live one
+   0x440-byte block per party slot. */
+typedef struct {
+    /* 0x0 */ u8 unk0; // 0xFF marks an empty slot
+    /* 0x1 */ u8 unk1;
+    /* 0x2 */ u8 unk2;
+    /* 0x3 */ u8 unk3;
+    /* 0x4 */ u8 unk4;
+    /* 0x5 */ u8 unk5;
+    /* 0x6 */ u8 flags; // bit 1 = disabled
+    /* 0x7 */ u8 unk7;
+} BattleListRow; // size: 0x8
+/* main/18B8.c's Unk8001DE0C, redeclared here because main_private.h is not
+   visible from the battle overlay. */
+typedef struct {
+    u16 unk0;
+    u16 unk2;
+    u16 unk4;
+    u16 unk6;
+} BattleLineRect;
+void func_8001DE0C(BattleLineRect*, s16, s16, s16, s32);
+void func_8001E040(BattleLineRect*);
+
+extern u8 D_8009DB14[];
+extern u8 D_8009DB94[];
+extern u8 D_8009D8F8[];
+extern s16 D_800F1E64[];
+extern BattleMenuWidget D_800F90FC[];
+
 /* One 6-byte record per selectable entry; 16 of them per 0x60-byte row,
    indexed by D_80158CFC. */
 typedef struct {

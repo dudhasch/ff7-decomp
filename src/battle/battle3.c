@@ -195,8 +195,47 @@ static void func_800DD690(s32 arg0, s16 arg1) {
 void func_800DD85C(s32, s16);
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DD85C);
 
+/* 25 changed / -6 instructions (81 against 87).  The line records are read
+ * with the byte-offset form the target's $at expansions require, and the two
+ * stack records are the right shapes, but the frame is 0x48 against 0x38 and
+ * six instructions are missing: the target's loop reloads the count from
+ * D_800F1E64 on the back edge where this body hoists it, and its clip record
+ * is four separate s16 locals rather than a RECT (m2c's sp20..sp26), which
+ * is where the extra 0x10 of frame comes from.  Next pass: read the count
+ * through the member at the loop guard instead of caching it, and split the
+ * clip RECT back into four locals. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DDAD8);
+#else
 void func_800DDAD8(s32, s16);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DDAD8);
+/*?*/ void func_80026A00(); // extern
+
+void func_800DDAD8(s32 arg0, s16 arg1) {
+    BattleLineRect line;
+    RECT clip;
+    s16 i;
+    s32 base;
+    s32 off;
+    u16 x0;
+    u16 y0;
+
+    func_80026A00();
+    clip.x = 0;
+    clip.y = 0;
+    clip.w = 0xFF;
+    clip.h = 0xFF;
+    func_80026A34(0, 1, GetTPage(0, 1, 0x3C0, 0x100) & 0xFFFF, (s32)&clip);
+    base = arg1 * 0x98;
+    for (i = 0; i < *(s16*)((u8*)D_800F1E64 + base); i++) {
+        off = i * 8 + base;
+        x0 = *(u16*)((u8*)D_800F1E64 + off + 2);
+        y0 = *(u16*)((u8*)D_800F1E64 + off + 4);
+        func_8001DE0C(&line, x0, y0, *(u16*)((u8*)D_800F1E64 + off + 6) - x0,
+                      *(u16*)((u8*)D_800F1E64 + off + 8) - y0);
+        func_8001E040(&line);
+    }
+}
+#endif
 
 /*
  * Draw step for one active on-screen entity. The caller (func_800DDE90) walks
