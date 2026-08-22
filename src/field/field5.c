@@ -2746,13 +2746,35 @@ extern u8 D_800E1036[];
  * the target's second address computation -- which does reproduce it but
  * costs more than the two insns it buys.
  *
- * `insn_histogram.py` states the -1 exactly and it is worth having written
+ * **100 rows / -1 instruction -> 96 changed / 0 inserted, at the exact 191.**
+ * Two local widths, found by `tools/width_sweep.py` and neither of them in
+ * the list above -- which measured `glyph` only as `s32` and never swept
+ * `charOff` at all.
+ *
+ *   - **`charOff` is `s16`, not `s32`**, and that is the length: 100/-1 ->
+ *     98 and exact. `chars` is capped at 0x158 by the guard above, so
+ *     `charOff = chars * 0x10` is at most 0x1570 and an `s16` holds it. The
+ *     `s8`/`u8` variants score identically and are a different program.
+ *   - **`glyph` is `s16`, not `u32`.** 98 -> 96, with the opcode histogram
+ *     unchanged, so this one is alignment rather than a real instruction. The
+ *     note above rejects `s32` glyph for turning the `srl` into an `sra`; the
+ *     `sra +1` in the histogram is present at every width including the
+ *     original `u32`, so it is not this. Every assignment is a constant
+ *     <= 0xDA or `*str + 0x73` with `*str` a `u8`, i.e. at most 0x172 and
+ *     always positive, so the signed shift is the same value.
+ *
+ * The sweep has to be re-run after each change and that is the whole method
+ * here: `charOff` only became visible once nothing else moved, and `glyph`
+ * only after `charOff` landed. After both, all 35 variants plateau at 96.
+ *
+ * `insn_histogram.py` states the remainder exactly and it is worth having written
  * down, because it is two facts rather than a hundred rows: every opcode
  * count matches except **addu 22 against 24** and **nop 13 against 12**, so
  * the body needs two more `addu` and one fewer `nop` and nothing else. The
  * `%hi` table is clean apart from our jump table being a local `.rodata`
  * label where the target names `jtbl_800A12E8`, which `checkfn` aliases.
  *
+ * Still two `addu` short with one extra `sra` and one extra `nop`.
  * The obvious candidate for the two `addu` -- `*(D_800E08A8 + off + row)`,
  * where the target adds `off + row` first and the base last -- is not it.
  * CLAUDE.md's `n + (s32)p` lever does not apply when both addends are plain
@@ -2771,8 +2793,8 @@ void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
     s32 rb;
     s32 chars;
     s32 rbOff;
-    s32 charOff;
-    u32 glyph;
+    s16 charOff;
+    s16 glyph;
     u8 ch;
     SPRT_16* sprite;
     u8 unusedLocals[4];
