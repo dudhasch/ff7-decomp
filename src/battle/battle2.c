@@ -1184,11 +1184,26 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4710);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D491C);
 
+void func_800D4A64();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4A64);
 
 static void func_800D4D6C(s32 arg0, s32 arg1, s32 arg2);
 void func_800D4C08(void* arg0, s32 arg1, s32 arg2, s32 arg3);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4C08);
+extern u8 D_800F0F98[];
+
+// Claim a slot running func_800D4A64. `off` is a pre-scaled byte offset, so
+// the D_800F0F98 lookup keeps the assembler's $at expansion the target has --
+// a scaled subscript would fold the symbol into a base register instead.
+void func_800D4C08(void* arg0, s32 arg1, s32 arg2, s32 arg3) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D4A64)];
+    s32 off = (arg1 & 0xFF) << 2;
+
+    p->D_801621F0 = arg1 & 0xFF00;
+    *(s32*)&p->unkC = *(s32*)(D_800F0F98 + off);
+    *(SVECTOR*)&p->D_801621F4 = *(SVECTOR*)arg0;
+    p->unk10.unk.unk2 = arg2;
+    *(s16*)&p->unk18 = arg3;
+}
 
 void func_800D4CBC(s32 arg0, s32 arg1, s32 arg2) {
     s32 sp10;
@@ -1223,9 +1238,39 @@ static s16* func_800D4FA8(s32 arg0) {
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4FF0);
 
 void func_800D508C();
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D508C);
-
 extern Unk80162978* D_800F10E0;
+
+// The screen-fade tick: step the accumulator, release the slot when it runs
+// past zero, clamp it at 0xFFFF, and push its high byte out as a flat colour.
+// `cur` is named so the sum keeps source order -- inline, fold ranks the
+// deref below `step` and emits `addu <acc>,<step>,<cur>`.
+void func_800D508C(void) {
+    Unk80162978* e = &D_80162978[D_8015169C];
+    s32 step;
+    s32 acc;
+    s32 cur;
+
+    if (D_80062D98 == 0) {
+        step = *(s32*)&e->unk8;
+        if (step != 0) {
+            cur = *(s32*)&e->D_8016297C;
+            acc = cur + step;
+            *(s32*)&e->D_8016297C = acc;
+            if (acc <= 0) {
+                e->D_80162978 = -1;
+                D_800F10E0 = NULL;
+                return;
+            }
+            if (0xFFFF < acc) {
+                *(s32*)&e->D_8016297C = 0xFFFF;
+                *(s32*)&e->unk8 = 0;
+            }
+        }
+    }
+    D_80163C74 = (DR_MODE*)func_800C4FC8(*(u8*)((u8*)e + 5),
+                                        *(u8*)((u8*)e + 5),
+                                        *(u8*)((u8*)e + 5));
+}
 
 // Reset the fixed-point ramp: zero the accumulator (0x04) and seed the
 // countdown (0x0C) so it lasts arg0 ticks.
@@ -1543,7 +1588,29 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D6D8C);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D6F78);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D70C0);
+// Every fourth tick, hand the current slot's position to a fresh slot running
+// the callback it carries at +0x1C; retire the slot after 13 ticks.
+//
+// `q` has to be a named pointer: written inline as
+// `&D_801621F0[...].D_801621F4` the +4 folds into the base register and the
+// block move stores at 0/4/7/0xB, where the target keeps the element address
+// and carries the +4 as a displacement.
+void func_800D70C0(void) {
+    Unk801621F0* p = &D_801621F0[D_801590D4];
+    Unk801621F0* q;
+
+    if (D_80062D98 != 0) {
+        return;
+    }
+    if ((p->D_801621F2 & 3) == 0) {
+        q = &D_801621F0[func_800BC04C(*(void (**)())&p->unk1C)];
+        *(SVECTOR*)&q->D_801621F4 = *(SVECTOR*)&p->D_801621F4;
+    }
+    p->D_801621F2++;
+    if (p->D_801621F2 == 0xD) {
+        p->D_801621F0 = -1;
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7178);
 
