@@ -187,4 +187,17 @@ void func_80029998(s32* arg0) {
     } while (i != 0);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800299C8);
+// Tear down the root-counter tick event and silence the SPU.
+void func_800299C8(void) {
+    while (StopRCnt(0xF2000002) == 0) {
+    }
+    UnDeliverEvent(0xF2000002, 2);
+    while (DisableEvent(D_80062E00) == 0) {
+    }
+    while (CloseEvent(D_80062E00) == 0) {
+    }
+    SpuSetTransferCallback(0);
+    SpuSetIRQ(0);
+    SpuSetIRQCallback(0);
+    SpuSetKey(0, 0xFFFFFF);
+}
