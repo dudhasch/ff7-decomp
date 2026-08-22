@@ -2492,7 +2492,34 @@ void func_800AF320(s32 arg0, s32 arg1, s32 arg2) {
 
 void func_800AF380(s32 arg0) { func_800A7254(2, arg0, 0x15, 0xF); }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AF3AC);
+// Recompute the per-turn HP drift for combatant arg0: +1/32 of max HP while
+// Regen is up, -1/32 while Poison is.
+void func_800AF3AC(s32 arg0, s32 arg1, s32 arg2) {
+    s32 delta;
+    s32 step;
+    s32 status;
+
+    delta = 0;
+    step = g_BattleState.combatant[arg0].maxHP >> 5;
+    status = g_BattleState.combatant[arg0].status;
+    if (status < 0) {
+        if (D_800F5F44.D_800F7DC6 == 1) {
+            status |= STATUS_DUAL_DRAIN;
+        }
+    }
+    if (status & STATUS_REGEN) {
+        delta += step;
+    }
+    if (status & STATUS_DUAL_DRAIN) {
+        delta -= step;
+    }
+    g_CombatantTurnState[arg0].unk6 = delta;
+    if (arg2 != 0) {
+        func_800AEB20();
+    } else {
+        func_800AEB80(arg0, arg1, 0);
+    }
+}
 
 void func_800AF470(s32 arg0) { g_CombatantTurnState[arg0].unk28 = 3; }
 
