@@ -397,7 +397,36 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A4F78);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5208);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A52A4);
+Unk800E5768* func_800A52A4(void) {
+    Unk800E5768* p;
+    Unk800E5768* prev;
+    Unk800E5768* old;
+
+    if (D_800E5760 != NULL) {
+        p = D_800E5760;
+        D_800E5760 = p->next;
+    } else {
+        p = D_800E5764;
+        if (p != NULL) {
+            prev = NULL;
+            while (p->next != NULL) {
+                prev = p;
+                p = p->next;
+            }
+            if (prev != NULL) {
+                prev->next = NULL;
+            } else {
+                p = NULL;
+            }
+        }
+    }
+    if (p != NULL) {
+        old = D_800E5768;
+        D_800E5768 = p;
+        p->next = old;
+    }
+    return p;
+}
 
 void func_800A5348(s32* arg0, s32* arg1) {
     s32 old;
