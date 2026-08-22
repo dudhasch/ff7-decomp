@@ -276,6 +276,17 @@ genuinely wrong function ahead of them was fixed. Read the *operands*: if the
 only difference on every row is the hex address after a `beqz`/`j`/`bnez` and
 the deltas all agree, do not touch the function — go fix whichever earlier
 function `checkfn` reports a length for.
+**The shape that says you are looking at exactly that, and not at a fault of
+your own:** every differing row is a branch or jump *target*, the two sides
+are off by the **same** constant, the instructions are identical and the
+length is exact. `checkfn` and `variant_eval` scope the comparison to one
+function but the addresses come from the whole object, so a function 18
+instructions long earlier in the unit reads as 0x48 on every branch in five
+later ones. Fix the earlier function and re-measure before touching any of
+them -- in one batch of ten, four "mismatches" were already matches and the
+fifth was a single real row hiding behind the same constant. This is the
+plain-build twin of the `-DNON_MATCHINGS` trap recorded under *Sweeping many
+variants at once*; the cause is different and the diff looks the same.
 
 ### 2. Seed with m2c
 
@@ -4663,6 +4674,47 @@ a near-miss, in rough order of frequency:
   directly and 1 with the local, with identical register assignments either
   way; declaration order, an initialiser on the declaration, and reordering the
   other locals are all inert.
+* **A scaled byte-offset local used again *after* its loop is a global
+  allocno and loses the register; a second local for the tail is the fix, and
+  deleting the tail use instead grows the frame.** The `$at` addressing idiom
+  wants `off = i * 8;` in a local, and the obvious way to write the one extra
+  store a clear-loop usually has after it is to assign the same `off` again.
+  That single reuse makes the pseudo span two blocks, so `local_alloc` refuses
+  it, `global_alloc` places it, and it comes out in `$v1` where the target has
+  `$v0` -- 10 rows of what reads as pure naming on `func_800A59A0` in
+  `src/world/world.c`. Declaring `s32 last;` for the tail is 0. The
+  counter-intuitive half is the third spelling: writing `i * 8` inline at the
+  tail *also* frees `off` to be block-local and scores 1 row, but adds
+  `addiu sp,sp,-8` / `addiu sp,sp,8` -- an 8-byte frame the target does not
+  have, in a leaf function with no aggregate and nothing spilled. So the rule
+  is not "shorten the live range"; it is "give the tail its own variable".
+* **`arr[i]` and `(T*)(i * sizeof(T) + (s32)arr)` put the `addu` operands the
+  other way round even when `arr` is a *loaded pointer*, not a symbol.**
+  CLAUDE.md records this for a symbol base ("`p + n` puts the pointer first;
+  `n + (s32)p` lets you choose"); the same holds when the base arrived in a
+  register from an `lw`, because what fold canonicalises is the pointer-ness
+  of the operand and not where its value came from. `func_800A8898` in
+  `src/world/world.c` sums three normals through `verts[tri->vert[k]]` and
+  measures **21 rows, 0 insertions, 0 deletions, exact length** -- the whole
+  residue being `addu a2,a1,a2` against the target's `addu a2,a2,v0` and the
+  register cascade behind it. Written `(SVECTOR*)(tri->vert[k] * 8 +
+  (s32)verts)` it matches. Note the companion fix that has to come first: the
+  three stores go through an out-pointer that may alias the two globals, so
+  the three addresses have to be named in locals or every one of them is
+  recomputed after each store (+18 instructions).
+* **A narrowing conversion at a call site comes from the prototype, and a
+  callee defined *later in the same file* has no prototype.** gcc 2.6.3 takes
+  the call as an implicit declaration, promotes the argument to `int` and
+  converts nothing -- so a target's `andi a1,a1,0xff` in front of a `jal`
+  simply never appears and the function is one instruction short with no
+  other fault. `func_800B84D8` in `src/world/world.c` calls
+  `func_800B8D4C(u8, u8)`, which is defined 270 lines below it; `(u8)arg0` at
+  the call site restores the mask. Read the rule in both directions before
+  reaching for a forward declaration: `func_800B8720` in the same file passes
+  two `s16`s to `func_800B8A5C(s16, s8, s16)` and the target has two plain
+  `sll`/`sra 16` pairs and *no* truncation to `s8`, which only the implicit
+  declaration produces. Adding the prototype would be the faithful-looking
+  change and the wrong one.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -6126,14 +6178,31 @@ splat had rendered as a 402-instruction one plus a 325-instruction one, and
 the bytes are right, the overlay's SHA-1 is right, and the halves diff
 perfectly against themselves.
 
-Three tells, any one of which is conclusive:
+Three tells, of which **only the second is conclusive**:
 
-* the `.s` has no `addiu $sp, $sp, -N` at the top, or no `jr $ra` at the
-  bottom (`head -6` / `tail -4` is the whole check)
 * a branch target rendered as `.L800…` that lies outside the file's own
-  address range -- so the two `.s` reference each other's labels
+  address range -- so the two `.s` reference each other's labels. This is
+  the one to screen a whole overlay with, and it is one command:
+
+  ```shell
+  for f in asm/us/<ovl>/nonmatchings/<unit>/*.s; do
+    comm -23 <(grep -oE '\.L[0-9A-F]{8}' "$f" | sort -u) \
+             <(grep -oE '^\s*\.L[0-9A-F]{8}:' "$f" | tr -d ': \t' | sort -u)
+  done
+  ```
+
+  Note the `^\s*` -- splat indents the label definitions two spaces, and a
+  definition regex anchored at column 0 matches nothing, so every label
+  reads as undefined and all 180 files come back "suspect".
+* no `jr $ra` anywhere in the file
 * no callers: `grep -rl "jal *<name>" asm/ src/` finds nothing, and the
   function is not an obvious entry point
+
+**A missing `addiu $sp, $sp, -N` is not a tell at all** -- a leaf function
+with no saved registers has no prologue, and most small functions are leaves.
+Screening `src/world/world.c` that way reported 180 of its 191 `.s` files as
+suspect and every one of them was fine; the label check reported none, which
+is the correct answer for that unit.
 
 The fix is to pin the real function's size in the overlay's symbol config,
 which is read by splat only:
@@ -6662,6 +6731,31 @@ mkdir -p .claude/worktrees/wt-<n>/{.venv,build,.variants}
   will not take a mode change. It also deletes the `.gz` on the way out, so the
   second attempt fails differently. Stamp the prerequisites old and the
   products new and make leaves the toolchain alone:
+
+  **`touch -d` cannot be used for that on Windows**, and neither can
+  `rm -f bin/*.gz`. The container user does not own the bind-mounted files, so
+  setting an *arbitrary* time is `Operation not permitted` while a plain
+  `touch` (which only needs write access) works; and deleting the `.gz` makes
+  `make` re-download it and then die on the `chmod +x` that follows. Recreate
+  the `.gz` as empty stamps instead and order the three layers with plain
+  touches -- the rule chain is `bin/%: bin/%.gz: bin/%.gz.sha256`, so all that
+  matters is sha256 <= gz <= binary:
+
+  ```shell
+  : > bin/cc1-psx-26.gz; : > bin/cc1-psx-272.gz
+  : > bin/clang-format.gz; : > bin/objdiff-cli-linux-x86_64.gz
+  touch bin/*.gz.sha256 bin/*.tag tools/str.c
+  sleep 2; touch bin/*.gz
+  sleep 2; touch bin/cc1-psx-26 bin/cc1-psx-272 bin/clang-format \
+                 bin/objdiff-cli-linux-x86_64 bin/str
+  ```
+
+  `make -n build` printing nothing but `./mako.sh build` is the check. Only
+  `bin/cc1-psx-26`, `bin/cc1-psx-272` and `bin/str` are prerequisites of
+  `build`, so a wrong stamp on the other two shows up under `make format`
+  instead, which is easy to misread as a formatting problem.
+
+  On a host where the files *are* owned by the user, the original form works:
 
   ```shell
   rm -f bin/*.gz
