@@ -1367,6 +1367,33 @@ a near-miss, in rough order of frequency:
   local (worse). The other way to reach the register form is the symbol_ref
   bullet above — give the address a second reference by spelling a neighbour
   as an offset from it.
+
+  **In a unit compiled with `-G<n>` there is a third route, and it is a fact
+  about the symbol rather than about the function: a `D_` scalar the target
+  addresses through a `lui`/`addiu` pair with `0(reg)` is a *member of a large
+  object*, not a standalone global.** `-G8` (the `//! G=8` header on
+  `src/main/1255C.c` and its siblings) makes gcc treat any object it can prove
+  is at most 8 bytes as small-data, so its address never needs a register and
+  every access comes out as the assembler's `$at` expansion; the address of a
+  member of a 0x10F4-byte struct is not small-data, so gcc builds it once into
+  a register and reuses it for the load *and* the store. `D_8009D260` in
+  `src/main/1255C.c` is `Savemap.gil` — `Savemap` is `0x8009C6E4` and `gil` is
+  at `+0xB7C` — and rewriting the two `SystemMenuAddPartyGold` /
+  `SystemMenuRemovePartyGold` bodies to say `Savemap.gil` matched both
+  **outright**, from 10 rows / +2 instructions and 8 rows / +1. The two park
+  notes there were forty lines of allocator theory (`$v0` against `$a1`,
+  "gcc 2.7.2's refusal", "needs a permuter run or a toolchain lever") that had
+  measured a file-scope pointer, a `volatile` pointer, a `section(".data")`
+  attribute and four spellings of the local — and not once asked *what the
+  symbol is*. The base symbol is what matters, not struct-ness: a
+  `(u32*)&Savemap.gil` pointer local reaches the same form.
+
+  So the check, before any codegen reasoning about an address that will not go
+  into a register: subtract the `D_` address from every big object declared in
+  `include/game.h` and `src/<ovl>/<ovl>_private.h` and see whether the
+  difference lands on a member. `grep -n 'Savemap = ' config/sym_extern.us.txt`
+  gives the bases; the struct's own `/* 0xNNN */` offset comments give the
+  rest. It costs a minute and it is the difference between a match and a park.
 * **A scaled subscript folds the symbol into the address register; a
   pre-scaled byte offset does not.** This is the whole of the "`$at`
   rematerialisation wall" that a dozen park notes in `src/field/` describe.
