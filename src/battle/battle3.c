@@ -562,7 +562,54 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DFE34);
 
 void func_800DFFDC(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DFFE4);
+/* 26 changed / 4 inserted at the exact 106 instructions.  Two clusters:
+ *   - the target loads D_800F38A1 as its *second* insn, ahead of the
+ *     D_8009D8FE read; here it lands after the D_80162970 store, because a
+ *     plain-scalar load cannot be scheduled above a plain-scalar store while
+ *     an ARRAY_REF load can (CLAUDE.md-s MEM_IN_STRUCT_P rule).  That says
+ *     one of D_800F38A1 / D_80162970 is a struct member in the original;
+ *     D_800F389C..D_800F38A9 look like one record and typing them is the
+ *     next pass-s first job.
+ *   - v (a2 in the target) stays live past "idx = v - 1", which here reuses
+ *     its register.  Downstream of the first cluster. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DFFE4);
+#else
+void func_800DFFE4(void) {
+    BattleMenuWidget* widget;
+    u8 v;
+    s32 idx;
+
+    v = D_8009D8FE[D_800F38A0 * 0x440];
+    widget = &D_800F910E[D_800F38A0];
+    D_80162970 = v;
+    idx = v - 1;
+    if (D_8009CBDC[D_800F38A1] == 0xFF) {
+        D_80162970 = 1;
+    }
+    D_800F2C9A = D_800F3168[idx];
+    D_800F2CAC = D_800F3168[idx] - 3;
+    if (D_800F57CC == 0) {
+        widget->unkA = 0;
+        widget->cursorRow = 0;
+        widget->unk0 = 0;
+        widget->scroll = 0;
+    }
+    widget->unkC = 1;
+    widget->unkD = D_80162970;
+    *(u16*)widget->unk4 = 1;
+    widget->unk10 = 0;
+    widget->unk6 = D_80162970;
+    if ((s16)D_80162970 == 1) {
+        widget->unk11 = 0;
+    } else {
+        widget->unk11 = 1;
+    }
+    widget->unkE = 0;
+    widget->unkF = 0;
+    widget->unk8 = 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E010C);
 
