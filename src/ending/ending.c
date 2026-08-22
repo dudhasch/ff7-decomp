@@ -32,6 +32,12 @@ typedef struct EndingModel {
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
 extern s32 D_800A6390;
+/* Three (sector, size) pairs in .data -- the ending overlay's own file
+ * table, indexed by the script halfword func_800A1EEC and func_800A1F48 read.
+ */
+extern s32 D_800A6398[];
+extern s32 D_800A63B0;
+extern u_long* D_800A6524;
 extern s32 D_800AF40C;
 extern s32 D_800AF410;
 extern EndingTask* D_800AF3CC;
@@ -43,8 +49,11 @@ s32 func_80034410(void);
 u_long* func_80034D18(u_long* base, s32 index);
 s32 func_80034D2C(u_long* src, u_long* dst);
 s32 func_80034D5C(void);
+s32 func_80034FC8(u_long* dst, s32 index);
 s32 func_800484A8(void);
 s32 func_80048540(s32 arg0);
+void func_800A2504(s32 x, s32 y, s32 w, s32 r, u8 g, u8 b);
+void func_800A273C(s32 arg0);
 void func_800A2888(u_long* tim, u16* tpage, u16* clut);
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0030);
@@ -83,9 +92,21 @@ void func_800A1ED4(s16* arg0) { D_800A6528 = arg0; }
 
 s32 func_800A1EE4(void) { return 0; }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A1EEC);
+s32 func_800A1EEC(void) {
+    s32 file = *D_800A6528++;
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A1F48);
+    SystemLoadFileBySector(D_800A6398[file * 2], D_800A6398[file * 2 + 1],
+                           (u_long*)0x800D0000, NULL);
+    return 1;
+}
+
+s32 func_800A1F48(void) {
+    s32 file = *D_800A6528++;
+
+    DS_read(D_800A6398[file * 2], D_800A6398[file * 2 + 1], (u_long*)0x800D0000,
+            NULL);
+    return 1;
+}
 
 s32 func_800A1FA4(void) { return func_80034410() == 0; }
 
@@ -114,18 +135,43 @@ s32 func_800A2014(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A208C);
+s32 func_800A208C(void) {
+    D_800A6524 = (u_long*)0x801A0000;
+    func_80034FC8((u_long*)0x801A0000, *D_800A6528++);
+    return 1;
+}
 
 s32 func_800A20D4(void) { return func_80034410() == 0; }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A20F8);
+s32 func_800A20F8(void) {
+    /* 8 bytes of frame the emitted code never names -- the target's `sw
+     * ra,0x20(sp)` against a 0x18 outgoing-argument area. Any size from 2 to 8
+     * gives the same layout; the identity of the local is not recoverable. */
+    u8 unusedLocals[8];
+    s32 x = *D_800A6528++;
+    s32 y = *D_800A6528++;
+    s32 w = *D_800A6528++;
+    u8 r = *D_800A6528++;
+    u8 g = *D_800A6528++;
+
+    func_800A2504(x, y, w, r, g, *D_800A6528++);
+    func_800A273C(0);
+    return 1;
+}
 
 s32 func_800A2190(void) {
     SetDispMask(*D_800A6528++);
     return 1;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A21CC);
+s32 func_800A21CC(void) {
+    if (D_800A6390 != 0) {
+        D_800A63B0 = *D_800A6528++;
+    } else {
+        D_800A6528++;
+    }
+    return --D_800A63B0 == 0;
+}
 
 s32 func_800A2248(void) {
     func_800A32D8(func_800A3314(4));
@@ -156,9 +202,20 @@ s32 func_800A22E4(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A2328);
+s32 func_800A2328(void) {
+    D_8009A000[0] = 0x10;
+    D_8009A004[0] = (u32)func_80034D18((u_long*)0x800D0000, *D_800A6528++);
+    SystemAkaoExecute();
+    return 1;
+}
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A2380);
+s32 func_800A2380(void) {
+    D_8009A000[0] = *D_800A6528++;
+    D_8009A004[0] = *D_800A6528++;
+    D_8009A008[0] = *D_800A6528++;
+    SystemAkaoExecute();
+    return 1;
+}
 
 s32 func_800A23F8(void) { return func_80034410() == 8; }
 
