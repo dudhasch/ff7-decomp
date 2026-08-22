@@ -5740,10 +5740,42 @@ has is orphaned:
 
 ```powershell
 $buildVol = if ($env:FF7_BUILD_VOLUME) { $env:FF7_BUILD_VOLUME }
-  elseif ($repoRoot -match '[\/]\.claude[\/]worktrees[\/]([^\/]+)') {
+  elseif ($repoRoot -match '[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)') {
     'ff7_build_' + ($Matches[1] -replace '[^A-Za-z0-9_.-]', '_') }
   else { 'ff7_build' }
 ```
+
+**The character class has to be `[\\/]`, and an earlier version of this
+snippet said `[\/]`, which silently does the opposite of what it claims.**
+Inside a .NET character class `\/` is an escaped forward slash, so `[\/]` is
+just `[/]` — and `$repoRoot` on Windows is `C:\...\.claude\worktrees\<name>`
+with backslashes. The match fails, the `else` arm fires, and **the worktree
+shares `ff7_build` with the main clone**: precisely the corruption this
+section exists to prevent, set up by the snippet that is supposed to prevent
+it. Verify it rather than reading it — the whole check is one line, and it
+costs nothing:
+
+```powershell
+$repoRoot = "<your worktree path>"
+if ($repoRoot -match '[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)') {
+    "ff7_build_$($Matches[1])" } else { "SHARED ff7_build -- WRONG" }
+docker volume ls | Select-String ff7_build
+```
+
+The symptom, if you do not, is a link that fails on an object the same build
+produced minutes earlier: `build/us/src/main/psxsdk.c.o: file not recognized:
+file format not recognized`, on a unit you never touched, with `main.elf`
+having linked from that same object successfully at step 6 of the same run.
+Deleting the object and rebuilding "fixes" it until the next collision, so it
+reads as flakiness rather than as a shared volume. A second tell is
+`docker volume ls`: every other agent's worktree has an `ff7_build_<name>`
+and yours does not.
+
+The recovery is the fix plus one clean build — the new volume starts empty, so
+the rebuild is from scratch and its 19x `OK` is the strongest verification
+available. Re-run `checkfn.py` over everything the session landed afterwards:
+a shared volume can hand a verdict that was measured against another agent's
+object.
 
 Prove the result before handing work to anyone: `make build` to 19x `OK` **and**
 one `variant_eval.py` run whose row count matches what the source worktree
