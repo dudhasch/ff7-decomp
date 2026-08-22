@@ -5883,6 +5883,66 @@ force a match** unless you have evidence the whole translation unit was built
 differently — it affects every function in the file and will break the ones that
 already match.
 
+**A file with no `//!` line at all has not been *decided*, it has been
+defaulted — and on a fresh unit that is a coin flip you have to call before
+writing anything.** `src/ending/ending.c` carried the default for as long as it
+existed and the whole overlay is `//! PSYQ=3.3 CC1=2.6.3`; twelve functions
+written against the default came out MISMATCH by one instruction each and read
+as twelve separate scheduling puzzles. Three tells settle it in one command
+apiece, and none of them needs a diff:
+
+* **`jr ra` with the stack adjust in its delay slot is 2.7.2; `lw ra / addiu
+  sp / jr ra / nop` is 2.6.3.** gcc 2.7.2 has `DELAY_SLOTS_FOR_EPILOGUE`, so
+  reorg fills the return slot with `addiu sp` *and* moves the last body insn
+  into the `lw ra` load-delay shadow — two instructions shorter than 2.6.3's
+  epilogue for the same function. Every non-leaf function in the target then
+  reads as "-1 instruction, a `nop` we do not have", which is exactly what a
+  scheduling residue looks like. Count it across the target instead of reading
+  one function:
+
+  ```shell
+  mipsel-linux-gnu-objdump -d expected/build/us/<src>.o \
+    | grep -A1 'jr[[:space:]]*ra' | grep -c 'addiu[[:space:]]*sp'
+  ```
+
+  A file that is genuinely 2.7.2 still scores near zero on this (real code
+  rarely offers reorg a candidate), so a *nonzero* count in **your** build
+  against zero in the target is the signal, not the target's count alone.
+* **`lui at / addiu at / addu at / op 0(at)` where you get `lui at / addu at /
+  op %lo(at)` is aspsx < 2.30**, not a C-level addressing choice. cc1 emits
+  `sh $0,SYM($2)` either way — the four-instruction form is maspsx's
+  `addiu_at`, which `tools/maspsx/maspsx.py` turns on for `aspsx_version <
+  (2, 30)`. Before spending a budget on the scaled-subscript-versus-byte-offset
+  recipe, check the assembler version; the recipe cannot produce the extra
+  `addiu` at all under 2.34.
+* **An unexplained `nop` in a load-delay slot that an `$at` expansion's `lui`
+  would have covered is `nop_at_expansion`, same version gate.**
+
+The cheapest confirmation is not a build at all — run the unit through both
+compilers and read one function:
+
+```shell
+mipsel-linux-gnu-cpp -Iinclude -Iinclude/psxsdk -DUSE_INCLUDE_ASM -DFF7_STR \
+    -lang-c -undef -fno-builtin src/ending/ending.c \
+  | bin/str | iconv -f UTF-8 -t Shift-JIS \
+  | bin/cc1-psx-26 -quiet -mcpu=3000 -mgas -O2 -G0 -g -gcoff
+```
+
+**Changing the `//!` line and re-running `checkfn.py` does not test the change.**
+`tools/ninja/gen.py` reads that line when **build.ninja is generated**, and
+`ninja <target>` — which is what `checkfn.py` runs — never regenerates it. The
+compile line keeps the old compiler, every verdict comes back byte-identical to
+the previous run, and the honest-looking conclusion is "the compiler is not the
+difference". It cost a whole hypothesis here. Regenerate first and verify:
+
+```shell
+make build OVERLAYS=<ovl>          # regenerates build.ninja
+ninja -t commands build/us/<src>.o | tail -1 | grep -o 'cc1-psx-[0-9]*\|aspsx-version=[0-9.]*'
+```
+
+That is the same trap the MAGIC-overlay recipe records for a *newly created*
+`.c`; it applies just as much to editing the header of one that already exists.
+
 ### Game strings
 
 The game uses a custom encoding, not ASCII. Strings are written `_S("Hello")`.
