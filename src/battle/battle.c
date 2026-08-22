@@ -879,7 +879,20 @@ void func_800A6AC4(void) {
     D_800F5F44.D_800F7DC2 &= 0xFC0F;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A6B1C);
+// For each of the three player slots, move a pending flag out of D_800F7DC2
+// and into D_800F7DAC, unless the slot is already flagged in D_800F7DC4.
+void func_800A6B1C(void) {
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        if (!(((s32)D_800F5F44.D_800F7DC4 >> i) & 1)) {
+            if (((s32)D_800F5F44.D_800F7DC2 >> i) & 1) {
+                D_800F5F44.D_800F7DC2 &= ~(1 << i);
+                D_800F5F44.D_800F7DAC |= 1 << i;
+            }
+        }
+    }
+}
 
 void func_800A6B88(s32 arg0, s32 arg1) {
     s32 i;
