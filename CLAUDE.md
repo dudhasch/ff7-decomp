@@ -1739,6 +1739,36 @@ a near-miss, in rough order of frequency:
   cut between ...` comments in `src/main/18B8.c`) can legitimately contain
   functions from modules assembled at different versions — `func_8001DEF0`
   wants < 2.30 while 72 of its neighbours match at 2.34.
+
+  **Count both sides before concluding the unit's version is right, because
+  the count can say the opposite.** In `src/main/18B8.c` **77 of the 151
+  remaining functions** contain `addiu $at, $at, %lo(...)` — the < 2.30
+  expansion — and **none of the 72 already-matching ones do**. That is not a
+  mixed unit; it is a unit whose whole assembler version may be wrong, with
+  the evidence hidden because the functions that would show it are exactly the
+  ones nobody has written yet. `tools/ninja/gen.py` now takes `ASPSX=<ver>` in
+  the `//!` header to set the assembler alone (`PSYQ=` moves cc1 with it,
+  which is not what you want here), and under `//! G=8 ASPSX=2.21`
+  `build/us/src/main/18B8.c.o` is **byte-identical** to the 2.34 build —
+  measured with `md5sum`, twice, with the ninja output visible. So the change
+  is free for everything currently written and would unblock 77 functions.
+
+  It is *not* landable yet, and the reason is a latent build-system bug rather
+  than codegen: changing the header forces splat to re-run, splat rewrites
+  `build/us/undefined_syms.<ovl>.txt`, and `src/menu/cnfgmenu.c` and
+  `src/menu/bginmenu.c` reference `D_80062F58` — an address that only gets
+  that name while splat knows no better one. The regenerated
+  `config/sym_export.us.txt` (untracked, produced from `main.elf`) names
+  `0x80062f58` `g_AkaoVolMulMusicSlideStep`, splat drops the `D_` line, and
+  both menu overlays fail to link with `undefined reference to D_80062F58`.
+  The stale file is what has been holding them up: `rm
+  build/us/undefined_syms.cnfgmenu.txt` and rebuilding reproduces the failure
+  with the header **unchanged**. The root cause is one address:
+  `config/symbols.main.us.txt` puts `g_AkaoVolMulMusicSlideStep` at
+  `0x80062F2C` while `main.elf` links it at `0x80062F58`, 0x2C apart. Fix that
+  and the assembler switch is a 77-function unblock. Until then, leave
+  `//! G=8` alone — and know that **any** change that makes splat re-run for
+  the menu overlays can surface the same failure out of nowhere.
 * **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency

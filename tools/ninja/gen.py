@@ -125,6 +125,16 @@ def parse_compiler_params(line: str) -> CompilerParams:
                 c.cc_gp = f"-G{n}"
             except ValueError:
                 raise Exception(f"{key} value {value} is not a valid integer")
+        elif key == "ASPSX":
+            # The assembler version on its own, without PSYQ's cc1 pairing.
+            # aspsx below 2.30 expands an indexed-symbol reference through $at
+            # as lui/addiu/addu/op-0(at) and guards it with a nop, where 2.34
+            # emits lui/addu/op-%lo(at) -- two instructions a site. A unit
+            # splat has merged out of several original modules can need one
+            # cc1 and the other assembler; src/main/18B8.c is the case.
+            if value not in ("2.21", "2.34", "2.56"):
+                raise Exception(f"{key} value {value} is not recognized")
+            c.as_flags = f"--expand-div --aspsx-version={value}"
         elif key == "O":
             try:
                 n = int(value)
