@@ -2591,13 +2591,19 @@ const u8 g_StatusBitTable[] = {0x0A, 0x19, 0x15, 0x0D, 0x10, 0x11, 0x03, 0x02,
                                0x0F, 0x1B, 0x14, 0x18, 0xFF, 0xFF, 0xFF, 0xFF};
 int func_800B0378();
 int func_800B062C();
-int func_800B079C();
+void func_800B079C(void);
 int func_800B0B8C();
 int func_800B0910();
 void func_800B089C(void);
 int (* const D_800A04E0[])() = {
-    func_800B0378, func_800B062C, func_800B079C, func_800B0B8C,
-    func_800B0B8C, func_800B0B8C, func_800B0910, (int (*)())func_800B089C,
+    func_800B0378,
+    func_800B062C,
+    (int (*)())func_800B079C,
+    func_800B0B8C,
+    func_800B0B8C,
+    func_800B0B8C,
+    func_800B0910,
+    (int (*)())func_800B089C,
 };
 // ___end
 
@@ -2757,7 +2763,35 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B0378);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B062C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B079C);
+static s32 func_800B2F70(void);
+
+/* Decide whether the pending action lands: compare a level/luck-derived
+ * accuracy against a fresh roll, and set bit 1 of unk220 when it does.  A
+ * combatant carrying the 0x40000000 flag always hits (the 0xFF floor). */
+void func_800B079C(void) {
+    s32 acc;
+    s32 actorId;
+    s32 targetId;
+
+    actorId = g_CurrentAction->actorId;
+    targetId = g_CurrentAction->unk208;
+    if (g_CurrentAction->unk218 & 1) {
+        return;
+    }
+    acc = 0xFF;
+    if (!(g_CurrentAction->unkC8 & 0x40000000)) {
+        acc = (g_CurrentAction->characterLevel +
+               g_BattleState.combatant[actorId].unk15 -
+               g_BattleState.combatant[targetId].unk9) /
+              4;
+        if (actorId < 3) {
+            acc += D_800F5EFC[actorId * 0x18 + 5];
+        }
+    }
+    if (acc >= func_800B2F70()) {
+        g_CurrentAction->unk220 |= 2;
+    }
+}
 
 void func_800B089C(void) {
     s32 temp_v1;

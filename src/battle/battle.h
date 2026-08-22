@@ -75,7 +75,7 @@ typedef struct {
     /* 0x04 */ u32 unk4; // battle-state flags (e.g. bit 0x40 = back row, bit
                          // 0x20 = defending)
     /* 0x08 */ s8 unk8;
-    /* 0x09 */ s8 unk9;
+    /* 0x09 */ u8 unk9;  // read `lbu` in func_800B079C
     /* 0x0A */ s8 unkA;
     /* 0x0B */ s8 unkB; // written `sb` per combatant in func_800AE764
     /* 0x0C */ s8 unkC;
@@ -88,7 +88,7 @@ typedef struct {
     /* 0x12 */ s8 unk12;
     /* 0x13 */ s8 unk13;
     /* 0x14 */ u8 unk14; // read `lbu` + `srl` in func_800B0B94
-    /* 0x15 */ s8 unk15;
+    /* 0x15 */ u8 unk15; // read `lbu` in func_800B079C
     /* 0x16 */ s8 unk16;
     /* 0x17 */ u8 unk17;
     /* 0x18 */ s32 unk18;
