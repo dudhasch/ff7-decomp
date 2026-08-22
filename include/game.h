@@ -210,6 +210,7 @@ typedef union {
     TILE_1* tile1;
     BLK_FILL* blk_fill;
     LINE_F2* linef2;
+    DR_MODE* drmode;
 } Gpu;
 
 typedef struct {

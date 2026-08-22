@@ -17,6 +17,7 @@ s8 D_80062DFC;
 s32 D_80062ECC;
 s32 D_80062F0C;
 s32 D_80062F20;
+s32 D_80062F58;
 s32 D_80062F90;
 s32 D_80062F94;
 s32 D_80062FC0;
@@ -43,7 +44,12 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022B5C);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022DE4);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022FE0);
+// Per-frame double-buffer flip for the buffer pair indexed by D_80062F58.
+void func_80022FE0(void) {
+    func_800159B0();
+    PutDispEnv(&D_8007075C[D_80062F58]);
+    PutDrawEnv(&D_800706A4[D_80062F58]);
+}
 
 s32 func_80023050(void) { return D_80062DF8; }
 
@@ -129,7 +135,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023AD4);
 // double-buffer flip (activate the finished buffer for scanout, point drawing
 // at the other one).
 static void func_80024A04(void) {
-    PutDispEnv(&D_8007075C);
+    PutDispEnv(&D_8007075C[0]);
     PutDrawEnv(&D_80070700);
 }
 
@@ -248,7 +254,43 @@ void func_80025130(s32 arg0) {
     func_801D0704(arg0);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025174);
+// Boot dispatch: read the disc's boot flags and hand off to the matching
+// loader. Flag 8 also seeds six starter items into five inventory rows.
+void func_80025174(void) {
+    s32 flags;
+    s32 i;
+    s32 j;
+    s32 slot;
+
+    flags = func_8001C808();
+    if (flags & 4) {
+        func_80024E18(0);
+    } else if (flags & 8) {
+        func_80024E5C();
+        // `slot` has to be derived from `i` here, not carried as a second
+        // counter: written `slot -= 6` in the `for` increment, `i` has no use
+        // left but the exit test, `check_dbra_loop` reverses the loop, and the
+        // whole thing counts down from 4 (18 rows, one instruction short).
+        for (i = 0; i < 5; i++) {
+            slot = 0x13F - i * 6;
+            for (j = 0; j < 6; j++) {
+                D_8009CBE0[slot - j] = (j + 0x47) | 0xC600;
+            }
+        }
+        func_80024E94();
+    } else if (flags & 1) {
+        func_80024DD4(0);
+    } else if (flags & 2) {
+        for (i = 0; i < 9; i++) {
+            func_80024D88(i);
+        }
+        func_80024D88(0x64);
+    } else {
+        D_8009D2A4 = 0xFF;
+        D_8009D2A5 = 0xFF;
+        func_80024A3C(0);
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025288);
 
@@ -549,9 +591,72 @@ void func_80026090(void) {
     D_80062F90 = 0;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800260DC);
+// Save the top-of-screen VRAM strip, draw the three present party members'
+// portraits into it, snapshot the result, restore the strip, then wait for the
+// memory-card poll to settle.
+void func_800260DC(void) {
+    RECT rect;
+    u8 strip[0x1200];
+    u8 buf[0x1000];
+    s32 i;
+    s32 cy;
+    s32* sector_off;
+    s32* length;
+    u8 charId;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026258);
+    do {
+    } while (SystemCdromReadChain());
+    DrawSync(0);
+    func_80025C14((u_long*)strip);
+    DrawSync(0);
+    i = 0;
+    sector_off = &D_80048FE8->sector_off;
+    length = &D_80048FE8->length;
+    for (; i < 3; i++) {
+        cy = i * 0x30 + 0x138;
+        charId = D_8009CBDC[i];
+        if (charId != 0xFF) {
+            func_80020058(i);
+            func_8001786C(i & 0xFF);
+            func_80017678();
+            func_80033F40(
+                sector_off[charId * 2], length[charId * 2], (u_long*)buf, 0);
+            func_80025D14((u_long*)buf, 0x3C0, cy, 0x180, i);
+            DrawSync(0);
+        }
+    }
+    rect.x = 0x180;
+    rect.y = 0;
+    rect.w = 0x100;
+    rect.h = 3;
+    StoreImage(&rect, D_800756F8);
+    DrawSync(0);
+    func_80025C54((u_long*)strip);
+    DrawSync(0);
+    VSync(6);
+    do {
+    } while (func_800484A8() == -1);
+    do {
+    } while (func_80048540(1));
+}
+
+void func_80026258(void) {
+    s32 i;
+    u8* p;
+
+    D_80062F90 = 0;
+    SetupGamepad();
+    func_80026090();
+    func_80025008();
+    func_800260DC();
+    D_8009D7BC[0] = 0x80;
+    D_8009D7BD = 0x80;
+    g_FieldMessageSpeed = 0x80;
+    D_8009D7BE = 0x41;
+    for (i = 0xF, p = &D_8009D7BC[0x13]; i >= 0; i--, p--) {
+        *p = i;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800262D8);
 
@@ -602,7 +707,10 @@ void func_80026A0C(void) { D_8006300C = D_80062FC4; }
 
 void func_80026A20(void) { D_80062FC4 = D_8006300C; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A34);
+void func_80026A34(s32 dfe, s32 dtd, s32 tpage, RECT* tw) {
+    SetDrawMode(D_80062F24.drmode, dfe, dtd, tpage, tw);
+    AddPrim(D_80062FC4, D_80062F24.drmode++);
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A94);
 
