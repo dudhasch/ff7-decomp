@@ -1875,7 +1875,20 @@ s32 func_800AD928(void) {
     return busy;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AD970);
+void func_800AD970(WorldActor* actor) {
+    u32 type;
+    u8 slot;
+    u32* p;
+
+    type = actor->actorType;
+    slot = D_800C6748[type];
+    if (slot < 6) {
+        p = (u32*)(slot * 8 + (s32)D_8010AD50);
+        p[0] = (actor->altPos.vx & 0x7FFFF) | ((type << 19) & 0xF80000) |
+               ((actor->direction << 20) & 0xFF000000);
+        p[1] = (actor->altPos.vz & 0x3FFFF) | (actor->altPos.vy << 18);
+    }
+}
 
 void func_800ADA08(void) {
     WorldActor* var_s0;
