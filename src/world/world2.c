@@ -141,7 +141,75 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C31F0);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C3948);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C3DB0);
+void func_800C3DB0(WorldModelPart* part, s32 flag) {
+    u32 i;
+    u32 j;
+    s32 count;
+    u8* p;
+    /* 8 bytes of locals this body does not declare; identity not
+     * recoverable.  Frame is 0x40 against the 0x38 the code needs. */
+    u8 unusedLocals[8];
+
+    for (j = 0; j < 2; j++) {
+        p = part->unk1C;
+        i = 0;
+        if (j != 0) {
+            p += part->unk16;
+        }
+
+        /* The first list is spelled as an explicit guard plus a do/while so
+         * that `i = 0` lands in the block above the `if` -- reorg then fills
+         * that branch's delay slot with it, which is what the target has.  A
+         * plain `for (i = 0; ...)` puts the init in the join block and the
+         * slot goes to the count guard instead (2 rows), and moving the init
+         * out of a `for` without the explicit guard costs the zero-trip fold
+         * (51 rows, +1 instruction).  The other seven keep the `for`. */
+        count = part->numPrims[0];
+        if (count != 0) {
+            do {
+                setSemiTrans(p, flag);
+                setShadeTex(p, flag);
+                i++;
+                p += 0x34;
+            } while (i < count);
+        }
+        count = part->numPrims[1];
+        for (i = 0; i < count; i++, p += 0x28) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[2];
+        for (i = 0; i < count; i++, p += 0x28) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[3];
+        for (i = 0; i < count; i++, p += 0x20) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[4];
+        for (i = 0; i < count; i++, p += 0x14) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[5];
+        for (i = 0; i < count; i++, p += 0x18) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[6];
+        for (i = 0; i < count; i++, p += 0x1C) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+        count = part->numPrims[7];
+        for (i = 0; i < count; i++, p += 0x24) {
+            setSemiTrans(p, flag);
+            setShadeTex(p, flag);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C4148);
 
