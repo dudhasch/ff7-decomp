@@ -1499,6 +1499,26 @@ extern s16 D_801144D0;
  *   - the counters moved to just after `pairs[0]` (71/13) or just after the
  *     clut store (70/17) instead of to the end of the body.
  *   - `tpages++` written ahead of `modes++` rather than after (88 against 67).
+ * **47 rows -> 45**, from `spriteCount` declared `s32` rather than `u16`
+ * (`u32` is byte-identical). `tools/width_sweep.py` found it, and the full
+ * 47-variant cross-product over `count`/`spriteCount`/`sprite34Count`/`white`
+ * then closes the dimension: 45 is the floor, `count` must stay `s16` (every
+ * `s32 count` variant is **-4 instructions** and 110 rows or worse), and
+ * `sprite34Count` and `white` are free at any width.
+ *
+ * The frame-pad and address-take pair was re-swept afterwards, because
+ * changing a counter's width is exactly the sort of thing that makes a
+ * finished sweep stale -- and this one survived. All eleven combinations of
+ * pad size (none, 4, 8, 0x10, 0x18, 0x20) against taking or not taking
+ * `&sprite34Count` measure 65 rows or worse, several at +2 instructions,
+ * against 45 for the pairing already here. So CLAUDE.md's note that the two
+ * lock each other still holds at the new width.
+ *
+ * What is left reads as three spills: `sw +3 / lw +3` against `sh -3`, plus
+ * `nop +2`, `lh -2`, `addu -2`, `lhu -1`. The target keeps in halfwords what
+ * this body spills as words, and no width reaches it -- which points at
+ * *which* values are in memory rather than how wide they are.
+ *
  *   - `D_801144C8 = spriteCount` deferred to the layer-4 entry: it does flip
  *     the allocation on its own (147/22, before the loop change was found) but
  *     the store then lands in the wrong block -- the target stores it at the
@@ -1526,7 +1546,7 @@ void FieldBackgroundInitPackets(
     s16* run;
     s16 count;
     u8 white;
-    u16 spriteCount;
+    s32 spriteCount;
     u16 sprite34Count;
     u16* addrOfSprite34Count;
     u8 unusedLocals[0x10];
