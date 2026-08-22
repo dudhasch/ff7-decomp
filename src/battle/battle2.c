@@ -621,11 +621,51 @@ void func_800D088C(s32 loc, s32 len) {
     func_800B7FB4();
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D08B8);
+extern u32 D_800F9984[][8];
+extern u32 D_801679BC[][8];
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D0958);
+// Rebase the eight script pointers at +0xBC and the eight at +0x18C of
+// player arg0's model block: on disc they are offsets from the start of the
+// table, in memory they have to be offsets from the block itself.
+//
+// `(i << 2)` rather than `i * 4` is load-bearing in all three functions
+// below -- fold ranks a MULT_EXPR above the pointer and emits
+// `addu <idx>,<base>`, where the shift ties and leaves source order, giving
+// the target's `addu <base>,<idx>`.
+void func_800D08B8(u8 arg0, u32* arg1) {
+    s32 i;
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D09D0);
+    if (arg1 == NULL) {
+        return;
+    }
+    for (i = 0; i < 8; i++) {
+        *(u32*)(D_800F8384[arg0] + (i << 2) + 0xBC) =
+            (u32)arg1 + arg1[i + 1] - (u32)D_800F8384[arg0];
+    }
+    for (i = 0; i < 8; i++) {
+        *(u32*)(D_800F8384[arg0] + (i << 2) + 0x18C) =
+            (u32)arg1 + arg1[i + 9] - (u32)D_800F8384[arg0];
+    }
+}
+
+// Save those sixteen pointers away; func_800D09D0 puts them back.
+void func_800D0958(u8 arg0) {
+    s32 i;
+
+    for (i = 0; i < 8; i++) {
+        D_800F9984[arg0][i] = *(u32*)(D_800F8384[arg0] + (i << 2) + 0xBC);
+        D_801679BC[arg0][i] = *(u32*)(D_800F8384[arg0] + (i << 2) + 0x18C);
+    }
+}
+
+void func_800D09D0(u8 arg0) {
+    s32 i;
+
+    for (i = 0; i < 8; i++) {
+        *(u32*)(D_800F8384[arg0] + (i << 2) + 0xBC) = D_800F9984[arg0][i];
+        *(u32*)(D_800F8384[arg0] + (i << 2) + 0x18C) = D_801679BC[arg0][i];
+    }
+}
 
 void func_800D0A44(void) {}
 
