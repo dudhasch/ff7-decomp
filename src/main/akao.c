@@ -1880,7 +1880,49 @@ void func_800325E8(AKAO_TRACK* track) {
     track->fine_tuning = (s8)*track->addr++ + track->fine_tuning;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032614);
+// Vibrato on, the pitch-side twin of func_80032804 -- it also has to
+// pre-compute the pitch delta the way func_80032718 does.
+void func_80032614(AKAO_TRACK* track) {
+    s32 val;
+    s32 off;
+    s32 depth;
+    s32 base;
+    u32 raw;
+    s32 wave;
+    s32 steps;
+    s32 pitch;
+
+    track->update_flags |= 1;
+    if (track->type != 0) {
+        track->unk72 = 0;
+        val = *track->addr++;
+        if (val != 0) {
+            track->vibrato_depth = val << 8;
+        }
+    } else {
+        track->unk72 = *track->addr++;
+    }
+    steps = *track->addr++;
+    track->unk76 = steps;
+    if (steps == 0) {
+        track->unk76 = 0x100;
+    }
+    base = (u16)track->pitch_base;
+    track->unk7A = *track->addr++;
+    raw = (u16)track->vibrato_depth;
+    depth = (raw & 0x7F00) >> 8;
+    if (raw & 0x8000) {
+        pitch = (depth * base) >> 7;
+    } else {
+        pitch = (depth * ((base * 16 - base) >> 8)) >> 7;
+    }
+    track->unk7C = pitch;
+    off = track->unk7A * 4;
+    wave = *(s32*)((u8*)g_AkaoWaveTableKey + off);
+    track->unk74 = track->unk72;
+    track->unk78 = 1;
+    track->vibrato_wave = wave;
+}
 
 void func_80032718(AKAO_TRACK* track) {
     u32 raw;
@@ -1917,7 +1959,37 @@ void func_800327E0(AKAO_TRACK* track) {
     track->attr_mask |= 0x10;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032804);
+// Tremolo on: rate, depth and waveform. A sound effect (type != 0) resets
+// the phase and takes its depth from the byte, a song keeps the running
+// depth and reads a rate instead.
+void func_80032804(AKAO_TRACK* track) {
+    s32 val;
+    s32 off;
+    s32 wave;
+    s32 steps;
+
+    track->update_flags |= 2;
+    if (track->type != 0) {
+        track->unk86 = 0;
+        val = *track->addr++;
+        if (val != 0) {
+            track->tremolo_depth = val << 8;
+        }
+    } else {
+        track->unk86 = *track->addr++;
+    }
+    steps = *track->addr++;
+    track->unk8A = steps;
+    if (steps == 0) {
+        track->unk8A = 0x100;
+    }
+    track->unk8E = *track->addr++;
+    off = track->unk8E * 4;
+    wave = *(s32*)((u8*)g_AkaoWaveTableKey + off);
+    track->unk88 = track->unk86;
+    track->unk8C = 1;
+    track->tremolo_wave = wave;
+}
 
 void func_800328D4(AKAO_TRACK* track) {
     track->tremolo_depth = *track->addr++ << 8;
