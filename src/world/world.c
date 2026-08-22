@@ -2558,7 +2558,7 @@ s16 func_800B86C4(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B86E8);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B8720);
+void func_800B8720(s16 arg0, s16 arg1) { func_800B8A5C(0, arg0, arg1); }
 
 static void func_800B8750(const char* str, s32 val, s32 kind) {}
 
