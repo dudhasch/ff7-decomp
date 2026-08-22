@@ -975,7 +975,55 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3474);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D34C8);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3520);
+/* Advance a counter that lives 4 bytes past a self-relative header: the word
+ * at arg0 is the byte offset from &arg0[1] to the record.
+ *
+ * The body below is byte-exact for all nine of the target's instructions.
+ * It is parked on a tenth "instruction" that is not code: `func_800D3520.s`
+ * carries a `nop` *after* its own `.size` directive, i.e. four bytes of
+ * object padding, and it is the only `.s` in this unit that does. Functions
+ * in this overlay are not 8-byte aligned in general (func_800D7B1C sits at
+ * ...B1C), so this is an original translation-unit boundary rather than
+ * function alignment -- battle2.c is several of the original `.c` files glued
+ * together, and the pad belongs to the end of one of those objects. Nothing
+ * written inside a merged unit emits it: landing the body compiles 36 bytes
+ * where the target has 40, every later symbol in battle.elf shifts, and what
+ * you see is `batini.c: undefined reference to D_800F7ED0` -- an overlay this
+ * file does not touch. Verified by a red `make build`.
+ *
+ * Three levers in the body are real and each was measured; keep them if the
+ * padding is ever solved (a `.align 3` on the *next* function's INCLUDE_ASM
+ * would do it, but the macro hard-codes `.align 2`):
+ *   * the three locals keep `addiu a0,a0,4` on the pointer -- written inline
+ *     as `(s16*)((u8*)(arg0 + 1) + *arg0)`, fold associates the +4 onto the
+ *     loaded value (`addiu v0,v0,4`) instead, 7 rows. `(s32)(arg0 + 1)` is
+ *     the same 7.
+ *   * `s32 v` rather than `s16 v` keeps the sign-extending `lh`: with an s16
+ *     local combine narrows to `lhu`, since the sign is dead into a narrowing
+ *     store. 5 rows.
+ *   * the `volatile` on the store is what leaves the `jr ra` delay slot
+ *     empty. Without it the RTL is byte-identical through `.sched2` and reorg
+ *     pulls the `sh` into the slot at `.dbr` (confirmed with `--rtl=a`),
+ *     3 rows and one instruction short.
+ * Also measured: `void` return, 4 rows -- the sum lands in `a1` not `v0`;
+ * `void` plus reusing `v` for the sum, 4; `return q[1] = arg1 + v;`, 3 rows
+ * and +1 instruction from a `sll`/`sra` pair re-widening the s16 value; a
+ * `volatile s16*` local instead of the cast, byte-identical to the below.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle2", func_800D3520);
+#else
+s32 func_800D3520(s32* arg0, s32 arg1) {
+    u8* p = (u8*)(arg0 + 1);
+    s32 off = *arg0;
+    s16* q = (s16*)(p + off);
+    s32 v = q[1];
+    s32 t = arg1 + v;
+
+    *(volatile s16*)&q[1] = t;
+    return t;
+}
+#endif
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3548);
 
