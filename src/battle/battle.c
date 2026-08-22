@@ -543,7 +543,18 @@ void func_800A4E40(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A4E80);
+void func_800A4E80(s32 arg0) {
+    s32 off;
+    u16* mask;
+
+    if (D_800F5E60[arg0].unk5 != 0xFF) {
+        mask = &D_80163762;
+        *mask |= 1 << arg0;
+        off = arg0 * 0x44;
+        *(u16*)((u8*)&g_CombatantTurnState[0].unk8 + off) |= 1;
+        *(u8*)((u8*)&g_CombatantTurnState[0].unkE + off) |= 1;
+    }
+}
 
 void func_800A4F14(s32 arg0) {
     s32 temp_v0;
