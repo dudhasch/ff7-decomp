@@ -2617,7 +2617,13 @@ void func_800B8488(FieldScriptHeader* fieldScripts) {
     g_FieldState = &D_8009ABF4;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B84D8);
+void func_800B84D8(s32 arg0) {
+    if (D_800832A0 == 0) {
+        D_8011628C = 0;
+        D_80116288 = 0;
+        func_800B8D4C(0, (u8)arg0);
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B851C);
 
