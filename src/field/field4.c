@@ -1734,6 +1734,139 @@ void FieldInitDefaultValues(void) {
  *
  * The width dimension is closed too -- 30 variants over the six scalar locals
  * and every one is 15 rows at the exact length.
+ *
+ * ---- next pass, and the four rows now have a name ----
+ *
+ * The -1 instruction the body *without* `pcBase` carries is one specific
+ * pair, and knowing which one reframes the whole function. At the inner
+ * loop's preheader the target has
+ *
+ *     lui   s0, %hi(g_FieldScriptPC)
+ *     addiu s0, s0, %lo(g_FieldScriptPC)
+ *
+ * and the no-`pcBase` build has `move s0,s2` -- cse2 substituting the outer
+ * loop's already-hoisted address register. So the target materialises
+ * g_FieldScriptPC's address **twice**: once as an outer-loop movable ($s2,
+ * third of three in the outer preheader) and once inside the `if (op != 0)`
+ * guard ($s0), where `move_movables` will not lift it because the guard makes
+ * it conditional -- CLAUDE.md's always-executed-path rule, visible in the
+ * target as `lui s0` sitting after the `beqz` and before the inner loop
+ * label.
+ *
+ * `pcBase` buys that second materialisation and nothing else: as the do-body's
+ * *first* statement it is separated from the `slot` use by the debug block's
+ * branches, so cse cannot fold it, and `pcTable = g_FieldScriptPC;` then
+ * survives as its own `lui`/`addiu`. The price is that g_FieldScriptPC is now
+ * referenced before g_DebugText, and `move_movables` emits the outer
+ * preheader's hoists in insn order, so `lui s2,%hi(g_FieldScriptPC)` comes
+ * out ahead of `lui s1,%hi(g_DebugText)` where the target has them the other
+ * way round. That is the four rows. The two facts are one fact, and the
+ * function needs a way to get the inner materialisation without any reference
+ * to the PC table above the debug block.
+ *
+ * Measured against that, and all negative:
+ *   - the inner access written inline, `g_FieldScriptPC[g_CurrentEntity]`,
+ *     with no `pcTable` local at all: **46 rows, -4 instructions** without
+ *     `pcBase` and 45/-4 with it. The -4 is the whole story -- the outer
+ *     preheader comes out with only *three* movables and the function saves
+ *     one fewer register, so the inner reference is simply folded onto the
+ *     outer one. The byte-offset spelling measures the same 46/-4. This is
+ *     the note's older "46" re-measured, and it is worse than it looked: it
+ *     is not four rows of noise, it is a missing register.
+ *   - reaching the inner one through the *neighbouring* symbol, so cse has no
+ *     shared `symbol_ref` to relate it to -- `pcTable = (u16*)((u8*)
+ *     D_8008325C - 0x60);` -- does not split them either: 59/-1 without
+ *     `pcBase`, and **exactly 15** with it, i.e. completely inert. The
+ *     neighbouring-object idiom moves *outer* accesses (already recorded
+ *     above at 26 to 59 rows) and does not move this one.
+ *   - the same spelling written inline in the inner body: 68/-1.
+ *
+ * The eleven-row cluster did not move either, and it is now clear that it is
+ * the same *kind* of thing as the tie that used to park OpcodeFuncMove: our
+ * build and the target emit the identical instruction sequence, so the
+ * ranking terms are identical, and what differs is which of the two shifts
+ * gets $v1 -- and whichever gets $v1 has to be emitted second, because $v1 is
+ * g_CurrentEntity's own register. Target: `sll a3,v1,1` (the slot index) then
+ * `sll v1,v1,6` (the script base); ours the reverse. What was tried this
+ * pass, on the 15-row body:
+ *   - a named `s32 slotIdx` for `g_CurrentEntity * 2`, split off as its own
+ *     statement -- the exact lever that closed OpcodeFuncMove: **15**, inert.
+ *   - a named `s32 entity` for `g_CurrentEntity`, feeding both the shift and
+ *     the index: **15**, inert.
+ *   - `scriptBase` deleted and `(g_CurrentEntity << 6)` written inline at both
+ *     address sites: 34 rows and +2 instructions.
+ *
+ * Block structure, which is what closed the other three functions in this
+ * unit, is a live lever here and points the wrong way:
+ *   - `do { } while (0);` after `scriptBase` is 28/+1, before `slot` is 16/+0.
+ *     Neither is inert, so by CLAUDE.md's probe the residue *is* partly
+ *     sched2's and source position does reach it -- but no placement tried is
+ *     an improvement.
+ *   - a dead conditional (`if (g_FieldScriptPC) { X } else { X }`) around the
+ *     `scripts`/`scriptBase`/`numExtras`/`lo` block is 39/+6, and around
+ *     `slot = ...; *slot = lo;` is 39/+5. Note the length: unlike
+ *     OpcodeFuncMove's, these duplications are *not* deleted. The difference
+ *     between the two cases is that MOVE's duplicated block leaves nothing
+ *     live at the join -- every value it computes is consumed inside it --
+ *     while both of these leave locals (`scripts`, `scriptBase`, `numExtras`,
+ *     `lo`; or `slot`) live afterwards. Treat that as the rule of thumb for
+ *     where a `perm_ins_block` duplication is free and where it is not, but
+ *     it is an inference from two data points, not a mechanism anyone has
+ *     read out of gcc.
+ *
+ * ---- and the four rows then fell, 15 -> 11 ----
+ *
+ * The paragraph above asks for "a shape that gets the inner `lui`/`addiu`
+ * without naming the PC table above the debug block". It is two lines:
+ *
+ *     }                              (the end of the debug block)
+ *     pcBase = (u8*)g_FieldScriptPC;
+ *     do {
+ *     } while (0);
+ *     scripts = g_FieldScripts;
+ *
+ * `pcBase` below the debug block is what puts g_DebugText's address first in
+ * insn order, so the outer preheader hoists s1/s2/s3 in the target's order;
+ * the empty loop is a basic-block boundary and nothing else, and it is what
+ * stops cse folding `pcBase` into the `slot` subscript below it -- which is
+ * the only reason `pcBase` had to sit above the debug block in the first
+ * place (the branches there were doing the same job). Both halves are
+ * required and neither is worth anything alone: `pcBase` moved down with no
+ * barrier is the 51 rows / -2 instructions this note already recorded, and
+ * the barrier on its own (with `pcBase` still at the top) is 16 / +1. This is
+ * a `perm_ins_block` insertion in the sense CLAUDE.md means; its identity is
+ * not recoverable and the comment in the source says so.
+ *
+ * Barrier placement is not free-choice: with `pcBase` below the debug block,
+ * the barrier immediately after it is 11 and immediately before `slot` is
+ * 12/+1; moving `pcBase` below `scripts` is 19/+1.
+ *
+ * 11 rows at the exact 152, and they are all the shift cluster -- rows 62-63
+ * and everything downstream of them. Re-swept against *this* body, since a
+ * rejected list is only true of the program it was measured on, and all still
+ * 11: a named `s32 slotIdx` for `g_CurrentEntity * 2` split into its own
+ * statement (the lever that closed OpcodeFuncMove), a named `s32 entity`
+ * feeding both the shift and the index, `scriptBase` moved below `numExtras`,
+ * `slot` written `pcBase + (g_CurrentEntity * 2)`, and the second address sum
+ * with `(s32)scripts` and `numExtras` swapped -- which is worth trying because
+ * the target's two sums do *not* agree (the first adds numExtras then scripts,
+ * the second scripts then numExtras) but fold canonicalises both, and doing
+ * the same to the *first* sum is 13. Worse: `slot` hoisted above `scriptBase`
+ * 21, a second barrier before `slot` 12/+1.
+ *
+ * What is left is one question and it is sharp: the two shifts both read $v1
+ * (g_CurrentEntity's own register), so whichever of them *writes* $v1 has to
+ * be emitted second. The target gives $a3 to the slot index and $v1 to the
+ * script base; we do the reverse. Our build and the target emit the identical
+ * instruction sequence, so `n_refs` and `live_length` are identical on both
+ * sides and `QTY_CMP_PRI` cannot be what differs -- as with OpcodeFuncMove,
+ * the difference has to be in how the block is cut into quantities. The
+ * OpcodeFuncMove answer (name the intermediate) is measured and inert here,
+ * so it is a different cut. Everything upstream of row 62 and downstream of
+ * row 89 already matches, which makes this a good decomp-permuter target with
+ * `perm_temp_for_expr` and `perm_ins_block` weighted up -- but re-import
+ * first: the scratch that produced `pcBase` was taken from the 16-row body
+ * and every number in this note has moved since.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldEventRunInit);
@@ -1755,7 +1888,6 @@ void FieldEventRunInit(void) {
     g_CurrentEntity = 0;
     if (g_FieldScripts->numEntities != 0) {
         do {
-            pcBase = (u8*)g_FieldScriptPC;
             if (g_FieldScriptDebugFlags & 3) {
                 FieldDebugStringCopy(g_DebugText, &D_800E0628);
                 FieldDebugStringConcat(g_DebugText, (u8*)g_FieldScripts + 0x20 +
@@ -1767,6 +1899,16 @@ void FieldEventRunInit(void) {
                     DebugPrintToFieldWindow(g_DebugText);
                 }
             }
+            /* Below the debug block, so g_DebugText's address is the first
+             * movable `move_movables' records and the preheader's hoists come
+             * out in the target's order. The empty loop is a basic-block
+             * boundary and nothing else: without it `pcBase' and the `slot'
+             * use below are in one extended block, cse folds the address into
+             * the subscript, and the inner loop's own materialisation of
+             * g_FieldScriptPC goes with it. See the note above. */
+            pcBase = (u8*)g_FieldScriptPC;
+            do {
+            } while (0);
             scripts = g_FieldScripts;
             scriptBase = g_CurrentEntity << 6;
             numExtras = scripts->numExtras * 4;
