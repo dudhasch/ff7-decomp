@@ -6,6 +6,12 @@ u8* func_80014C80(s32 arg0);
 s32 func_80015B50(void);
 s32 func_80015B88(void);
 extern u8 D_80083084[];
+/* main's .bss, addressed %gp_rel under -G8 -- declare, never define. */
+extern s8 D_80062FFC;
+extern u8 D_80063020;
+extern Unk80062F7C* D_80062F7C;
+extern s32 D_80062F10;
+extern s32 D_80062FBC;
 
 s32 D_80062D4C = 0x00000000;
 s32 D_80062D50 = 0x000000FF;
@@ -792,12 +798,20 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A280);
 // file cut between func_8001A384 to func_8001C0EC
 
 #ifndef NON_MATCHINGS
-// needs BSS import for %gp regs
 void func_8001A384(u8 arg0, s32 arg1);
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A384);
 #else
-extern s8 D_80062FFC = 0;
-extern u8 D_80063020 = 0;
+/* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
+ * 5 rows, +2 instructions (2 insertions). The body is instruction-for-instruction right; every differing row is
+ * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn each.
+ * cc1 emits a bare `op $r,SYM` and leaves the gp decision to the assembler,
+ * which gets -G0 -- so only a symbol this object *defines* in .sdata is
+ * gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live in
+ * main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
+ * object. Measured and rejected, all exactly 5 rows: `extern u8 SYM[1];` indexed
+ * [0], a tentative definition `u8 SYM;` in this unit, and a volatile cast at
+ * each access. The fix is a .bss import plus -G8 on the assembler, not a
+ * spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A384(u8 arg0, s32 arg1) {
     func_8001AC9C(arg0, arg1);
     if (D_80063020) {
@@ -807,12 +821,20 @@ void func_8001A384(u8 arg0, s32 arg1) {
 #endif
 
 #ifndef NON_MATCHINGS
-// needs BSS import for %gp regs
 void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2);
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A3B8);
 #else
-extern s8 D_80062FFC = 0;
-extern u8 D_80063020 = 0;
+/* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
+ * 8 rows, +2 instructions (2 insertions). The body is instruction-for-instruction right; every differing row is
+ * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn each.
+ * cc1 emits a bare `op $r,SYM` and leaves the gp decision to the assembler,
+ * which gets -G0 -- so only a symbol this object *defines* in .sdata is
+ * gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live in
+ * main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
+ * object. Measured and rejected, all exactly 8 rows: `extern u8 SYM[1];` indexed
+ * [0], a tentative definition `u8 SYM;` in this unit, and a volatile cast at
+ * each access. The fix is a .bss import plus -G8 on the assembler, not a
+ * spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2) {
     u8 param;
     s32 i;
@@ -880,14 +902,14 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A9CC);
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001AB1C);
 
 #ifndef NON_MATCHINGS
-// matching with GCC 2.6.3
 s32 func_8001AC9C(u8, s32);
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001AC9C);
 #else
-extern Unk80062F7C* D_80062F7C = NULL; // %gp
-extern s32 D_80062F10 = 0;             // %gp
-extern s32 D_80062FBC = 0;             // %gp
-extern u8 D_80063020 = 0;              // %gp
+/* PARKED at 35 rows / +10 instructions. Eleven of those rows are the same
+ * %gp_rel blocker as func_8001A384 above -- four .bss symbols, one extra
+ * `lui` each -- so the honest residue is smaller than the number and cannot be
+ * measured until the .bss import lands. Do not spend a codegen budget here
+ * before that; the note on func_8001A384 has the rejected spellings. */
 s32 func_8001AC9C(u8 arg0, s32 arg1) {
     s32 i;
     s32 found;

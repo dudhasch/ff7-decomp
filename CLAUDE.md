@@ -1705,6 +1705,27 @@ a near-miss, in rough order of frequency:
   right diagnosis and the wrong conclusion. Note the size rule is a *ceiling*,
   not a floor: declaring the same eight bytes as `u8 D_80062E10[8]` would still
   be small data, because 8 is `<= G`.
+
+  **The other direction — `%gp_rel` in the target where you emit `lui`/`%lo` —
+  is not reachable from C at all, and it is worth knowing before spending a
+  budget on it.** cc1 does *not* emit the gp form: with `-mgas` it writes a
+  bare `sw $2,D_80062E18` and puts the object in `.sdata`, and the **assembler**
+  decides. `mipsel-linux-gnu-as` gp-addresses a symbol only when it can see it
+  defined in a small-data section *in the same object*, and `tools/ninja/gen.py`
+  passes `as` `-G0`, so an `extern` never qualifies however it is declared. The
+  three spellings that look like they should work all measure to the row:
+  `extern u8 SYM[1];` read as `SYM[0]`, a tentative definition `u8 SYM;` in the
+  unit (which becomes a `.comm` that `-G0` puts in `.bss`, not `.sbss`), and a
+  volatile cast at each access. So a diff whose every row is
+  `%gp_rel(SYM)($gp)` against `lui/%lo` — one extra instruction per access, and
+  otherwise instruction-for-instruction correct — is a **build-configuration**
+  finding, not a codegen one: the original defined those objects in the
+  translation unit that referenced them, and reproducing that needs the
+  overlay's `.bss` imported into C plus `-G8` on the assembler. Park and say so.
+  `src/main/18B8.c` has three parked bodies in exactly this state and **30 of
+  its 154 remaining functions reach a `.bss` symbol this way** —
+  `grep -rho '%gp_rel([A-Za-z0-9_]*)' asm/<ovl>/nonmatchings/<unit>/*.s` against
+  the unit's `.sdata` symbol list is the one command that sizes it.
 * **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency
