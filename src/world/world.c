@@ -448,8 +448,8 @@ void func_800A59A0(void) {
     }
     last = i * 8;
     *(s32*)(D_800E582C + last) = 0;
-    D_800E5A30 = D_800E582C;
-    D_800E5A2C = 0;
+    D_800E5A30 = (Unk800E5A2C*)D_800E582C;
+    D_800E5A2C = NULL;
     D_800E5A34 = 0;
 }
 

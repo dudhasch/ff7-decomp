@@ -110,11 +110,18 @@ typedef struct {
     /* 0x20 */ s32 unk20;
 } Unk8010B3B8; // size:???
 
-// singly linked list hung off D_800E5768
+// singly linked list hung off D_800E5768, pooled in D_800E5718
 typedef struct WorldUnk800E5768 {
     /* 0x00 */ struct WorldUnk800E5768* next;
     /* 0x04 */ s16 unk4;
-} Unk800E5768; // size: unknown
+    /* 0x06 */ s16 unk6;
+} Unk800E5768; // size: 0x8
+
+// singly linked list hung off D_800E5A2C, pooled in D_800E582C
+typedef struct WorldUnk800E5A2C {
+    /* 0x00 */ struct WorldUnk800E5A2C* next;
+    /* 0x04 */ WorldChunkHeader* chunk;
+} Unk800E5A2C; // size: 0x8
 
 /* One drawable part of a world model.  Lives in the buffer at
  * WorldModel::unk1C, WorldModel::unk18 bytes in, WorldModel::unk3 of them
@@ -408,8 +415,8 @@ extern s32 D_80116274;
 extern Unk800E5768* D_800E5768;
 extern Unk800E5768* D_800E5764;
 extern u8 D_800E582C[];
-extern s32 D_800E5A2C;
-extern u8* D_800E5A30;
+extern Unk800E5A2C* D_800E5A2C;
+extern Unk800E5A2C* D_800E5A30;
 extern WorldChunkHeader* D_80109D5C;
 extern WorldTriangle* D_80109D60;
 extern s32 D_8010B4A0;
@@ -448,5 +455,15 @@ extern u32 D_8010D9C0[];
 extern s32 D_801159BC;
 extern u8* D_801159C0[];
 extern s32 D_80116510;
+extern s32 D_800C80BC;
+extern Unk800E5768 D_800E5718[];
+extern Unk800E5768* D_800E5760;
+extern s32 D_80115A40;
+extern s32 D_80115A44;
+extern s32 D_80115A48;
+extern s32 D_80115A4C;
+extern s32 D_80115A54;
+extern s32 D_80115A5C;
+extern s32 D_80115A6C;
 
 #endif
