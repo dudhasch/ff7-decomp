@@ -3898,196 +3898,62 @@ extern u8 D_801144D8; // blink RNG cursor
  * queue every visible model for rendering, run its KAWAI script, and finally
  * push the eye/mouth texture for the frame, blinking on a random countdown.
  *
- * 2 rows out, and both are the same row: the fourth loop's preheader loads the
- * two eye-state constants in the other order -- target `li s4,1` then
- * `li s6,2`, ours `li s6,2` then `li s4,1`. Everything else, including the
- * frame size, the nine saved registers and every hard-register assignment,
- * matches.
+ * Matched. Three source facts, and the third is the one nobody had a name
+ * for. All three numbers below come out of cc1's own `-dL` and `-dl` dumps,
+ * not out of the diff.
  *
- * The `blinkClosed = 2;` at the top of that loop is not decoration: gcc 2.6.3
- * hoists a loop-invariant constant only when its defining insn is on the
- * loop's always-executed path, so the literal 2 written inside the
- * `KawaiA == 0` arm stays in the loop (`li v0,2` in a branch delay slot) while
- * the 1, whose first use is the unconditional `BlinkOn == 1` compare, is
- * hoisted into a callee-saved register. That costs the whole function a saved
- * register and renames every s-register -- 55 rows. Assigning the 2 to a local
- * at the top of the body makes it hoistable and takes the diff to 2.
+ * 1. `blinkClosed = 2;` has to be the loop's *first* statement. gcc 2.6.3
+ *    hoists a loop-invariant constant only when `threshold * savings *
+ *    lifetime >= insn_count`, and the `.loop` dump prints the decision per
+ *    candidate: at the loop top the 2 has `life 18, savings 1` and is moved,
+ *    written inside the `KawaiA == 0` arm it has `life 2` and is `not
+ *    desirable`, which costs a callee-saved register and 55 rows.
  *
- * move_movables emits the hoists in insn order, so the loop-top assignment is
- * always emitted first, and the only way to reverse it is for the 1's movable
- * to come first -- which needs it to be a local too. Written that way
- * (`blinkOpen = 1; blinkClosed = 2;`) the two `li`s come out in the target's
- * order, but the allocator then gives `blinkClosed` s5 and `faceSel` s6 where
- * the target has them the other way round: 13 rows. Measured both ways at s32
- * and u8; the type changes nothing except that a u8 `blinkOpen` folds back
- * into the compare and disappears. Declaration order is inert, as ever.
+ * 2. `blinkOpen = 1;` above it, as an `s32`. `move_movables` emits the hoists
+ *    in the order `scan_loop` recorded them -- insn order in the body -- so
+ *    the target's `li s4,1` before `li s6,2` needs the 1's defining insn
+ *    ahead of the 2's, and only a loop-top assignment puts it there. It must
+ *    be `s32`: a `u8` or `s16` local folds back into its uses and no second
+ *    movable is created at all (byte-identical to having no local).
  *
- * Re-measured against the current body, four more spellings, all of them
- * dead ends and all of them cheap to re-try by accident:
- *   - `blinkOpen = 1;` as an extra loop-top local, in either declaration
- *     order, used in the guard, in the else-arm stores, or in both: 2 rows,
- *     byte-identical to the body below. cse folds the local straight back into
- *     its uses, so no second movable is ever created and the order does not
- *     move. It is not that the spelling is wrong -- it compiles to nothing.
- *   - `blinkClosed = 2;` moved below the first `continue`, or below both: 55.
- *     One conditional jump ahead of it is enough to lose the hoist.
- *   - no local at all, the literal 2 written twice inside the arm: 55.
- *   - a loop-top local holding 1 with the literal 2 left in the arm: 55.
- * So the 2 is hoistable only from the loop top, and the 1's first use is the
- * `BlinkOn` guard below it; in insn order the 2 therefore always comes first.
+ * 3. `g_FieldEntity[i].KawaiA = blink;` written out at the end of *both*
+ *    arms rather than once after the `if`/`else`. That is worth nothing in
+ *    the object -- post-reload cross-jumping merges the two tails, and the
+ *    target has the single store at the join, reached by a `j` from arm A --
+ *    and it is worth two insns of `live_length` to every pseudo live across
+ *    loop 4, which is the whole fix. Without it `blinkClosed` is 5 refs over
+ *    84 insns (`2*5/84 = 1190`) against `faceSel`'s 19 over 644 (`4*19/644 =
+ *    1180`), so `allocno_compare` ranks `blinkClosed` first and it takes
+ *    `$s5` where the target has `$s6`; with it the two are 5/86 (1162) and
+ *    19/646 (1176) and they come out the other way round.
  *
- * The gate on the 2 is not `maybe_never` -- the 1 is hoisted from uses that
- * are themselves behind two conditional jumps -- it is move_movables'
- * savings/lifetime threshold. The loop-top assignment does not dodge a jump,
- * it stretches the movable's live range across the whole body so
- * `savings * lifetime` clears the bar. Written in the arm the range is two
- * insns and the constant stays put; that is why every arm-local spelling
- * measures 55.
+ * Facts 2 and 3 are one lever: adding the `blinkOpen` movable is what puts
+ * an insn in front of `blinkClosed`'s hoist, and that single insn is exactly
+ * the 0.8% of live range that flips the pair -- which is why every attempt
+ * to fix the register swap while keeping the movable order failed, and why
+ * the note that preceded this one concluded the function wanted a shape C
+ * did not spell. The shape is "duplicate a statement the arms share".
  *
- * The one spelling that reverses the order is `s32 blinkOpen = 1;` at the loop
- * top, used only in the else-arm stores, with the guard keeping its literal:
- * an SImode pseudo stored to a `u8` needs a truncation, so cse cannot fold it
- * away the way it folds a `u8` or `s16` local (both of those measure 2 rows,
- * byte-identical to the body below). That gets `li s4,1` into exactly the
- * target's slot and leaves a *different* residue -- 13 rows that are nothing
- * but `faceSel` and `blinkClosed` trading s5 and s6, both ways round, in the
- * prologue saves, all eight `sb`s and the call argument.
- *
- * That swap is global_alloc priority, `log2(n_refs) * n_refs * freq /
- * live_length`: `blinkClosed` has 3 refs over one loop, `faceSel` 10 refs over
- * the whole function, and the short range wins, so `blinkClosed` is processed
- * first and takes the lower register. Nothing available moves it -- all four
- * declaration positions and `s16`/`s32`/`u8` were measured (13, 13, 13, 2),
- * and assigning `faceSel` just before the fourth loop to shorten its range
- * costs 48. Next pass: attack the priority, not the movable order.
- *
- * The priority has now been attacked, from both sides, and it does not move.
- * `n_refs` is not reachable from the source, because cse re-shares the two
- * constants however they are spelled: writing one of `blinkClosed`'s two
- * stores as the literal 2 (either one), giving the 1 an extra pair of refs by
- * letting `blinkOpen` carry the else-arm stores, and both changes together all
- * measure the same 13 rows and the same s5/s6 swap. So does every declaration
- * position for `blinkOpen`, including first in the function.
- *
- * The other side -- carrying the 1 in a pseudo that already exists, so no
- * allocno is added at all -- is the more interesting negative. `kawaiOp`, the
- * s16 the third loop uses and which is dead by the fourth, gives a *third*
- * residue: 3 rows, with `li s4,0x1` in exactly the target's slot and the
- * faceSel/blinkClosed registers correct, but the guard rematerialising its own
- * `li v0,0x1` instead of comparing against s4 -- an HImode pseudo cannot serve
- * a QImode compare, so cse hands it a fresh constant and the movable is used
- * only by the else-arm stores. `blink`, the s32 the loop assigns later, gives
- * 68: extending its live range to the loop top makes it a movable of its own.
- * So the three shapes available are 2 rows with the order wrong, 3 rows with
- * the compare rematerialised, and 13 rows with two registers swapped, and the
- * function wants a fourth that C does not appear to spell.
- *
- * decomp-permuter has now had a proper run at it and did not find one:
- * 47,000 iterations on 11 workers from a clean scratch (no diagnostics,
- * base.o within 1% of target.o, relocations identical) at base score 20,
- * with perm_ins_block raised to 20 alongside the settings' own
- * perm_temp_for_expr 150 and perm_reorder_stmts 15 -- not one improvement
- * over the base. Declaring the function non-`void`, which is what closed
- * FieldEntityCheckTalk's last row, is exactly inert here too. That is
- * consistent with the diagnosis above being right: allocno_compare's
- * ranking is not something a source-level randomiser can reach.
- *
- * Five more, aimed at the two halves the note names as open, and all of them
- * dead. On the movable-order half: carrying the 1 in `kawaiType` promoted to
- * function scope -- an s8 pseudo, so neither the HImode mismatch that spoils
- * `kawaiOp` nor the live range that spoils `blink` -- is **78 rows**, because
- * hoisting it out of the first two loops' block scope costs those loops. And
- * `s32 blinkOpen` used in the guard *as well as* the else-arm stores is 13,
- * i.e. identical to using it in the stores alone: the guard's compare against
- * an SImode pseudo changes nothing.
- *
- * On the priority half, where the note says to attack next: no. Stretching
- * `blinkClosed`'s live range with a second assignment -- at the top of the
- * function, or just above the third loop -- is exactly 13 either way, because
- * the earlier store is dead and flow deletes it, so `live_length` never moves.
- * Giving `faceSel` two loop-weighted references instead, by writing the first
- * two loops' `*(s32*)0x1F800000 = 3;` through it (`REG_N_REFS += loop_depth`,
- * so each counts double), does raise its rank -- and costs 5 instructions,
- * 27 rows, because those stores then lose their rematerialised `lui`.
- *
- * So the three shapes stand at 2 / 3 / 13 and neither term of
- * allocno_compare is reachable: `n_refs` cannot be raised without emitting
- * something, and `live_length` cannot be raised at all, since every spelling
- * that would stretch it is dead code.
- * Confirmed again from the .lreg dump, which puts numbers on the 13-row
- * shape: faceSel is 19 refs over 644 insns (priority 1180) and blinkClosed
- * 5 over 84 (1190), a 0.8% gap, and the allocno list has them in that order.
- * So one reference on faceSel, or one insn of live range on blinkClosed,
- * would flip it -- and neither is reachable. Measured and all exactly 13:
- * every width of blinkClosed (s32/u16/u32/s16), blinkOpen used in the guard
- * as well as the stores, blinkClosed derived as `blinkOpen + 1` or
- * `blinkOpen * 2` (the forced-movable order is the same), blinkOpen used in
- * the guard alone, and an extra dead local. blink's width is 13 at u32/long
- * and 14 at s16/u8/u16/s8, so it changes the loop but never that pair.
- * Assigning blinkOpen *before* the loop rather than at its top is worse
- * still -- 16 to 51 rows and always +1 instruction, because the loop then
- * builds its own second constant. A u8 blinkOpen at the loop top is 2 rows,
- * i.e. exactly the body below: cse folds it away and nothing changes.
- *
- * The movable-order half has now been attacked from the *pointer* side too,
- * which is what CLAUDE.md's `FieldEntityLineInteract` bullet says to do --
- * there the three arrangements of a pointer and a constant at a loop top
- * measured 19, 17 and 0 rows. Here every one is much worse, so the analogy
- * does not carry: `faceSel = (u8*)0x1F800000;` moved from the top of the
- * function to immediately above loop 4 is **51 rows**, as loop 4's first
- * statement 50 and +6 instructions, as its second statement 50 and +6, and
- * naming the constant above the pointer at function scope 40. The pointer's
- * 644-insn live range is load-bearing rather than incidental: it is what
- * keeps loops 1 and 2 rematerialising 0x1F800000 through the `$at` macro,
- * the same coupling that makes routing those two stores through `faceSel`
- * cost 5 instructions. So `live_length` is unreachable from this end as
- * well, and the 2/3/13 trichotomy stands.
- *
- * Two things settle it, and the first is the one to read.
- *
- * **The two halves of the fix are the same insn, so they cannot both be
- * had.** The 13-row shape is not "the right movable order plus an unrelated
- * allocation accident": adding `blinkOpen = 1;` *above* `blinkClosed = 2;` is
- * what reverses the movable order, and it does so by putting one insn in
- * front of `blinkClosed`'s def -- which shortens `blinkClosed`'s live range by
- * exactly one insn. Its priority is `2*5/84 = 1190` against `faceSel`'s
- * `4*19/644 = 1180`, a 0.8% gap, so one insn of live range is precisely the
- * margin. The order lever *is* the swap lever. That is why every attempt to
- * fix the swap while keeping the order has failed and will: it is not two
- * problems, it is one insn wearing two hats.
- *
- * **The residue is allocation, not scheduling, and that is now measured
- * rather than argued.** CLAUDE.md's free test -- a `do { } while (0);`, which
- * emits nothing and can only end a basic block -- is *exactly inert* on the
- * 13-row body both immediately below the loop-top assignments and below the
- * two guards (13 either way). So every barrier, statement reordering and
- * re-spelling still untried in that loop is inert too, and the only live
- * question is the priority. Below the guards it is 79 rows and -1 insn,
- * which is the hoist being lost, not scheduling.
- *
- * Also measured against the current body and all dead:
- *   - `blinkClosed = 2;` moved below the first `continue`, below both, or
- *     into the `KawaiA == 0` arm: **55 rows and -3 instructions** in all
- *     three. The loop-top position is what makes the 2 a movable at all, so
- *     the insn that costs the swap is not optional.
- *   - `faceSel = (u8*)0x1F800000;` moved *one* or *two* statements down at
- *     function scope (the note above only ever tried it next to loop 4):
- *     exactly inert, 2 rows on the base body and 13 on the 13-row one. Three
- *     statements down -- below `models = ...` -- is 54 rows and +1 insn.
- *     `live_length` does not respond to small moves either.
- *   - arm A's stores reordered to `[0], [2], [3], [1]`, so `blinkClosed`'s
- *     last use is two insns later: **byte-identical to 13**. The note above
- *     rejected stretching that range with a dead *assignment* (flow deletes
- *     it); this stretches it with a real *use* and it still does not move,
- *     which is the stronger negative and closes the `live_length` side.
- *   - one or both of loop 1's `*(s32*)0x1F800000 = 3;` through `faceSel`, on
- *     the 13-row body: 31 rows / -1 insn, 44 / +1, and 27 / 5 insertions.
- *     Raising `n_refs` always emits something, as the note above found.
- * The 2/3/13 trichotomy stands, and it now has a mechanism rather than a
- * list. Park it. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
-#else
+ * The dead ends are worth keeping, since all of them look reasonable:
+ *   - every width of `blinkClosed` and `blinkOpen`, both declaration orders,
+ *     `blinkOpen` used in the `BlinkOn` guard as well as the stores, and
+ *     `blinkClosed` derived as `blinkOpen + 1`: all exactly 13 rows.
+ *   - carrying the 1 in an existing pseudo instead of a new one: `kawaiOp`
+ *     (HImode, so cse cannot serve the QImode compare from it) is 3 rows
+ *     with the guard rematerialising its own `li`; `blink` is 68; a
+ *     function-scope `kawaiType` is 78.
+ *   - `faceSel = (u8*)0x1F800000;` moved down: one or two statements is
+ *     *exactly inert* -- the `.lreg` dump gives it 644 insns of live range
+ *     wherever the assignment sits -- three statements down is 54 rows,
+ *     above loop 2 is 29, above loop 3 is 48, above loop 4 is 51.
+ *   - `& 0xFF` on the KawaiA store (5 rows, +1 instruction) reaches the same
+ *     live range as fact 3 and leaves the `andi` in the object; the same
+ *     mask on the *index* store folds before flow and is worth nothing.
+ *   - a reg-reg copy in place of the duplicated store is folded by cse and
+ *     is inert, so the duplicated tail is not interchangeable with one.
+ *   - decomp-permuter: 47,000 iterations from a clean scratch, no
+ *     improvement -- consistent with the residue being a ranking rather
+ *     than a spelling. */
 void HandleKawaiDataInModel(struct FieldRenderData* buf) {
     SVECTOR pos;
     long screenPos;
@@ -4098,6 +3964,7 @@ void HandleKawaiDataInModel(struct FieldRenderData* buf) {
     s32* src;
     s16 kawaiOp;
     s32 blink;
+    s32 blinkOpen;
     u8 blinkClosed;
     s32 i;
 
@@ -4211,6 +4078,7 @@ void HandleKawaiDataInModel(struct FieldRenderData* buf) {
     }
 
     for (i = 0; i < D_8009AC1C; i++) {
+        blinkOpen = 1;
         blinkClosed = 2;
         if (models[i].modelEntryIndex == 0xFF) {
             continue;
@@ -4224,19 +4092,19 @@ void HandleKawaiDataInModel(struct FieldRenderData* buf) {
             faceSel[2] = 0;
             faceSel[3] = i;
             blink = (g_RandomTable[D_801144D8++] & 0x1F) + 0x40;
+            g_FieldEntity[i].KawaiA = blink;
         } else {
-            faceSel[0] = 1;
-            faceSel[1] = 1;
+            faceSel[0] = blinkOpen;
+            faceSel[1] = blinkOpen;
             faceSel[2] = 0;
             faceSel[3] = i;
             blink = g_FieldEntity[i].KawaiA - 1;
+            g_FieldEntity[i].KawaiA = blink;
         }
-        g_FieldEntity[i].KawaiA = blink;
         KawaiLoadEyesMouthTexToVram(
             &g_FieldModelData->modelEntries[i], faceSel);
     }
 }
-#endif
 
 // Possable Debug routine. Ran at beginning of every main field loop. (FPS?)
 void DebugRunEveryLoop(void) {}
@@ -5996,9 +5864,66 @@ void FieldModelBsxTdbModify(u8* tdb) {
  *     s32/u16/u32 and costs an instruction at u8/s8; `i` is 3 rows at s32 and
  *     63-68 rows and +8/+12 instructions at every narrow width. `u32 i` is
  *     right and nothing else is.
- * Do not re-open this one on a spelling. The next thing that could move it is
- * a fact about `find_reg`'s conflict set rather than about `allocno_compare`'s
- * ranking, and the `.s` cannot show that.
+ * The paragraph above was wrong to close the `live_length` dimension, and the
+ * arithmetic it quotes is now a specification rather than a verdict. Reading
+ * the `.greg` dump: whichever of `i` and `d` `global_alloc` reaches first
+ * takes `$a3` and the other takes `$t0`, the conflict sets and preferences
+ * being byte-identical in both bodies, so the whole row is the ranking
+ *
+ *     pri = floor_log2(n_refs) * n_refs / live_length * 10000
+ *
+ * with `i` at 14/99 (4242) and `d` at 15/97 (4639) once the third loop-1
+ * access reads through `d`. `i` therefore needs **16 references** at that
+ * live range, or **live_length <= 90** at 14 -- and the second one is
+ * reachable:
+ *
+ *   - The second `i = 0` written **inside loop 2's guard** takes `i` to
+ *     14 refs over **86** insns (4883) and the allocation comes out right:
+ *     `.variants` scores it **3 rows**, all of them the one `move a3,zero`,
+ *     which our body puts in loop 2's preheader and the target puts in loop
+ *     1's exit block, plus the two branch offsets that follow from it. Every
+ *     register in the function is correct there. The note above only ever
+ *     tried the reset *below the middle block*, which the `.lreg` dump shows
+ *     is worth **nothing** -- 99 either way -- because the middle block and
+ *     the reset are one basic block and gcc keeps the def at its head.
+ *
+ *   - And the two are incompatible by construction. `i` is dead across the
+ *     middle block only if it is redefined after it; the target's reset is
+ *     before it, so in the original `i` is live-in to the middle block and
+ *     its live range is the full 99. The reset's position and the live range
+ *     are the same insn wearing two hats, which is the shape
+ *     `HandleKawaiDataInModel` above also had -- and there the escape was a
+ *     statement duplicated into both arms of an `if`, counted twice by flow
+ *     and merged back by post-reload cross-jumping. **That is the mechanism
+ *     to reach for here**, and the two obvious spellings of it do not work:
+ *     `i += 1` moved into both arms of loop 1 is 15 rows and **+2
+ *     instructions** (the copies survive, cross-jumping does not merge a
+ *     one-insn tail here), the same in loop 2 is 15 and +4, and a `k = i;`
+ *     copy in both arms with `i = k + 1;` after the join -- which cse cannot
+ *     fold, the join having two predecessors -- is 15 and +2, `k` and `i`
+ *     landing in different registers so the copies are not no-op moves.
+ *
+ * The pseudo-structure dimension is closed too, which the note above never
+ * varied. Splitting `d` into two pointers is the only way to give a site
+ * `$t0` without giving `d` the reference, and it cannot work: the split half
+ * has a short live range, so it out-ranks everything (`d` over loop 1 alone
+ * is 8 refs / 22 insns = 10909) and is allocated before `i` rather than
+ * sharing its register. Measured, all at **+1 instruction** because the copy
+ * survives: split after loop 1 (13 rows), split before loop 2 (13), the same
+ * without the required read (13), three pointers (29), and the split with
+ * `d2 = data` rather than `d2 = d` (17). Also measured and worse: a second
+ * `models` cursor for loop 2 (17), a second counter for loop 2 (26 with or
+ * without the read), `next` merged into the `data` parameter (17 with, 1
+ * without -- i.e. exactly inert on the current body), `next` derived from
+ * `d` (24, -1 instruction), and the reset written inside loop 1's `if` so it
+ * lands in the exit block (21 to 25 depending on where the first `i = 0`
+ * goes -- the position is right and the ranking is not).
+ *
+ * So the residue is one reference on `i` that emits nothing. Everything
+ * tried so far either emits an instruction or is deleted before `flow`
+ * counts it; the two mechanisms known to survive that gap are combine
+ * folding an address into its `mem` (same basic block only) and
+ * cross-jumping merging a duplicated tail. Neither has a candidate here yet.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);

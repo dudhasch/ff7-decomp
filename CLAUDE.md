@@ -2353,6 +2353,54 @@ a near-miss, in rough order of frequency:
   again. So `REG_N_REFS` on a pointer is a property of the walk, not of the
   spelling, and a residue that needs it lowered needs a different program
   rather than a different phrasing.
+  The caveat, from `FieldModelStructInit` in `src/field/field2.c`: a row whose
+  two sides name *different registers for the same address* is not a pure
+  permutation, because which pseudo an operand names decides that pseudo's
+  `n_refs`. That function is 1 changed / 0 inserted and the fix genuinely is
+  the ranking — reading the third `d->modelCount` through `d` rather than
+  through `data` is what takes `d` from 13 references to 15 and puts it ahead
+  of the loop counter. The rule holds when the differing rows are register
+  *names* on values that are already the same pseudo; it does not when the
+  row is a base register, since that is a reference count in disguise.
+
+* **A statement duplicated into both arms of an `if`/`else` is free in the
+  object and worth two insns of `live_length` to everything live around it.**
+  Post-reload cross-jumping merges two identical tails, so the object keeps
+  one copy — but `flow` ran long before that and counted both, and every
+  pseudo live across the surrounding loop gets the extra insns in its
+  `reg_live_length`. That is the only lever this project has found for the
+  case where a residue needs a *longer* live range: a dead assignment is
+  deleted by flow before it counts (measured twice), a reg-reg copy is folded
+  by cse, and an `andi` that combine cannot reach because its consumer is in
+  another basic block stays in the object. `HandleKawaiDataInModel` in
+  `src/field/field2.c` matched on exactly this — `g_FieldEntity[i].KawaiA =
+  blink;` written at the end of both arms rather than once after them, which
+  takes `blinkClosed` from 5 refs over 84 insns (`2*5/84 = 1190`) to 5 over 86
+  (1162) and `faceSel` from 19/644 (1180) to 19/646 (1176), so the two
+  exchange `$s5` and `$s6` and the function lands. The target has the single
+  merged store at the join, reached by a `j` from the first arm, which is what
+  a duplicated-then-merged tail looks like from the `.s` side.
+
+  It is not universal, and the failure is silent: the same trick on
+  `FieldModelStructInit`'s `i += 1` leaves **both** copies in the object
+  (+2 instructions, 15 rows). A one-insn tail whose arms differ in how they
+  reach the join is not always merged, so check the length, never the rows.
+
+* **Read the reset of a loop counter as a live-range lever, and put it inside
+  the *guard*, not merely below the block.** A second `i = 0` between two
+  loops sits in the same basic block as everything else between them, and
+  `reg_live_length` for the counter then covers that whole block however far
+  down the assignment is written — `FieldModelStructInit` measures **99
+  insns** with the reset at the top of the middle block and 99 with it at the
+  bottom, byte-identical. Written inside the second loop's guard,
+  `if (count != 0) { i = 0; do { … } }`, the def moves into the loop's own
+  preheader, the middle block leaves the counter's live range altogether, and
+  it drops to **86** — enough to reverse `allocno_compare` against a pointer
+  at 15 refs / 97 insns. The cost is that the `move a3,zero` is then emitted
+  in the preheader rather than in the first loop's exit block, so the two are
+  mutually exclusive; read the target for which one it wants before spending
+  anything. The general form: *where* a def sits inside a block is inert, and
+  *which* block it sits in is decisive.
 
 * **Paired levers can both be *plateaus*, not regressions, and a note that
   measures one at a time rejects both.** The existing paired-levers rule is
