@@ -252,6 +252,7 @@ extern u8 D_800708D0[][0x1C]; // kernel-region table, indexed by
 extern s16 D_8009D85C[];      // record fields, stride 0x440
 extern s16 D_8009D85E[];
 extern s16 D_8009D862[];
+extern u8 D_8009D86F[]; // flags byte, 0x440 stride
 extern Unk8009D866 D_8009D866[];
 extern u8 D_8009D954[]; // per-actor sub-table, 0x440 stride, 8-byte rows keyed
                         // by effect id

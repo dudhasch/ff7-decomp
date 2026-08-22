@@ -1646,7 +1646,42 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB308);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB480);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB674);
+/* Drop the enemy slots that are out of reach (formation row >= 0x10) from the
+ * pending action's target mask.  If that changed anything, either flag the
+ * action as needing a re-pick or commit the narrowed mask -- and if nothing is
+ * left, park the "no valid target" message id. */
+void func_800AB674(void) {
+    s32 mask;
+    s32 i;
+
+    if (g_CurrentAction->unk90 & 0x10) {
+        return;
+    }
+    if (g_CurrentAction->actorId >= 3) {
+        return;
+    }
+    if (!(g_CurrentAction->unk44 & 0x1C00)) {
+        if (g_CurrentAction->unk28 != 5) {
+            return;
+        }
+    }
+    mask = g_CurrentAction->allowedTargetsMask;
+    for (i = 4; i < 10; i++) {
+        if (g_BattleState.combatant[i].unk4E >= 0x10) {
+            mask &= ~(1 << i);
+        }
+    }
+    if (mask != g_CurrentAction->allowedTargetsMask) {
+        if (D_8009D86F[g_CurrentAction->actorId * 0x440] & 4) {
+            g_CurrentAction->unk90 |= 0x20000;
+        } else {
+            g_CurrentAction->allowedTargetsMask = mask;
+            if (mask == 0) {
+                g_CurrentAction->unkDC = 0x77;
+            }
+        }
+    }
+}
 
 void func_800AB788(void) {
     s32 bit;
