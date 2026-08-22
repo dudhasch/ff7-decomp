@@ -56,7 +56,8 @@ typedef struct {
     s16 unk7C;
     s16 vibrato_depth;
     s16 vibrato_depth_slide_steps;
-    u8 unk82[0xE];
+    s16 unk82;
+    u8 unk84[0xC];
     s16 tremolo_depth;
     s16 tremolo_depth_slide_steps;
     s16 tremolo_depth_slide_step;
@@ -91,7 +92,8 @@ typedef struct {
     s16 pan_lfo_vol;
     s32 unkDC;
     s32 attr_mask;
-    u8 unkE4[0x8];
+    u32 unkE4;
+    u32 unkE8;
     u32 unkEC;
     u32 unkF0;
     u32 unkF4;
@@ -105,7 +107,9 @@ typedef struct {
 } AKAO_TRACK; // size:0x108
 
 typedef struct {
-    u8 pad0[0x18];
+    u8 pad0[0x4];
+    u32 unk4;
+    u8 pad8[0x10];
     u32 tempo;
     u8 pad1C[0x8];
     u32 unk24;
@@ -181,6 +185,25 @@ extern s32 D_80062F00;
 extern s32 D_80062F04;
 extern u16 D_80062F1E;
 extern u8 D_80075F34[];
+
+// One 0x40-byte record per instrument. Only the first 16 bytes are read by
+// the driver: two words of SPU envelope, then eight LFO/parameter bytes.
+typedef struct {
+    /* 0x0 */ s32 unk0;
+    /* 0x4 */ s32 unk4;
+    /* 0x8 */ u8 unk8;
+    /* 0x9 */ u8 unk9;
+    /* 0xA */ u8 unkA;
+    /* 0xB */ u8 unkB;
+    /* 0xC */ u8 unkC;
+    /* 0xD */ u8 unkD;
+    /* 0xE */ u8 unkE;
+    /* 0xF */ u8 unkF;
+    /* 0x10 */ u8 unk10[0x30];
+} AkaoInstrument; // size:0x40
+
+extern AkaoInstrument D_80075F28[];
+extern s32 D_80076C68[];
 // Music-driver slide state: each MulMusic value is a fixed-point scalar for
 // pitch/volume/tempo (current value in the upper 16 bits, lower 16 bits are
 // fractional precision the driver accumulates every tick for a smooth
@@ -248,6 +271,7 @@ extern s32 D_80099FDC;
 extern s32 g_AkaoNoiseMask;
 extern s32 g_AkaoReverbMask;
 extern s32 g_AkaoPitchLfoMask;
+extern u16 D_80099FFA;
 extern u16 D_8009A14E;
 extern u16 D_8009A152;
 extern s32 D_8009A104;
