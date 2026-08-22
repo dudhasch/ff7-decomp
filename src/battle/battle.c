@@ -1170,7 +1170,58 @@ void func_800A85B4(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A85FC);
+/* PARKED: 5 changed / 0 inserted, one instruction short (27 against 28).
+ * Everything is right except which register `result` gets:
+ *
+ *   want: li v0,-1 ... nop / sw v0,0(v1) / li v0,0x2f ... sw v0,0x20(v1)
+ *   got:  li a0,-1 ... li a0,0x2f / sw v0,0(v1) ...    sw a0,0x20(v1)
+ *
+ * The target keeps `result` in $v0, shared with the two call return values,
+ * so `li v0,0x2f` cannot be issued before `sw v0,0(v1)` and the load-delay
+ * slot after `lw v1,%lo(g_CurrentAction)` stays a `nop`.  This build gives
+ * `result` $a0 -- shared with `target` instead -- and reorg fills that slot
+ * with the constant, which is the whole of the missing instruction.
+ *
+ * The control-flow shape is settled and is the one below: `result = -1`
+ * ahead of the guard (reorg puts it in the bnez delay slot), the body as the
+ * fall-through, one store at the join, and `act` as a named pointer so the
+ * join needs no fourth load of g_CurrentAction.
+ *
+ * Measured, all 5 rows and -1 instruction: `result` merged with the second
+ * call's return value (the OpcodeFuncSplit idiom); `target` reused as
+ * `result`; every width of `result` and of `target` (width_sweep, 10
+ * variants -- `target` as `u16` is 4 changed / 1 inserted at the *exact*
+ * length, but only because a spurious `andi v0,v0,0xffff` pays for the
+ * missing nop, so it is two errors cancelling, not a better body);
+ * declaration order.  Worse: no `act` local, so the join reloads
+ * g_CurrentAction (6 rows, +1); the unk20 store written out in both arms
+ * (4 rows, +1 -- everything matches except that the else arm keeps a `j`
+ * and its own `li v0,-1` block instead of collapsing into the delay slot);
+ * `act` assigned once rather than twice (22 rows).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800A85FC);
+#else
+void func_800A85FC(void) {
+    Unk800A8D04* act;
+    s32 target;
+    s32 result;
+
+    act = g_CurrentAction;
+    result = -1;
+    if (act->actorId >= 3) {
+        act->unkC = 1;
+        act->unk50 = 0;
+        target = func_800B3030(*(u16*)&act->allowedTargetsMask) & 0xFFFF;
+        g_CurrentAction->allowedTargetsMask = target;
+        target = func_80014A38(target);
+        act = g_CurrentAction;
+        act->actorId = target;
+        result = 0x2F;
+    }
+    act->unk20 = result;
+}
+#endif
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A866C);
 
