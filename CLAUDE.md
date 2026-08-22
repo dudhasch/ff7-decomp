@@ -1108,6 +1108,74 @@ a near-miss, in rough order of frequency:
   them apart. decomp-permuter found it in 721 iterations through
   `perm_randomize_internal_type`; nothing about reading the target suggests
   it, which is exactly the case the permuter is for.
+
+  A third instance, and this one *is* readable off the target:
+  `func_801D3478` in `src/menu/title.c` sat one instruction short with the
+  `li v0,1` of the next statement sitting in the delay slot of the
+  `bnez` that leaves for the epilogue, where the target has a `nop` there.
+  One row, one word, `void` -> `s32`, MATCH. The function sets no return
+  value on any path and no caller reads one, so K&R implicit `int` is the
+  likely original spelling; write `s32` and say so in a comment, because a
+  reader will otherwise "fix" it back.
+
+* **A block a conditional branch jumps *forward* to gets swapped into the
+  fall-through unless it contains a call.** For `if (c) { checks } else { A }`
+  followed by `B`, gcc emits `beqz c,A / checks / j B / A: / B:` and then
+  moves `A` up -- `bnez c,checks / A / checks / B` -- which deletes the `j B`
+  *and* puts `B` in the same extended basic block as the checks, so cse
+  substitutes a register for `B`'s first load and reorg fills a delay slot
+  with it. Four instructions per site, and it reads as scheduling noise a
+  long way from the `if`. Nothing about the *spelling* reaches it: the
+  if/else, its inversion, the explicit `if (c) goto A;` goto chain, a
+  combined `c1 || c2` range test and a `do { } while (0);` barrier at either
+  end all measured exactly 100 rows on `func_801D2DA8` in `src/menu/title.c`.
+  What reaches it is giving `A` a **call**: writing `A`'s early-out as
+  `func_801D2B58(1); return;` rather than `goto` into the shared tail that
+  already ends in that call is 4 instructions per arm and 100 rows -> 87.
+  The tell is your build being short by `j`s and `nop`s while every
+  instruction still looks right, with the target's version of `B` reloading a
+  field yours keeps in a register.
+
+* **Which of two stores to the same field is the conditional one decides
+  whether reorg can duplicate it into a delay slot.** `if (c) { p->f = 0; }
+  p->f = 0;` and `p->f = 0; if (c) { p->f = 0; }` are the same program and
+  four instructions apart. With the unconditional store *second*, cse shares
+  the field the test reads with the test above it and sched2 sinks the store
+  past two unrelated loads, so the branch's delay slot ends up a `nop`; with
+  it *first*, the conditional store is the branch's target, reorg copies it
+  into the delay slot and redirects the branch past it, and both copies
+  survive. Two `sb $zero` to one address with a branch between them is that
+  shape, not a compiler artefact to be tidied away -- `func_801D2DA8` in
+  `src/menu/title.c` needs it, and the six spellings measured 0 (this one),
+  4, 4, 4, 57 and 58 rows.
+
+* **`beq`/`li K`/`beq`/`j default` with *both* tests ahead of *both* arms is a
+  `switch`; an `if`/`else if` chain interleaves them.** `expand_end_case`
+  emits the whole compare chain first and the case bodies after it, so a
+  target whose two comparisons sit adjacent and whose arms follow is a switch
+  even when there are only two cases -- and the `li` for the second compare
+  ends up in the first branch's delay slot. Written as `else if` the second
+  test lands *after* the first arm instead. Worth 29 rows and the whole tail
+  of `func_801D2DA8`. This is the same reading as the `OpcodeFuncJump` bullet
+  above, one level up: there a `switch` bought one delay slot, here it buys
+  the block order.
+
+* **A compiler-generated loop-invariant -- a division's magic multiplier --
+  is hoisted or not depending on how many giv *bases* the loop needs, and the
+  lever is a pre-loop local that cse folds straight back to the symbol.** A
+  loop walking two arrays off one symbol carries two giv base registers, and
+  `move_movables` then leaves the `lui`/`ori` of the `x / 0xFFFF` magic
+  constant in the loop body; naming one of the two walks' base in a local
+  (`Unk801D026C* ratio = (Unk801D026C*)D_8009D3FC;`, indexed `&ratio[i]`)
+  drops it to one and the constant is lifted into a callee-saved register --
+  which is **+2 instructions**, its save and restore. So the tell is a target
+  *longer* than your build by exactly one `sw`/`lw` pair with a `lui`/`ori`
+  of a division magic number in its preheader where yours has it in the loop.
+  `func_801D027C` in `src/menu/bginmenu.c` needed it. Note the local is
+  inert as far as the emitted address goes -- cse folds it back, and the
+  preheader is byte-identical either way -- so this is not the "cache a
+  re-read global pointer" idiom and reads as a no-op change.
+
 * **`x++` on a `volatile` re-reads it; `x = x + 1` does not.** The increment is
   an expression whose value gcc materialises even when the statement discards
   it, and for a volatile that means a fourth instruction pair (`lui`/`lhu`)

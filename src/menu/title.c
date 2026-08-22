@@ -61,7 +61,186 @@ static void func_801D2D10(s32 arg0) {
     SystemAkaoExecute();
 }
 
-INCLUDE_ASM("asm/us/menu/nonmatchings/title", func_801D2DA8);
+// Cursor movement / scroll handler for one Unk80026448 list widget.
+void func_801D2DA8(Unk80026448* menu) {
+    if (menu->unk8 == 0) {
+        if (D_80062D7E & 0x1000) {
+            menu->unkB--;
+            if (menu->unk11 == 0) {
+                goto upNoWrap;
+            }
+            if (menu->unk11 < 0) {
+                return;
+            }
+            if (menu->unk11 >= 3) {
+                return;
+            }
+            goto upWrap;
+        upNoWrap:
+            if (menu->unkB >= 0) {
+                func_801D2B58(1);
+                return;
+            }
+            menu->unkB = 0;
+            if (menu->unk2 > 0) {
+                menu->unk2--;
+                menu->unkF = -7;
+                menu->unk8 = 1;
+                func_801D2B58(1);
+            }
+            return;
+        upWrap:
+            if (menu->unkB < 0) {
+                menu->unkB = menu->unkD - 1;
+            }
+        } else if (D_80062D7E & 0x4000) {
+            menu->unkB++;
+            if (menu->unk11 == 0) {
+                goto downNoWrap;
+            }
+            if (menu->unk11 < 0) {
+                return;
+            }
+            if (menu->unk11 >= 3) {
+                return;
+            }
+            goto downWrap;
+        downNoWrap:
+            if (menu->unkB < menu->unkD) {
+                func_801D2B58(1);
+                return;
+            }
+            menu->unkB = menu->unkD - 1;
+            if (menu->unk2 < menu->unk6 - menu->unkD) {
+                menu->unkF = -1;
+                menu->unk8 = 2;
+                func_801D2B58(1);
+            }
+            return;
+        downWrap:
+            if (menu->unkB >= menu->unkD) {
+                menu->unkB = 0;
+            }
+        } else if (D_80062D7E & 0x8000) {
+            switch (menu->unk10) {
+            case 0:
+                menu->unkA--;
+                if (menu->unkA < 0) {
+                    menu->unkA = 0;
+                    return;
+                }
+                break;
+            case 1:
+                menu->unkA--;
+                if (menu->unkA < 0) {
+                    menu->unkA = menu->unkC - 1;
+                }
+                break;
+            case 2:
+                if (*(u16*)&menu->unkA == 0 && menu->unk2 == 0) {
+                    return;
+                }
+                menu->unkA--;
+                if (menu->unkA < 0) {
+                    menu->unkA = menu->unkC - 1;
+                    menu->unkB--;
+                    if (menu->unkB < 0) {
+                        menu->unkB = 0;
+                        if (menu->unk2 > 0) {
+                            menu->unk2--;
+                            menu->unkF = -7;
+                            menu->unk8 = 1;
+                        }
+                    }
+                }
+                break;
+            default:
+                return;
+            }
+        } else if (D_80062D7E & 0x2000) {
+            switch (menu->unk10) {
+            case 0:
+                menu->unkA++;
+                if (menu->unkA >= menu->unkC) {
+                    menu->unkA = menu->unkC - 1;
+                    return;
+                }
+                break;
+            case 1:
+                menu->unkA++;
+                if (menu->unkA >= menu->unkC) {
+                    menu->unkA = 0;
+                }
+                break;
+            case 2:
+                if (menu->unkA == menu->unkC - 1 &&
+                    menu->unkB == menu->unkD - 1 &&
+                    menu->unk2 == menu->unk6 - menu->unkD) {
+                    return;
+                }
+                menu->unkA++;
+                if (menu->unkA >= menu->unkC) {
+                    // The second store is redundant, and it is what the target
+                    // has: reorg copies the *first* one into the branch's
+                    // delay slot and redirects the branch past it, so both
+                    // copies survive.  Writing the unconditional store second
+                    // instead lets cse share the `menu->unkC` load with the
+                    // test above and sched2 sink the store two loads down --
+                    // one instruction short and three rows out.
+                    menu->unkA = 0;
+                    if (menu->unkB >= menu->unkC) {
+                        menu->unkA = 0;
+                    }
+                    menu->unkB++;
+                    if (menu->unkB >= menu->unkD) {
+                        menu->unkB = menu->unkD - 1;
+                        if (menu->unk2 < menu->unk6 - menu->unkD) {
+                            menu->unkF = -1;
+                            menu->unk8 = 2;
+                        }
+                    }
+                }
+                break;
+            default:
+                return;
+            }
+        } else if (D_80062D7E & 8) {
+            menu->unk2 += menu->unkD;
+            if (menu->unk6 - menu->unkD < menu->unk2) {
+                menu->unk2 = menu->unk6 - menu->unkD;
+                return;
+            }
+        } else if (D_80062D7E & 4) {
+            menu->unk2 -= menu->unkD;
+            if (menu->unk2 < 0) {
+                menu->unk2 = 0;
+                return;
+            }
+        } else {
+            return;
+        }
+    beep:
+        func_801D2B58(1);
+    } else {
+        switch (menu->unk8) {
+        case 1:
+            menu->unkF++;
+            if (menu->unkF == 0) {
+                menu->unk8 = 0;
+                menu->unkF = 0;
+            }
+            break;
+        case 2:
+            menu->unkF--;
+            if (menu->unkF == -8) {
+                menu->unk8 = 0;
+                menu->unkF = 0;
+                menu->unk2++;
+            }
+            break;
+        }
+    }
+}
 
 static void func_801D32C0(void) {
     TestEvent(D_8009A024[0]);
@@ -111,7 +290,57 @@ static s32 func_801D33F4(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/menu/nonmatchings/title", func_801D3478);
+// Non-void, though no caller reads the result and no path sets one: the return
+// type is what stops reorg stealing the `li v0,1` below into the delay slot of
+// the branch to the epilogue (CLAUDE.md, "A `void` function fills the delay
+// slot of a branch to its own epilogue").  K&R implicit int is the likely
+// original spelling.
+s32 func_801D3478(s32 arg0) {
+    s32 port;
+
+    port = (arg0 != 0) << 4;
+    _card_info(port);
+    switch (func_801D3370()) {
+    case 0:
+        if (D_801E8F38[arg0][0] != 0) {
+            return;
+        }
+        D_801E8F38[arg0][0] = 1;
+        break;
+    case 2:
+        D_801E8F38[arg0][0] = 0;
+        D_801E8F38[arg0][1] = 0;
+        D_801E8F38[arg0][2] = 0;
+        return;
+    case 3:
+        func_801D3318();
+        _card_clear(port);
+        func_801D33F4();
+        break;
+    case 1:
+    default:
+        D_801E8F38[arg0][1] = 1;
+        return;
+    }
+
+    func_801D32C0();
+    _card_load(port);
+    switch (func_801D3370()) {
+    case 0:
+        D_801E8F38[arg0][2] = 0;
+        return;
+    case 2:
+        D_801E8F38[arg0][0] = 0;
+        return;
+    case 3:
+        D_801E8F38[arg0][2] = 1;
+        return;
+    case 1:
+    default:
+        D_801E8F38[arg0][1] = 1;
+        return;
+    }
+}
 
 void func_801D3668(s32 arg0) {
     if (!(arg0 & 0x3F)) {

@@ -101,8 +101,26 @@ static void func_801D026C(Unk801D026C* arg0, u16 arg1) {
     arg0->unk1 = arg1 >> 8;
 }
 
-// Recalculates display stats and ratios for party members.
-INCLUDE_ASM("asm/us/menu/nonmatchings/bginmenu", func_801D027C);
+// Rescales each party member's current HP by the 16-bit ratio held in the
+// per-member scratch area, clamped to a minimum of 1.  D_8009D3FC - 0xC98 is
+// &Savemap.party[0].hp_cur; spelling it as an offset from the scratch symbol
+// is what lets cse serve both walks from one address (see CLAUDE.md, "cse
+// links two symbolic constants only when they share a symbol_ref base").
+void func_801D027C(void) {
+    s32 i;
+    s32 hp;
+    Unk801D026C* ratio;
+
+    ratio = (Unk801D026C*)D_8009D3FC;
+    for (i = 0; i < 5; i++) {
+        hp = *(u16*)((u8*)D_8009D3FC - 0xC98 + i * 0x84) *
+             func_801D0258(&ratio[i]) / 0xFFFF;
+        if (hp <= 0) {
+            hp = 1;
+        }
+        *(u16*)((u8*)D_8009D3FC - 0xC98 + i * 0x84) = hp;
+    }
+}
 
 // Removes specified item, materia, or character ID from party/inventory.
 void func_801D0324(s32 arg0) {
