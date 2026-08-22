@@ -2247,7 +2247,25 @@ void BATTLE_ApplyKillCountBonus(void) {
     g_CurrentAction->unk214 = var_v1 * 0xA;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE378);
+// unk214 = 1111 per equipped materia (weapon plus armor slots)
+void func_800AE378(void) {
+    s32 count = 0;
+    s32 i;
+    SavePartyMember* p;
+
+    if (g_CurrentAction->unk208 < 3) {
+        p = D_800F5E60[g_CurrentAction->unk208].partyMember;
+        for (i = 0; i < 8; i++) {
+            if (p->materia_weapon[i] != -1) {
+                count++;
+            }
+            if (p->materia_armor[i] != -1) {
+                count++;
+            }
+        }
+    }
+    g_CurrentAction->unk214 = count * 1111;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE42C);
 
