@@ -1152,7 +1152,19 @@ void func_8001C58C(void) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C5BC);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C788);
+u16 func_8001C788(void) {
+    u16 result;
+
+    result = 0;
+    if (D_80062E94 != 0) {
+        D_80062E94--;
+    } else if (func_80023050() == 0 || func_80023050() == 1) {
+        if (SystemCdromReadChain() == 0) {
+            result = func_8001C5BC();
+        }
+    }
+    return result;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C808);
 
