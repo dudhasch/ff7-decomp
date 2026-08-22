@@ -531,7 +531,35 @@ s32 func_800A5A94(s16 arg0) {
     return p != NULL;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5AD8);
+void func_800A5AD8(WorldChunkHeader* arg0) {
+    Unk800E5A2C* p;
+    Unk800E5A2C* next;
+    s32 key;
+
+    p = D_800E5A2C;
+    if (p != NULL) {
+        key = *(s32*)&arg0->x;
+    loop:
+        if (*(s32*)&p->chunk->x != key) {
+            p = p->next;
+            if (p != NULL) {
+                goto loop;
+            }
+        }
+    }
+    if (p != NULL) {
+        return;
+    }
+    if (D_800E5A30 == NULL) {
+        func_800A0B40(0x16);
+    }
+    p = D_800E5A30;
+    next = p->next;
+    p->next = D_800E5A2C;
+    D_800E5A2C = p;
+    p->chunk = arg0;
+    D_800E5A30 = next;
+}
 
 void func_800A5B88(Unk800E5768* arg0) {
     WorldChunkHeader* chunk;
