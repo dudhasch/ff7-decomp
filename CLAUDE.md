@@ -239,6 +239,42 @@ This replaces the function's `INCLUDE_ASM(...)` line in the `.c` with approximat
 decompiled C, using the project's existing types and symbol names. It is a
 starting point, not an answer — it will usually compile but rarely match.
 
+**One missing prototype poisons every later `mako.sh dec` in the unit, not
+just the function that needs it.** When m2c cannot type a callee it writes
+`/*?*/ void func_800A4F60(u8, ?);` into the `.c`, and `?` is not C — so the
+*next* run fails at the C-context parse with
+
+```
+Decompilation failure:
+Syntax error when parsing C context.
+before: ? at line 2713, column 26
+      void func_800A4F60(u8, ?);
+```
+
+naming a line number in a preprocessed file and a function that has nothing to
+do with the one you asked for. Three separate batches in
+`src/battle/battle3.c` died this way. The fix is always the same: declare the
+callee properly in the overlay's private header and re-run the whole batch.
+Read the parameter types off the callee's own prologue — `andi $a0,$a0,0xff`
+is a `u8` parameter, `sll`/`sra 16` is `s16`, a plain `slti $v0,$a0,N` with no
+mask is `s32`. Doing it up front for every `jal` target the unit has is a few
+minutes and it is the cheapest work in a fresh file:
+
+```shell
+grep -ho 'jal *\w*' asm/us/<ovl>/nonmatchings/<unit>/*.s | sort -u
+```
+
+**And the declaration does not always belong in `game.h`.** A main-overlay
+function that main *defines* with a different signature than the callers use
+is a `conflicting types` error the moment `game.h` is included by both units,
+and gcc 2.6.3/2.7.2 keeps generating code afterwards (see *A compile error
+that ninja calls a success*). Two in `src/battle/battle3.c`:
+`func_80026B5C` is `void func_80026B5C(void) {}` in `1255C.c` while every
+battle caller passes an argument, and `func_8001DE0C` is defined in `18B8.c`
+against `main_private.h`'s `Unk8001DE0C`, which the battle overlay cannot see.
+Declare those in `battle_private.h` (redeclaring the struct locally if you
+must) and leave `game.h` for the ones that agree.
+
 ### 3. Iterate against the assembly
 
 Rebuild the one object and get a verdict:
@@ -257,7 +293,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Nine ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Twelve ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -799,7 +835,7 @@ a near-miss, in rough order of frequency:
   reports 34 rows with `const u32 D_800A0000[]` present and **27** with it
   deleted -- a constant 7 rows that vanish the moment the function is
   unparked, which is exactly when the object must be deleted anyway (see
-  *Nine ways a clean-looking diff lies*). So for any parked function with a
+  *Twelve ways a clean-looking diff lies*). So for any parked function with a
   local aggregate initialiser, take the honest baseline by scoring one
   variant that deletes the object, and record both numbers in the note.
 
@@ -4014,6 +4050,48 @@ a near-miss, in rough order of frequency:
   cannot be reached from C: `!(a && b)` is De Morgan'd by `build_unary_op`'s
   `invert_truthvalue` at parse time, and every ternary spelling is folded back
   to an `ANDIF`/`ORIF` before `do_jump` runs.
+* **A global's address in a hoisted register needs `&` *and* `volatile`, and
+  neither alone.** This file records `volatile` as one route to the register
+  form and says a `volatile` cast at the access site "measures the same" as
+  the declaration. On a global read inside a loop that is wrong in both
+  halves. `*(volatile u16*)&D_8009C862` is 0 rows on `func_800E53C8` in
+  `src/battle/battle3.c`; `extern volatile u16 D_8009C862` with a plain read
+  is **6** and one instruction short, and `*(u16*)&D_8009C862` with a
+  non-volatile declaration is **6** as well. The `&` is what gives the
+  address its own pseudo, which `move_movables` then lifts into the loop
+  *preheader* — after the zero-trip guard, which is where the target has it
+  and where a source-level pointer local (assigned before the `for`) cannot
+  land. The `volatile` is what stops cse folding that pseudo back into the
+  `mem`. The tell is `lui`/`addiu` in the preheader with `lhu 0(reg)` in the
+  body, against your `lui %hi` / `lhu %lo(reg)` pair inside the loop.
+* **A scattered run of `D_` scalars that exactly covers a known struct's size
+  is that struct, and typing it is worth more than any codegen lever.** m2c
+  emits one `extern` per address it sees touched, so a function that
+  initialises a record comes out as thirteen unrelated globals. `D_800F92E2`
+  through `D_800F92F3` in `src/battle/battle3.c` are one `Unk80026448`: every
+  field width and offset lines up, and `func_800DE46C` hands `&D_800F92E2`
+  straight to `func_800264A8(Unk80026448*)`, which is the confirmation. The
+  check is cheap — take the lowest and highest address m2c invented, subtract,
+  and grep the headers for a struct of that size whose member widths match the
+  store opcodes. It was worth a row on the initialiser itself and made two
+  other functions in the same unit readable at all.
+* **`p[i]` and `*(p + i)` are not the same address sum.** For a `u8*` local
+  and an `int` index, the subscript comes out `addu v0,v0,s1` (index first)
+  and the pointer-plus form `addu v0,s1,v0` (pointer first). One row, and the
+  last one on `func_800E010C`. The companion for a *scaled* index is the
+  reverse: `&row[i]` puts the pointer first and the integer sum
+  `i * sizeof(T) + (s32)row` puts the index first — `func_800DE46C` needs
+  that one. Read which register the target's `addu` names first and pick the
+  spelling accordingly; no cast or parenthesisation of the *other* form
+  reaches it.
+* **A post-increment read into a second global is three statements, not
+  `b = a++`.** `D_8009D2FC = D_80163604++;` computes the increment first and
+  emits the two `sb` in the order D_80163604, D_8009D2FC; a plain
+  `D_8009D2FC = D_80163604; D_80163604 = D_80163604 + 1;` reuses the old
+  value's register and drops one instruction. What the target has —
+  `addiu v1,v0,1` with `v0` still live — is `next = D_80163604 + 1;` as its
+  own statement *before* the D_8009D2FC store, and `next` has to be `u8`: an
+  `s32` local costs 3 rows. `func_800E05E4`'s last two rows.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
@@ -4064,7 +4142,7 @@ cost no instruction. When a diff shows a value in a callee- or long-lived
 register where the target uses `$v0`, count how many different things the
 source spells with that name.
 
-#### Nine ways a clean-looking diff lies
+#### Twelve ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -4247,6 +4325,31 @@ while it was being written: a callee-saved prologue `sw s3,0x4c(sp)` reads the
 *caller's* value and defines nothing, and a `jal` defines `$v0`/`$v1` while
 naming no register at all. Either one mishandled turns the check into a
 constant answer.
+
+**A row count read before the functions *above* it are settled.** Every branch
+in a function is a PC-relative offset into its own `.text`, and `diff.py`
+renders those as absolute offsets in the object — so one neighbour of the wrong
+length shifts every branch row in every function after it. This is the file-
+order rule stated as a measurement error rather than as advice, and on a fresh
+unit it is the dominant one: parking three near-misses in `src/battle/battle3.c`
+took `func_800E05E4` from **17 rows to 2**, `func_800DDE90` from 11 to **0**,
+`func_800DE94C` from 20 to 4 and `func_800E010C` from 6 to 1, with no change to
+any of their bodies. Two habits follow. Park or fix upstream *before*
+measuring downstream — a `MASPSX_OVERRIDE` is exactly the target's length, so
+pinning restores every offset below it. And when a diff is nothing but branch
+rows whose two addresses differ by a constant, do not read it as a finding:
+subtract the two, divide by four, and check that against the instruction
+surplus of the functions above.
+
+**A red `make build` that is the container's, not yours.** On the Windows
+Docker path `build/` lives in a named volume over virtiofs, and a full build
+occasionally fails once with a missing object
+(`cannot find build/us/src/main/psxsdk.c.o`) or a SHA-1 mismatch on
+`main_final.elf`, then passes on an immediate re-run with no source change at
+all. It happened twice in one session here. **Re-run a red build once before
+believing it** — and note the risk runs the other way too, so a green build
+that follows a red one on the same tree is worth a second confirmation before
+committing.
 
 #### Sweeping many variants at once
 
