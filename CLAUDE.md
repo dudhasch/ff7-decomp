@@ -229,7 +229,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Eight ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Nine ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -726,7 +726,7 @@ a near-miss, in rough order of frequency:
   reports 34 rows with `const u32 D_800A0000[]` present and **27** with it
   deleted -- a constant 7 rows that vanish the moment the function is
   unparked, which is exactly when the object must be deleted anyway (see
-  *Eight ways a clean-looking diff lies*). So for any parked function with a
+  *Nine ways a clean-looking diff lies*). So for any parked function with a
   local aggregate initialiser, take the honest baseline by scoring one
   variant that deletes the object, and record both numbers in the note.
 
@@ -2038,6 +2038,41 @@ a near-miss, in rough order of frequency:
   which costs a save, a restore and the whole allocation. Assign it after the
   last call that precedes its uses. Worth 12 rows either way in
   `FieldEventRunInit`, in opposite directions.
+* **A `move` of a variable into a scratch register immediately before a
+  compare against a constant is a post-increment in the test.**
+  `addu v0,s6,zero / slti v0,v0,9 / addiu s6,s6,1` cannot come from
+  `if (repeat >= 9) … repeat++;` — `slti v0,s6,9` is legal and gcc emits it,
+  so the copy has no reason to exist. `if (repeat++ >= 9)` needs the *old*
+  value live across the increment, which is exactly one extra pseudo and
+  exactly that `move`. sched2 then puts the `addiu` in the branch's delay
+  slot, which is what makes the increment look as though it belongs to one
+  arm. Same shape for `--`, and for a post-increment used as any operand
+  rather than as a comparand. `func_800A01A0` in `src/brom/brom.c` needs it
+  for the pad auto-repeat counter.
+* **`bcc rX,L / delay: <insn defining rX>` is reorg copying an insn *up* out
+  of the branch target, so the target block's first statement runs on the
+  taken path only — read it as an `if`/`else`, not as a statement before the
+  test.** The pattern
+
+  ```
+  bgez  s3, L      ; delay: addiu s3,s3,0xA
+  j     L          ; delay: move  s3,zero
+  ```
+
+  reads naturally as `index += 10; if (index < 0) index = 0;` and that is not
+  what it is: `fill_simple_delay_slots` will not move an insn that defines the
+  branch's own operand *down* into its slot, because the branch has already
+  read it and the result would be a different program. What it will do is
+  `fill_eager_delay_slots` — copy the *target* block's first insn up, and
+  redirect the branch past it, whenever that insn is dead on the fall-through
+  path. Here the fall-through overwrites `s3` with zero, so `s3 += 10` is
+  dead there and qualifies. The source is
+  `if (index < 0) { index = 0; } else { index += 10; }`, whose `bgez` skips
+  the then-arm, whose then-arm ends in the `j` to the join, and whose else-arm
+  is the single `addiu` reorg then steals. The give-away that it is eager
+  filling rather than a hoisted statement is that the branch and the `j` have
+  the *same* target: a statement genuinely above the test would leave the
+  branch pointing at the join and the slot holding something else.
 * **A hand-written `tag = base + 7` is an ordinary insn; `base[7]` is a giv.**
   The giv's initialiser is emitted into the loop preheader by
   `strength_reduce` and reorg leaves it there, while the hand-written pointer
@@ -2045,6 +2080,29 @@ a near-miss, in rough order of frequency:
   slot. So a target with a `nop` after `beqz <count>` and the `addiu` *after*
   it wants the offset written at the use site, not carried in a second
   variable. Eight rows across `KawaiSetModelTransparency`'s eight loops.
+* **The same rule decides whether a *frame* address is derived or
+  rematerialised, and there it is worth the whole function.** `&buf[4]` on a
+  local array is folded by the front end to `(plus (sp) 0x14)`, and gcc
+  rebuilds it from `$sp` at the use — even when `&buf` is already sitting in a
+  callee-saved register because `move_movables` hoisted it out of the
+  surrounding loop. Written as an index the same address becomes a giv, and
+  `strength_reduce` emits its preheader init *off the hoisted base*:
+  `addiu a1,s8,4` rather than `addiu a1,sp,0x14`. So spell a walking cursor
+  over a stack buffer as a subscript, not a pointer:
+
+  ```c
+  j = 4;
+  do { buf[--j] += n % 10; n /= 10; } while (n != 0);   /* addiu a1,s8,4  */
+  p = &buf[4];
+  do { *--p += n % 10;     n /= 10; } while (n != 0);   /* addiu a1,sp,20 */
+  ```
+
+  `j` has no use outside the address, so gcc drops the biv entirely and the
+  two forms are otherwise instruction-for-instruction identical — the tell is
+  exactly one row, an `addiu` whose base register is `$sp` where the target's
+  is the frame pointer the same loop nest already holds. `func_800A01A0` in
+  `src/brom/brom.c` is 0 rows one way and 2 the other, at the same length,
+  with identical opcode and `%hi` histograms.
 * **A giv's increment follows its biv's, in written order.** With
   `for (j = 0; j < n; j++, base += stride)` the `j++` comes first and the
   reduced `base + 7` increment after it; `base += stride, j++` swaps both.
@@ -3706,7 +3764,7 @@ cost no instruction. When a diff shows a value in a callee- or long-lived
 register where the target uses `$v0`, count how many different things the
 source spells with that name.
 
-#### Eight ways a clean-looking diff lies
+#### Nine ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -3721,6 +3779,21 @@ object ends up older than the source.
 past the end of the function, so rows belonging to the *next* function appear
 under the name you asked for. Scope by the target `.s`'s instruction count, as
 `checkfn.py` does, before concluding anything.
+
+**A function name two overlays both define.** `diff.py` with no `-f`/`-F`
+picks the objects through `diff_settings.py`, which greps every
+`build/us/*.map` for the function name — and when **more than one** overlay
+defines it, `estimate_overlay_from_func_name` returns `None` and the caller
+silently falls back to `main`. The auto-generated names collide by
+construction, because several overlays share a load address: `func_800A0000`
+is defined by both `brom` and `dschange`, both at `0x800A0000`, and `field`,
+`ending` and `dschange` all start there. What comes back is a diff of a
+function `main` does not have — no rows, score 0, which reads as a flawless
+match. `checkfn.py` now passes `-f`/`-F` outright, the way `variant_eval.py`
+already did, so no map is consulted and there is nothing to guess; before
+that its instruction-count guard caught this one only by luck, because `main`
+happens to have no function of that name. If you call `diff.py` by hand on an
+overlay, pass the objects.
 
 **A compile error that ninja calls a success.** The compile line is a pipeline
 ending in `mipsel-linux-gnu-as`, so the shell's exit status is the
@@ -4050,6 +4123,34 @@ and only the overlay's SHA-1 fails — `OpcodeFuncAdpal2` matches instruction
 for instruction and still produced `build/us/field.exe: FAILED`. A pinned
 function is *not* an owner; treat SHARES as BORROWS whenever the named owner
 sits under a `MASPSX_OVERRIDE`.
+
+#### An overlay's `.bss` is `extern`, never a C definition
+
+An overlay whose `.bss` lies past the end of its disk file has no subsegment
+for it in `config/us.yaml` — there is nothing to disassemble — and splat's
+`create_undefined_syms_auto` writes `build/us/undefined_syms.<ovl>.txt`
+instead, one bare `D_800A06CC = 0x800A06CC;` per address the *disassembly*
+references. Two consequences, and both were needed to land `func_800A0000` in
+`src/brom/brom.c`:
+
+* **Declare them, do not define them.** `extern DRAWENV D_800A06CC;` resolves
+  against that generated script and emits the same `%hi`/`%lo` the `.s` had.
+  A real C object would land in `<ovl>.c.o(.bss)`, which the linker script
+  places *inside* the overlay's own section — so `SIZEOF(.<ovl>)` grows, the
+  emitted binary is longer than the retail file, and the SHA-1 fails for a
+  reason nothing points at. (`dschange` is the other case: its zero region is
+  *inside* the file, so it has a real `bss` subsegment and a real `.s`.)
+* **splat keeps emitting them after the last referencing function becomes
+  C.** It disassembles the whole segment regardless of which functions the
+  `.c` still holds as `INCLUDE_ASM`, so the auto-generated definitions do not
+  disappear underneath you. This is the thing worth checking rather than
+  assuming — `undefined_syms.brom.txt` still lists all fourteen with every
+  function in the unit written out as C.
+
+An interior address (`D_800A0739` for `DISPENV.isrgb24`) needs no declaration
+of its own: `D_800A0728.isrgb24 = 0;` relocates against `D_800A0728+0x11`,
+which `checkfn.py` discounts against the target's `D_800A0739` as an alias
+and which links to the same byte.
 
 #### Jump table alignment, and the file splits it implies
 

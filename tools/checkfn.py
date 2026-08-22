@@ -117,6 +117,12 @@ def object_for(source):
     return os.path.join(REPO, "build", "us", rel + ".o")
 
 
+def reference_for(source):
+    """The target bytes: expected/build/us/<source>.o, what `-F` compares to."""
+    rel = os.path.relpath(os.path.abspath(source), REPO).replace(os.sep, "/")
+    return os.path.join(REPO, "expected", "build", "us", rel + ".o")
+
+
 # "src/field/field.c:452: `D_8009AC26' undeclared (first use this function)".
 # gcc 2.6.3 says this and *carries on*, folding the unknown value to 0. The
 # compile line ends in the assembler, so the pipeline still exits 0 and ninja
@@ -356,9 +362,23 @@ def check(source, func, syms, show_rows=False, pinned=()):
     # binds the function to `end` rather than `start` and diff.py returns an
     # empty diff -- score 0, no rows, indistinguishable from a match to anything
     # that does not count instructions.
+    #
+    # `-f`/`-F` name the two objects outright, the way variant_eval.py does.
+    # Without them diff.py picks the overlay through diff_settings.py, which
+    # greps every build/us/*.map for the function name and -- when *more than
+    # one* overlay defines it -- gives up and falls back to `main`. The
+    # auto-generated names collide across overlays (`func_800A0000` is defined
+    # by both brom and dschange, both at 0x800A0000), so that fallback diffs the
+    # wrong object and returns an empty diff with score 0. The instruction-count
+    # guard below catches it, but only because main happens not to have a
+    # function of that name; naming the objects removes the guess entirely.
+    ref = reference_for(source)
+    if not os.path.exists(ref):
+        die("no reference object for %s (looked for %s)"
+            % (source, os.path.relpath(ref, REPO)))
     proc = subprocess.run(
-        [PYTHON, DIFF, "-o", "--format=json", func,
-         "--max-lines", str(want * 2 + 128)],
+        [PYTHON, DIFF, "-o", "--format=json", "-f", object_for(source),
+         "-F", ref, func, "--max-lines", str(want * 2 + 128)],
         cwd=REPO, capture_output=True, text=True)
     if proc.returncode != 0:
         die("diff.py failed for %s:\n%s" % (func, proc.stderr.strip()))
