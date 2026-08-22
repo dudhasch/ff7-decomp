@@ -838,50 +838,76 @@ extern u8 D_80166F78[6][0x10][6];
  * stats into the combatant record, and resolves its sixteen attack slots
  * against the scene's attack-id table.
  *
- * 165 rows (154 changed / 11 inserted) at the EXACT target length of 319, with
- * the %hi-per-address table identical -- so every address in the function is
- * computed off the right base and the residue is three specific things, not a
- * wall. The opcode histogram decomposes it exactly:
+ * 50 rows at the EXACT target length of 319, from 165. The four levers that
+ * got it there are all *program* facts, not codegen knobs, and each is written
+ * up in CLAUDE.md:
  *
- *     addiu -5   nop +3   lw +2   sw +1   ori -1   lhu +1   andi -1
+ *   1. `Unk800F83E0.unk52` was declared `s16`, so `c->unk52 = 0xFFFF` folded
+ *      to a QI/HImode -1 and shared a movable with `c->unk8 = -1` and the
+ *      `(s16)enemyID != -1` test. Three uses made it worth hoisting, it took a
+ *      callee-saved register the target spends on `&D_800F5F44.attackIDs`,
+ *      and the displaced pseudo -- the `i * 0x60` snapshot the attack loops
+ *      index off -- spilled, growing the frame to 0x38 against 0x30.
+ *      Retyping the member `u16` (its only user is this function) is worth
+ *      **59 rows and the whole frame**: the constant becomes `ori 0xffff`,
+ *      cannot share, nothing is hoisted, and the spill goes with it.
+ *   2. `c->maxHP = e->maxHP; c->curHP = e->maxHP;` reloads, because the first
+ *      store may alias the load. `c->curHP = c->maxHP = e->maxHP;` loads once
+ *      and stores 0x30 then 0x2c, which is the target's order. Same for
+ *      `unk2A`/`unk28`. -4 instructions.
+ *   3. A walking pointer's initialiser belongs in the `for` init clause.
+ *      +2 instructions and 53 -> 50 rows across the three clear loops.
+ *   4. One walking pointer per clear loop, not one reused. 53 -> 50.
  *
- *   (a) The two byte clears recompute `addu v0,t4,j` in the body where the
- *       target walks a giv it set up as `addiu v1,t4,0xf` in the preheader --
- *       same instruction count in the loop, one fewer in the preheader, hence
- *       part of the addiu deficit.
- *   (b) One spilled value: the frame is 0x38 against 0x30 and there is a
- *       `sw s0,8(sp)` / `lw t5,8(sp)` pair where the target has `move t5,s0`.
- *       It is the snapshot of `i * 0x60`, the D_80166F78 row base, that the
- *       inner attack loops index off.
- *   (c) One missing `andi v1,v1,0xffff` between the `lhu` of
- *       e->attackIndex[j] and the compare against 0xFFFF -- the HImode pseudo
- *       being promoted as its own insn rather than folded into the load.
+ * What is left is five clusters, every one of them a sched2 or allocation
+ * permutation of code that is already the right length and the right program:
  *
- * Measured, all with variant_eval against a pinned base -- read the LENGTH
- * column, not the row count, since the two disagree here in both directions:
+ *   R2 (4 rows)  the target copies the model index out of the match loop's
+ *                counter -- `move a0,a2` -- and stores the copy to
+ *                `.enemyID` and `c->unk8` while the counter still serves the
+ *                `(s16)` cast and the two `D_800F7DD4` indexes. A named
+ *                `s32 mi = j;` is EXACTLY inert (cse propagates it away) and
+ *                `u8 mi` is 65 rows.
+ *   R3 (8 rows)  `li 1` for `c->unk11`/`c->unk4C` fills the `lw 0xac` load
+ *                delay slot here and the `lw 0xa8` one in the target, which
+ *                also reorders `sb 0x11` above `sw 0x58`. Store order in the
+ *                source already matches the target's.
+ *   R4 (4 rows)  `&g_BattleState.unk12` is materialised 14 slots early.
+ *   R5 (13 rows) the biggest: the target issues `lhu 0x94(t2)` *before* the
+ *                four `atk` stores, keeps the value in one register across the
+ *                inner loop with an `andi v1,v1,0xffff`, and fills the `beq`
+ *                delay slot with `atk[3] = 3`. This build stores first, loads
+ *                after, and pays a `move t0,a0` instead of the `andi` -- same
+ *                instruction count, opposite structure. The `andi` is the
+ *                zero-extension surviving as its own insn; here combine folds
+ *                it into the `lhu` and the cross-block copy appears instead.
+ *   R6 (10 rows) the second fill loop issues its giv increment and `slti`
+ *                before the four stores; the target issues them after.
  *
- *     base (this body)                             165 rows, exact
- *     clr-ptr    walking `u8* q` for both clears   124 rows, +2 insns
- *     row-snap   `u8 (*row)[6] = D_80166F78[i];`   193 rows, -4 insns
- *     clrp-row   both of the above together        189 rows, -2 insns
- *     clr-notptr clears as the array expression    138 rows, +12 insns
- *     no-t       drop the Unk800AF470* local       167 rows, +14 insns
- *     no-p       D_800F7DD4 clear as a subscript   176 rows, exact
- *     no-n       loop bound as a literal 3         171 rows, exact (inert)
- *     hoist-e-late  `e = ...` after the enemyID store   171 rows, exact (inert)
+ * Measured and rejected against THIS body (re-measure before trusting -- the
+ * note's predecessor's numbers were all taken against the 165-row body):
+ *   attackID re-read inline at both compares          152 rows
+ *   attackID as s32 / u32                              57 rows, -1 insn
+ *   attackID as s16 / u8 / s8                     120-125 rows, -4/-5 insns
+ *   `(s32)attackID` in the inner compare                50 (inert)
+ *   `0xFFFF == attackID` operand order                  50 (inert)
+ *   `continue` rewritten as an `if` block                50 (inert)
+ *   a second u16 local for the inner compare             50 (inert)
+ *   `*(atk + k)` instead of `atk[k]`                     50 (inert) -- p[k] on
+ *      a POINTER is already an INDIRECT_REF, so it never had MEM_IN_STRUCT_P
+ *      to clear; CLAUDE.md's ARRAY_REF rule is about real arrays
+ *   `atk = ...` moved after the load                    106 rows, -1 insn
+ *   the four stores as `D_80166F78[i][j][k]`            212 rows
+ *   a separate pointer for the second fill loop         105 rows
+ *   a `u16* ids` local for the attack-id table          worse at every slot
+ *   `do { } while (0);` at eight positions        50 (one), 59-131 (seven)
+ *   width_sweep over all seven scalar locals      flat at 50, nothing better
  *
- * `row-snap` is the fix for (b) -- it deletes the spill outright, which is the
- * whole `lw +2 / sw +1`. `clr-ptr` is the fix for (a). They move the length in
- * OPPOSITE directions and together land at 317, so the set is not closed: two
- * more instructions have to come from somewhere, and the `andi` of (c) is one
- * of them. That is the next thing to chase, and it is a cheap one -- do not
- * re-run the sweeps above.
+ * The residue is `perm_ins_block` / `perm_temp_for_expr` shaped, not allocno
+ * arithmetic, so it is a legitimate permuter target.
  *
- * `tools/width_sweep.py` was run over all eight scalar locals: completely flat
- * at the exact length, nothing better than the base. Width is not the lever.
- *
- * Program facts already established -- these are read off the target and are
- * not up for re-derivation:
+ * Program facts already established -- read off the target, not up for
+ * re-derivation:
  *   * the `-1` formation entry skips to `t->unk29 = 0`, which is the loop
  *     body's LAST statement, so the guard is an `if`, not a `continue`;
  *   * `D_8016360C.enemyModelIDs[j]` is read SIGNED (`lh`) in the match loop
@@ -902,6 +928,8 @@ void func_801B1E0C(void) {
     SceneEnemy* e;
     u8* atk;
     u8* p;
+    u8* q;
+    u8* q2;
     s32 i;
     s32 j;
     s32 k;
@@ -911,10 +939,8 @@ void func_801B1E0C(void) {
     u16 attackID;
 
     g_BattleState.unk12 = 0;
-    p = &D_800F7DD4[2];
-    for (i = 2; i >= 0; i--) {
+    for (i = 2, p = &D_800F7DD4[2]; i >= 0; i--, p--) {
         *p = 0;
-        p--;
     }
     for (i = 0; i < 6; i++) {
         for (j = 0x1F; j >= 0; j--) {
@@ -935,11 +961,11 @@ void func_801B1E0C(void) {
          * needs the named fields there, so the runs are spelled as a byte
          * view. An ARRAY_REF on a cast pointer still sets MEM_IN_STRUCT_P,
          * so this aliases exactly as a real `u8 [0x10]` member would. */
-        for (j = 0xF; j >= 0; j--) {
-            ((u8*)t)[j + 0x10] = 0;
+        for (j = 0xF, q = (u8*)t + 0xF; j >= 0; j--, q--) {
+            q[0x10] = 0;
         }
-        for (j = 7; j >= 0; j--) {
-            ((u8*)t)[j + 0x20] = 0;
+        for (j = 7, q2 = (u8*)t + 7; j >= 0; j--, q2--) {
+            q2[0x20] = 0;
         }
         if ((s16)enemyID != -1) {
             c->unk24 = enemyID;
@@ -952,10 +978,8 @@ void func_801B1E0C(void) {
             e = &D_800F5F44.enemy[(s16)j];
             D_8016360C.formation[i].enemyID = j;
             c->unk8 = j;
-            c->maxHP = e->maxHP;
-            c->curHP = e->maxHP;
-            c->unk2A = e->unk9C;
-            c->unk28 = e->unk9C;
+            c->curHP = c->maxHP = e->maxHP;
+            c->unk28 = c->unk2A = e->unk9C;
             c->unkD = e->strength;
             c->unkE = e->magic;
             c->unk20 = e->defense * 2;

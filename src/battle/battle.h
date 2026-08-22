@@ -108,7 +108,7 @@ typedef struct {
     /* 0x4E */ u8 unk4E; // formation row
     /* 0x4F */ u8 unk4F;
     /* 0x50 */ s16 unk50;
-    /* 0x52 */ s16 unk52;
+    /* 0x52 */ u16 unk52;
     /* 0x54 */ u16 unk54;
     /* 0x56 */ u8 unk56;
     /* 0x57 */ u8 unk57;

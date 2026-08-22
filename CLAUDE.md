@@ -724,6 +724,27 @@ a near-miss, in rough order of frequency:
   with `addiu <r>,zero,-1` rather than `ori <r>,zero,0xff`. The stored byte is
   identical and the row is a real difference. Same trap as the `0xC600`
   narrowing bullet above, one width down.
+* **That same narrowing lets an all-ones constant *share a movable* with an
+  unrelated `-1`, and the hoist it earns then rewrites the whole function.**
+  The bullet above is about one row; this is the same fact with a loop around
+  it, and it was worth **59 rows and the frame** on `func_801B1E0C` in
+  `src/battle/batini.c`. `c->unk52 = 0xFFFF` through an **`s16`** member is
+  `addiu <r>,zero,-1`, which is bit-identical to the `c->unk8 = -1` two lines
+  up and to the `(s16)enemyID != -1` guard below it. Three matching movables
+  in one loop body, all on the always-executed path, is enough for
+  `move_movables` to lift the constant into a callee-saved register -- so the
+  register the target spends on a loop-invariant *address* is gone, that
+  address is rebuilt at every use instead, and the pseudo the address
+  displaced (here the `i * 0x60` snapshot two inner loops index off) spills,
+  taking the frame from 0x30 to 0x38. Declared **`u16`** the constant stays
+  `ori <r>,zero,0xffff`, matches nothing, is not hoisted, and all of it goes.
+  The diff reads as a wall of callee-saved renaming plus a spill, which is the
+  shape that sends you looking at register pressure; the tell that it is a
+  *constant* is a hoisted `li <s-reg>,-1` in your preheader that the target
+  does not have, with the target materialising -1 two or three times in the
+  body instead. Check the signedness of every member a function stores `0xFFFF`
+  or `0xFF` to before reading a single allocation row -- `grep` the member name
+  first, since one with a single user is free to retype.
 * **m2c's temporaries are a *readout* of gcc's grouping, not a source-level
   fact, and writing them back as locals makes things worse.** A run of stores
   that share one loaded pointer appears in m2c output as `temp_v0->a = 0;
@@ -847,6 +868,33 @@ a near-miss, in rough order of frequency:
   statements, not twelve separate ones; twelve give ascending order and a
   loop-hoisted constant besides. This is what the identity matrix in
   `HandleKawaiDataInModel` needs.
+* **Two fields of one struct fed by the same load want the chained form, and
+  the reason is aliasing, not style.** `c->maxHP = e->maxHP; c->curHP =
+  e->maxHP;` emits the load **twice** -- the first store is a struct MEM and
+  so is the load, `true_dependence` cannot disambiguate them, and gcc 2.6.3
+  re-reads. Written `c->curHP = c->maxHP = e->maxHP;` there is one load, and
+  the stores come out 0x30 then 0x2c, which is the descending order of the
+  bullet above. Two instructions per pair (the load and its delay-slot `nop`),
+  and `func_801B1E0C` in `src/battle/batini.c` had two such pairs. The tell is
+  a load of the *same* member appearing twice in your build and once in the
+  target, with a `nop` behind each.
+* **A walking pointer's initialiser belongs in the `for` init clause.**
+  `q = base + 0xF; for (j = 0xF; j >= 0; j--, q--)` emits the pointer's
+  `addiu` *before* the counter's `li`; `for (j = 0xF, q = base + 0xF; j >= 0;
+  j--, q--)` emits them in written order, which is what a target with
+  `li a2,0xf` ahead of `addiu v1,t4,0xf` is telling you. Free -- same
+  instructions, different order -- and worth two rows per loop, three loops in
+  `func_801B1E0C`. Same lever as the two-counter `for`-increment bullet below,
+  applied to the init clause. Reusing *one* pointer variable for two such
+  loops costs three more rows there, which is the "one pointer pair per loop"
+  rule again.
+* **`p[k]` on a pointer is already an INDIRECT_REF, so rewriting it as
+  `*(p + k)` to clear `MEM_IN_STRUCT_P` is exactly inert.** The C front end
+  lowers a subscript on a pointer to `*(p + k)` in `build_array_ref`; only a
+  subscript on a real *array* builds an ARRAY_REF. So the aliasing bullets
+  above that turn on ARRAY_REF apply to `arr[i]`, never to `ptr[i]`, and a
+  budget spent re-spelling pointer subscripts buys nothing -- measured to the
+  row on all seven stores through a `u8* atk` in `func_801B1E0C`.
 * **A whole-struct copy schedules; an element-wise copy through pointers does
   not.** `*(MATRIX*)dst = *src;` is a block move gcc knows cannot overlap, so it
   interleaves the loads and stores across three registers. Eight
