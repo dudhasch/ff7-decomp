@@ -2366,7 +2366,21 @@ void func_800B6DCC(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6E08);
+void func_800B6E08(void) {
+    s32 i;
+    u8* p;
+
+    if (D_80115A50 != 0) {
+        D_80115A50 = 0;
+        D_80115A64 = 3;
+        for (i = 0x2A, p = &D_80115A14[0x2A]; i >= 0; i--) {
+            *p-- = 0;
+        }
+        for (i = 0x20; i < 0x2B; i++) {
+            D_801159E8[i] = -1;
+        }
+    }
+}
 
 void func_800B6E78(void) {
     s32 temp_v0;
