@@ -2454,7 +2454,24 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5E28);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B624C);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6348);
+void func_800B6348(u32* hdr) {
+    s32 i;
+    u32* src;
+    u32* dst;
+
+    i = 0;
+    src = (u32*)((u8*)hdr + (hdr[5] >> 2) * 4);
+    dst = D_8010D9C0;
+    do {
+        *dst++ = *src++;
+        i++;
+    } while (i < 0x2000);
+    for (i = 0; i < 7; i++) {
+        D_801159C0[i] = (u8*)D_8010D9C0 + ((hdr[5 + i] - hdr[5]) >> 2) * 4;
+    }
+    D_801159DC = 0;
+    D_801159E0 = 0;
+}
 
 static void func_800B63E0(s32 arg0) { D_801159DC = arg0; }
 
