@@ -2010,7 +2010,13 @@ void func_800B017C(s32 arg0) {
         << 4;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B01C4);
+void func_800B01C4(s32 arg0) {
+    s32 off;
+
+    off = arg0 * 4;
+    *(s32*)((u8*)&D_8010B47C + off) =
+        (*(s32*)((u8*)&D_8010B488 + off) > 0) ? -0x10 : 0;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B0200);
 
