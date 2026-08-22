@@ -1512,11 +1512,84 @@ void func_8002FDA0(AKAO_TRACK* track, s32* out, s32 mask, s32 filter) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002FE48);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002FF4C);
+// Rebuild the SPU noise-voice mask: collect the voices of every sound-effect
+// and music track that wants noise and is not already keyed on, then set the
+// bits on and the rest off.
+void func_8002FF4C(void) {
+    s32 voices;
+    s32 idle;
+    s32 want;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80030038);
+    voices = 0;
+    if ((D_8009A190 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00)) != 0) {
+        func_8002FDA0(
+            D_80097EC8, &voices,
+            D_8009A190 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00),
+            ~(g_AkaoChannelMask[0] | D_80062F00));
+    }
+    idle = ~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00);
+    want = idle & D_8009A130;
+    if (want != 0) {
+        func_8002FDA0((AKAO_TRACK*)D_80096608, &voices, want, idle);
+    }
+    voices |= g_AkaoNoiseMask;
+    SpuSetNoiseVoice(1, voices);
+    voices ^= 0xFFFFFF;
+    SpuSetNoiseVoice(0, voices);
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80030148);
+// As func_8002FF4C, for the reverb voice mask -- with the extra rule that a
+// global override turns reverb on for every voice at once.
+void func_80030038(void) {
+    s32 voices;
+    s32 idle;
+    s32 want;
+
+    voices = 0;
+    if ((D_8009A194 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00)) != 0) {
+        func_8002FDA0(
+            D_80097EC8, &voices,
+            D_8009A194 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00),
+            ~(g_AkaoChannelMask[0] | D_80062F00));
+    }
+    if (D_80062FF8 & 0x10) {
+        voices = 0xFFFFFF;
+    } else {
+        idle = ~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00);
+        want = idle & D_8009A134;
+        if (want != 0) {
+            func_8002FDA0((AKAO_TRACK*)D_80096608, &voices, want, idle);
+        }
+    }
+    voices |= g_AkaoReverbMask;
+    SpuSetReverbVoice(1, voices);
+    voices ^= 0xFFFFFF;
+    SpuSetReverbVoice(0, voices);
+}
+
+// As func_8002FF4C, for the pitch-LFO voice mask.
+void func_80030148(void) {
+    s32 voices;
+    s32 idle;
+    s32 want;
+
+    voices = 0;
+    if ((D_8009A198 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00)) != 0) {
+        func_8002FDA0(
+            D_80097EC8, &voices,
+            D_8009A198 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00),
+            ~(g_AkaoChannelMask[0] | D_80062F00));
+    }
+    idle = ~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00);
+    want = idle & D_8009A138;
+    if (want != 0) {
+        func_8002FDA0((AKAO_TRACK*)D_80096608, &voices, want, idle);
+    }
+    voices |= g_AkaoPitchLfoMask;
+    SpuSetPitchLFOVoice(1, voices);
+    voices ^= 0xFFFFFF;
+    SpuSetPitchLFOVoice(0, voices);
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80030234);
 
