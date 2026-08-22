@@ -281,6 +281,18 @@ a near-miss, in rough order of frequency:
   one `row` serving the ripple loop, the corner-copy loop and the tile loop.
   The tell is a loop counter living on the stack in your build and in a
   register in the target, while the register counts are otherwise equal.
+* **But a bound *derived* differently is a different variable, however
+  identical the loops look.** The rule above is about counters that describe
+  one walk; a bound computed from an unrelated quantity is not one of them.
+  `LoadLocalFieldModelAndInitAll` in `src/field/field2.c` reused one `s32 n`
+  for the word copy's `words / 4` and for each of the three record loops'
+  `rec->boneCount`/`partCount`/`animCount` — which reads as exactly this idiom
+  and is not. The target keeps the copy count in `$t1` where the merged
+  variable lands in `$t3`, and giving the copy loop its own `nw` is worth
+  4 rows; splitting the three record counts instead is 49 rows *worse*, and
+  splitting the copy loops' shared `w` is 10 worse. The partition is real and
+  has to be read off the target rather than applied uniformly, and the
+  cheapest reading is which of the loops' counts share a register there.
 * **Put a call first in a sum: `f() + expr`, not `expr + f()`.** Written second,
   the call forces `expr` to be computed *before* it and to survive it, so the
   value needs a callee-saved register or a spill slot; written first, `expr` is
@@ -1861,6 +1873,19 @@ a near-miss, in rough order of frequency:
   `base` is dead afterwards matches either way, because gcc drops the biv
   increment entirely — so a run of loops where all but the last are two rows
   out is this.
+
+  **For an unrolled copy between two walked pointers the same word decides
+  which combined giv's initialiser is emitted first.** `record_giv` prepends,
+  so `strength_reduce` walks the list in reverse discovery order and the two
+  `addiu <base>,<base>,0xc` insns land in the preheader in the order the two
+  `+= 4` statements are *not* written in. `LoadLocalFieldModelAndInitAll`'s
+  word copy wants `d += 4; s += 4;` — the source base's initialiser first,
+  which is what `addiu a2,s1,0xc` ahead of `addiu a1,a3,0xc` says. Two rows,
+  and nothing inside the body reaches it: naming the loaded word, `d[3] = s[3]`
+  first, `*d = *s`, both increments in the `for` clause, and the `s`/`d`
+  declaration and assignment orders were all measured and are inert or worse.
+  The tell is two preheader `addiu`s with identical registers in the opposite
+  order.
 * **`slt` against a register where you emit `slti` means the loop bound is a
   named local — and where you assign it decides everything.** A literal bound
   is folded into the compare immediate and no spelling of the loop reaches
@@ -2332,6 +2357,34 @@ a near-miss, in rough order of frequency:
   boundary changes which quantities `local_alloc` sees as block-local, and
   therefore the order registers are handed out in — the same lever the
   `size` term reaches for free.
+
+  **And it is not free at all once it has a body: the loop notes are a
+  reference multiplier.** `expand_start_loop` emits `NOTE_INSN_LOOP_BEG` and
+  `NOTE_INSN_LOOP_END` around whatever is inside, and `flow.c` counts
+  `REG_N_REFS (regno) += loop_depth` — so every reference inside a
+  `do { … } while (0);` is weighted one level deeper, and nesting two of them
+  weights it two deeper, at no cost in instructions. **This is the only
+  construct this project has found that adds references to a pseudo without
+  emitting anything**, and it delivers exactly what an `allocno_compare`
+  specification asks for. `FieldModelStructInit` in `src/field/field2.c` needs
+  its counter `i` at 16 references to out-rank the data pointer at 15, and
+  every candidate this file lists — a dead store, a reg-reg copy, `i = i + 0`,
+  a duplicated tail — is either deleted before `flow` counts it or survives to
+  the object. `do { do { i = 0; } while (0); } while (0);` around the first
+  reset puts that one statement at loop_depth 3, takes `i` from 14 to 16 (read
+  off `-dl`, not inferred) and makes **every register in the function
+  correct**. The empty form measures inert precisely because it has no
+  references inside it; do not read "emits nothing" as "changes nothing".
+
+  The cost is the notes themselves. gcc's scheduler makes the insn after a
+  loop note depend on everything before it, so the basic block they sit in is
+  cut in two and the halves are then emitted in source order. Twenty-odd
+  placements were measured on that function: the cheapest is 2 rows at the
+  exact length, and the residue is always the pair of instructions the
+  target's undivided block swaps and the cut cannot. So the weight is free
+  where the target already has a block boundary at that point and costs at
+  least a row where it does not — which makes "where does the target end a
+  block?" the question to ask before choosing which reference to weight.
 
 * **A diff of 0 insertions and 0 deletions refutes an `allocno_compare` or
   `QTY_CMP_PRI` diagnosis by construction, and that is a proof rather than an

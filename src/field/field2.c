@@ -279,7 +279,49 @@ typedef struct {
  * 150-point width sweep are simply flat over a body with two globals and say
  * nothing about one with five. Re-run every sweep in this note before
  * quoting it, and re-run the barrier and width sweeps in particular -- both
- * are cheap, both are now stale, and neither has been repeated at 25. */
+ * are cheap, both are now stale, and neither has been repeated at 25.
+ *
+ * Both have now been repeated at 25, and the useful result is not either of
+ * them -- it is that cc1's `-dg` dump states the whole residue in five lines.
+ *
+ *     ;; 5 regs to allocate: 81 80 94 71 72
+ *     ;; 80 preferences: 5
+ *     71 in 11  72 in 12  80 in 5  81 in 6  94 in 10
+ *
+ * i.e. this body has five global allocnos -- 71 `limits` ($t3), 72 `pos`
+ * ($t4), 80 `num` ($a1), 81 `den` ($a2) and 94 `by` ($t2) -- and the target
+ * has five as well, because `limits` and `pos` land on $t3/$t4 there too and
+ * a four-global body puts them on $t2/$t3. What differs is *which* value is
+ * the fifth: the target's $t2 holds `num` (`negu t2,a1` in arm 1 and
+ * `negu t2,a3` in arm 2, the same register in both, so one variable) and its
+ * `by` is a *different* register in each arm ($v0 as `addiu v0,v0,0xf0`,
+ * $a1 as `addiu a1,a2,-0xf0`), which by the identity rule makes `by` two
+ * block-locals there and something else the fifth global.
+ *
+ * So the shape of the answer is known and the fifth global is not yet named.
+ * Measured from here, all at the exact 137 unless noted:
+ *   - `by` split per arm alone: 39, and `-dg` confirms why -- four globals,
+ *     `limits`/`pos` drop to $t2/$t3.
+ *   - `by` split plus merging one per-arm pair back to restore the count:
+ *     `fy` 41, `px` 43, `ax` 43, `minX` 45, `dx` 52, `ay` 58, `dy` 69,
+ *     `fx` 79. So the fifth global is none of those eight.
+ *   - naming the dot product (`sum = ax * dx + ay * dy; num = -sum;`) is
+ *     exactly 25 in every arrangement -- shared 52, per-arm 25, per-arm with
+ *     per-arm `num` 30, `0 - sum` 25. The sum is already its own pseudo
+ *     before allocation, so a source split cannot reach it; the target's
+ *     `negu` into a fresh register is an allocation fact, not a structural
+ *     one.
+ *   - width sweep re-run: 130 variants over 26 locals, **every one exactly
+ *     25 at the exact length**. Flat, as before, and now flat at the right
+ *     baseline.
+ *   - barrier probe re-run: `do { } while (0);` ahead of each of the six
+ *     natural statement boundaries measures 51, 51, 52, 56, 56, 70 -- so
+ *     unlike `AddBackgroundToRender` this residue is *not* inert to a block
+ *     cut, but no cut helps either.
+ * `80 preferences: 5` is the concrete lever nobody has pulled: that copy
+ * preference is what pins `num` to $a1 ahead of its conflict set, and
+ * finding where `global_conflicts` records it -- and what in the source
+ * feeds it -- is the next pass's first job. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
@@ -4920,7 +4962,43 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  *     Note the note's earlier verdict on walking `models` there ("48 rows,
  *     and turns -1 into +1") was measured when the body was an instruction
  *     short; the length is exact now, so that one is worth re-running before
- *     anything else. */
+ *     anything else.
+ *
+ * **11 rows -> 5, still 0 inserted and still the exact 529.** Both clusters
+ * above were wrong about which lever they needed, and both fixes are one word.
+ *
+ *   - **The copy loop's count is its own variable.** `s32 n` was serving
+ *     `words / 4` *and* all three record loops' `rec->boneCount` /
+ *     `partCount` / `animCount` -- the counter-merging idiom applied one step
+ *     too far. The target keeps the copy count in `$t1` where the merged
+ *     variable lands in `$t3`; a separate `nw` is **4 rows**. Splitting the
+ *     three record counts instead is 60 (49 worse), and splitting the two
+ *     copy loops' shared `w` is 17.
+ *   - **`d += 4; s += 4;`, not `s += 4; d += 4;`.** `record_giv` prepends, so
+ *     `strength_reduce` walks the list in reverse discovery order and the two
+ *     combined givs' preheader initialisers come out in the opposite order to
+ *     the increments. The target emits the source base first
+ *     (`addiu a2,s1,0xc` then `addiu a1,a3,0xc`); swapping the two statements
+ *     is **2 rows**. Nothing inside the body reaches it and all of it was
+ *     measured: naming the loaded word of the first pair or of all four,
+ *     `d[3] = s[3]` first (13), `*d = *s` (7), both increments in the `for`
+ *     clause (9 either order), `d[w * 4 + k]` indexing (30), and the `s`/`d`
+ *     declaration and assignment orders (7, i.e. inert).
+ *
+ * The five rows left are all the third loop's `&models[i]`: the target reads
+ * `lw t7,0x38(sp)` / `sll v0,s4,0x3` / `addu a2,v0,t7` -- three registers,
+ * with the address in a global allocno of its own -- where this body folds
+ * the sum into the index's register (`lw v0` / `sll v1` / `addu v1,v1,v0`).
+ * **The residue is register allocation and not scheduling, and that is
+ * measured rather than assumed:** an empty `do { } while (0);` at the top of
+ * the third loop's body and another at its end are *exactly* inert at 5, so
+ * the barrier probe closes the scheduling dimension. Also exactly 5, all at
+ * the exact length: a named `mp = &models[i]` pointer before or after
+ * `flip = &D_800DF114;`, an `mi = i` index local, and the whole width sweep
+ * (45 variants over 9 scalar locals -- nothing beats s32/u32 anywhere).
+ * Raising `modelIndex`'s loop weight with one or two `do { } while (0);`
+ * around its assignment is 13, so more references on it is the wrong
+ * direction; walking a `mw` cursor instead of indexing is 59. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
@@ -4952,6 +5030,7 @@ u8* LoadLocalFieldModelAndInitAll(
     s32 words;
     s32 w;
     s32 n;
+    s32 nw;
     u32 count;
     u32 i;
     u32 j;
@@ -4970,16 +5049,16 @@ u8* LoadLocalFieldModelAndInitAll(
         d = (u32*)D_800E0204;
         words = 3;
         words = (buf[0] >> 2) + ((buf[0] & words) != 0);
-        n = words / 4;
-        for (w = 0; w < n; w++) {
+        nw = words / 4;
+        for (w = 0; w < nw; w++) {
             d[0] = s[0];
             d[1] = s[1];
             d[2] = s[2];
             d[3] = s[3];
-            s += 4;
             d += 4;
+            s += 4;
         }
-        for (w = n * 4; w < words; w++) {
+        for (w = nw * 4; w < words; w++) {
             *d++ = *s++;
         }
         buf = (u32*)D_800E0204;
@@ -5924,6 +6003,60 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * counts it; the two mechanisms known to survive that gap are combine
  * folding an address into its `mem` (same basic block only) and
  * cross-jumping merging a duplicated tail. Neither has a candidate here yet.
+ *
+ * **That construct has now been found, and the residue is no longer the
+ * reference -- it is the basic-block boundary the construct costs.**
+ * `do { ... } while (0);` emits NOTE_INSN_LOOP_BEG/END, and flow.c counts
+ * `REG_N_REFS (regno) += loop_depth`, so every reference inside one is
+ * weighted a level deeper at no cost in instructions. Two of them nested
+ * around a reset put that `i = 0` at loop_depth 3, and cc1's -dl dump reads
+ * `i` at **16 references** over 99 insns against `d` at 15 over 97 -- exactly
+ * the specification above. With the ranking flipped, every register in the
+ * function is correct; what is left is that the notes are a scheduling
+ * barrier (gcc's scheduler makes the insn after a loop note depend on
+ * everything before it), so the block they sit in is cut in two and the two
+ * halves come out in source order.
+ *
+ * The cheapest bodies are **2 rows at the exact 123**, and the residue is the
+ * same in all of them: block 0's `move t0,a1` (`d = data`) and
+ * `sb zero,0(a1)` (`data->modelCount = 0`) are emitted in source order, where
+ * the target's undivided block swaps them. That swap is unreachable, by
+ * construction rather than by exhaustion:
+ *
+ *   - The cut must be between `i = 0` and `data->modelCount = 0`, because the
+ *     target's first three insns after the prologue are
+ *     `move t1,a0 / move a3,zero / move t0,a1` and only a cut right after the
+ *     reset reproduces them.
+ *   - `data->modelCount = 0;` must be written *before* `d = data;`: with the
+ *     copy first, the store's base becomes `d` ($t0) where the target has
+ *     `data` ($a1) and `d` goes to 16 references -- 18 rows, and a
+ *     `do { } while (0);` between the two does not stop it (18 as well), so
+ *     it is not a cse barrier for this.
+ *   - So the two insns that have to swap are on opposite sides of the cut.
+ *
+ * Placements measured, all with the required `d->modelCount` read and all at
+ * the exact length unless noted: notes around the first `i = 0` written first
+ * **2**, written after the store 2, after `d = data` 4, last in the preamble
+ * 6; around the second reset in place **3**, one statement into the middle
+ * block 6, two in 6, three or four in 12 and +1; around the second reset
+ * moved inside loop 1's `if` 7 at one, two or three levels of nesting;
+ * around loop 2's `i += 1` **4 and +1 instruction** (the `nop` the split
+ * block can no longer fill at the loop bottom); around loop 1's `i += 1` 9;
+ * around the whole loop-2 body 27 (`d`'s loop-2 reference gains the same
+ * weight, so it is a wash); one single wrap on each reset 5. Giving the cut
+ * half a fourth free insn so the scheduler sees the base body's shape -- a
+ * `de = desc` copy, a `d2 = data` copy, a `desc = desc` self-assignment --
+ * is exactly 2 every way round. Block-0 statement order with the cut in
+ * place: `sb, d, models` 2, `models, sb, d` 2 (the `move t0,a1` then lands
+ * in the branch delay slot instead of `addiu a0,t1,4`), `sb, models, d` 3.
+ * One wrap alone gives `i` 15 references, which is 45/99 against d's 45/97
+ * and still loses -- 18 and 19 rows, confirming the arithmetic.
+ *
+ * The open question is therefore no longer "a reference that emits nothing".
+ * It is: **is there any C construct that raises loop_depth without emitting
+ * loop notes?** None is known -- loop notes are the only source of depth and
+ * gcc treats them as a scheduling barrier -- so unless one turns up, this
+ * function is finished at 1 row and the last row is not reachable from C.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
