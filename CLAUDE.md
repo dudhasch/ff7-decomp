@@ -2039,6 +2039,23 @@ a near-miss, in rough order of frequency:
   one glance and it is the only structural check available before the tool
   itself is trusted.
 
+  **But that check belongs to the `%hi` table only, and applying it to the
+  opcode table inverts the answer.** The two tables are keyed differently and
+  balance means opposite things in them. `%hi` rows are keyed by *address*, so
+  there is no such thing as a legitimate substitution — a balanced pair can
+  only be one address split across two keys, i.e. an artifact. Opcode rows are
+  keyed by mnemonic, where a length-preserving substitution is the commonest
+  *real* fault there is: the same program compiled with one local declared
+  `s32` instead of `u16` emits `sw` where the target emits `sh`, and the
+  columns balance exactly because the instruction count did not change.
+  `FieldBackgroundInitPackets` is the worked case in both directions — its
+  `lw +3 / sw +3 / sh -3 / lh -2 / lhu -1 / addu -2 / nop +2` sums to zero,
+  survived both tool fixes unchanged, and every row of it was real. That is
+  the same fact as the exact-length-by-cancellation rule above, read off the
+  opcode table instead of the length: **a balanced opcode table is what a
+  wrong declaration looks like, and a balanced address table is what a wrong
+  tool looks like.**
+
   One row class in that table is naming and will stay: a string literal or a
   jump table is a local `.rodata` label in our object and a named symbol in the
   `.s`, so any function with either reports `.rodata` against `D_800A0000` /
