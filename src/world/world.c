@@ -648,7 +648,58 @@ void func_800A5B88(Unk800E5768* arg0) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5C08);
+void func_800A5C08(u8* arg0, u8* arg1) {
+    s32 flags;
+    u8* src;
+    u8* end;
+    u8* base;
+    u8* p;
+    u8* q;
+    s32 n;
+    s32 off;
+    s32 hi;
+    s32 dist;
+
+    src = arg0;
+    n = 0;
+    end = src + *(s32*)src + 3;
+    base = arg1;
+    src += 4;
+    while (1) {
+        if (n == 0) {
+            if (src >= end) {
+                return;
+            }
+            n = 8;
+            flags = *src++;
+        }
+        if (flags & 1) {
+            if (src >= end) {
+                return;
+            }
+            *arg1++ = *src++;
+        } else {
+            if (src >= end) {
+                return;
+            }
+            off = *src++;
+            hi = *src++;
+            off |= (hi & 0xF0) << 4;
+            dist = arg1 - base + 0xFEE;
+            p = arg1 - ((dist - off) & 0xFFF);
+            q = arg1 + (hi & 0xF) + 3;
+            while (p < base) {
+                *arg1++ = 0;
+                p++;
+            }
+            while (arg1 < q) {
+                *arg1++ = *p++;
+            }
+        }
+        flags >>= 1;
+        n--;
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5D00);
 
