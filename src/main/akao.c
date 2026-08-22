@@ -962,7 +962,31 @@ static void func_8002BCCC(void* arg0, void* arg1) {
     voice->half0.unkE0 = v0_e0 | 3;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002BD04);
+typedef struct {
+    u32 unk0;
+    s32 unk4;
+    u16 unk8;
+} Unk8002BD04;
+
+// Start a pitch-bend slide on both halves of a paired voice: the tick count
+// is arg0->unk4 (at least 1) and the target is the low 7 bits of arg0->unk8
+// scaled into the 8.8 field. The target expression is written out per half
+// rather than hoisted -- the store to the first half may alias arg0, so gcc
+// reloads it anyway.
+void func_8002BD04(Unk8002BD04* arg0, Unk80099788* voice) {
+    s16 steps;
+
+    steps = 1;
+    if (arg0->unk4 != 0) {
+        steps = arg0->unk4;
+    }
+    voice->half0.unkC8 =
+        (s16)(((arg0->unk8 & 0x7F) << 8) - voice->half0.unkC6) / steps;
+    voice->half1.unkC8 =
+        (s16)(((arg0->unk8 & 0x7F) << 8) - voice->half1.unkC6) / steps;
+    voice->half1.unk5E = steps;
+    voice->half0.unk5E = steps;
+}
 
 // Apply the paired handler to 4 blocks spaced 0x210 bytes apart.
 void func_8002BDCC(void* arg0) {
@@ -1013,7 +1037,21 @@ static void func_8002BFCC(void* arg0, void* arg1) {
     voice->half1.unkE0 = (v1 | 3);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C004);
+// As func_8002BD04, for the pan slide.
+void func_8002C004(Unk8002BD04* arg0, Unk80099788* voice) {
+    s16 steps;
+
+    steps = 1;
+    if (arg0->unk4 != 0) {
+        steps = arg0->unk4;
+    }
+    voice->half0.unkCA =
+        (s16)(((arg0->unk8 & 0x7F) << 8) - voice->half0.unk60) / steps;
+    voice->half1.unkCA =
+        (s16)(((arg0->unk8 & 0x7F) << 8) - voice->half1.unk60) / steps;
+    voice->half1.unk62 = steps;
+    voice->half0.unk62 = steps;
+}
 
 // Apply the paired handler to 4 blocks spaced 0x210 bytes apart.
 void func_8002C0CC(void* arg0) {
