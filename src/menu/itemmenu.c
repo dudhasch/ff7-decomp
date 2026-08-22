@@ -507,6 +507,26 @@ void func_801D0E4C(u8* arg0) {
     }
 }
 
+// The item menu's whole per-frame state machine: 1830 instructions, 136 calls
+// and four jump tables, so it is a batch of its own rather than one pick.
+// What a seed needs before it will even compile, all established once here so
+// the next pass does not re-derive it:
+//
+//  * delete every prototype m2c writes in its `// extern` block. None of the
+//    main-overlay callees this function uses (func_8001DE0C, func_80026F44,
+//    func_8001CF3C, SystemMenuAdd{Hp,Mp}ByPartyId, ...) is declared in any
+//    header, and savemenu.c and title.c call the same ones with no
+//    declaration at all -- so the original saw K&R implicit `int`, and every
+//    narrowing parameter m2c invents is a different program (CLAUDE.md
+//    records this as worth hundreds of rows on FieldEntityMovementUpdate).
+//  * `? sp38` is a `RECT` -- it is passed to func_8001DE0C, which savemenu.c
+//    already calls with one -- and `?* var_s1_4`, walked `+= 8` from
+//    &D_801D3D5C and passed to func_8001E040, is `RECT*` over a `RECT[]`.
+//  * `--fix-structs` mis-maps several Savemap accesses: `inventory[0][i]` for
+//    what is a flat `u16 inventory[]`, `.unk0`/`.unk2` on scalar `D_801D3D74`
+//    (a two-halfword record), and `*(&Savemap.party[8] + 0x77 + i)`. Those
+//    are the byte-offset trap and have to be retyped before any diff row is
+//    worth reading.
 INCLUDE_ASM("asm/us/menu/nonmatchings/itemmenu", func_801D0E80);
 
 void func_801D296C(void) {}
