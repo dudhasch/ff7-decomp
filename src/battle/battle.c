@@ -1215,7 +1215,60 @@ static void func_800A8D88(s32 arg0, s32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A8DCC);
+/* PARKED: 8 changed / 1 inserted at the exact length (26 insns), pure
+ * caller-saved register naming plus one delay slot.
+ *
+ *   want: srl a3,a0,6 / andi v0,a1,3 / lui v1,0x8000
+ *   got:  srl v1,a0,6 / andi v1,a1,3 / lui v0,0x8000
+ *
+ * The target puts `bit` in $v0 and the 0x80000000 constant in $v1, which
+ * pushes `idx` out to $a3; this build has them the other way round, so `idx`
+ * shares $v1 with `bit` and never reaches $a3. `bit` at HImode scores
+ * QTY_CMP_PRI 1*2*2/4 = 1.0 against the constant's 1*2*4/2 = 4.0, so
+ * block_alloc hands the constant $v0 first -- and neither term is reachable:
+ * the constant's life is already the minimum 2 and `bit` has no third use to
+ * give it. The single insertion is reorg stealing `sll v0,v0,2` into the
+ * bgez delay slot, which it does because this build's fall-through starts
+ * with `andi v1,...` (v1 = idx, live on the taken path) where the target's
+ * starts with the dead `lui v1,0x8000`; it follows the allocation rather
+ * than causing it.
+ *
+ * Measured and flat at 9 rows: every width of `bit` and `slot` (width_sweep,
+ * 10 variants, all exact length); `bit` declared first; `idx` assigned in a
+ * statement rather than an initialiser; the store order in the arm
+ * (const-then-bit as well as bit-then-const); `mask` as a named local, both
+ * inside the arm and above the `if` (cse folds the constant back either way).
+ * Worse: no `bit` local at all (14), `s32`/`u32 bit` (14, the conflict
+ * disappears), `slot` computed inside the else arm (12), the two arm stores
+ * swapped (18, -1 insn), no frame pad (19, -2 insns), `bit` assigned above
+ * the `if (arg1 < 0)` (15).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800A8DCC);
+#else
+void func_800A8DCC(u32 arg0, s32 arg1) {
+    s32 idx = arg0 >> 6;
+    s32 slot;
+    s16 bit;
+    u8 unusedLocals[4]; /* identity not recoverable; reserves the 8-byte frame
+                         */
+
+    g_CurrentAction->unk80 = 0;
+    g_CurrentAction->unk84 = 0;
+    g_CurrentAction->unk88 = 0;
+    if (idx < 3) {
+        slot = (arg0 & 0x3F) << 2;
+        if (arg1 < 0) {
+            bit = arg1 & 3;
+            g_CurrentAction->unk80 = 0x80000000;
+            D_800F5F44.D_800F7DC6 = bit;
+        } else {
+            g_CurrentAction->unk8C = slot;
+            (&g_CurrentAction->unk80)[idx] = arg1;
+        }
+    }
+}
+#endif
 
 void func_800A8E34(void) { func_800A79CC(); }
 
