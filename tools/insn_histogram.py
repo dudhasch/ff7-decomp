@@ -13,7 +13,10 @@ Two tables. The opcode histogram folds objdump aliases back to the mnemonics
 splat writes, by decoding the instruction word rather than by reading the
 alias -- `li` is `ori rD,$zero,K` or `addiu rD,$zero,-K` and `move` is
 `addu rD,rS,$zero` or `or rD,rS,$zero`, and folding by name alone credits every
-negative `li` to `ori` and invents an `addiu` deficit the same size. The `%hi`
+negative `li` to `ori` and invents an `addiu` deficit the same size. Only the
+aliases splat never writes are folded: it writes `negu` and `b` itself, so
+folding those would rename our side alone and invent the balanced pair the
+fold exists to prevent. The `%hi`
 table counts address materialisations per *address*, which is where an
 addressing mistake shows up as a clean integer.
 
@@ -66,17 +69,25 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # reads exactly like two constants materialised against a missing `addiu`.
 # `FieldMain` reported `ori +2 / addiu -1 / nop -1` on one such `addiu $a0,
 # $zero,-0x1`; decoded, it is `ori +1 / nop -1`, which is one known cluster.
-# Decode the encoding instead. The `.s` side needs no folding at all -- splat
-# emits none of these aliases.
+# Decode the encoding instead.
+#
+# Fold only the aliases splat does *not* spell, or the fold is the bug it was
+# meant to prevent, one side at a time. Across all of `asm/us/` splat writes
+# `negu` 261 times and `subu $rD, $zero, $rT` never, and `b` 13 times; `li`,
+# `move` and `not` it never writes. So mapping objdump's `negu` to `subu` and
+# its `b` to `beq` renames only *our* side, and the table then reports a
+# balanced `subu +N / negu -N` pair that is pure artifact.
+# `FieldModelCreatePktsForPart` read `subu +4 / negu -4` with the `negu` at all
+# four sites already byte-identical in the diff, and `FieldEntityMove` read
+# `+6/-6` the same way -- in both, the real cluster was elsewhere and this pair
+# was the loudest row in the table.
 BY_OP = {0x09: "addiu", 0x0D: "ori", 0x0F: "lui"}
 BY_FUNCT = {0x21: "addu", 0x23: "subu", 0x25: "or", 0x27: "nor"}
 
 
 def unalias(mnem, word):
     """objdump's alias -> the mnemonic splat writes, decided by the encoding."""
-    if mnem == "b":
-        return "beq"
-    if mnem not in ("li", "move", "negu", "not"):
+    if mnem not in ("li", "move"):
         return mnem
     op = word >> 26
     return BY_FUNCT.get(word & 0x3F, mnem) if op == 0 else BY_OP.get(op, mnem)

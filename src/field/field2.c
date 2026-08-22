@@ -5374,6 +5374,46 @@ u8* FieldModelCreatePktsAndScale(FieldModelEntry* model, u8* pkts, s32 arg2) {
  * second address into a second register so the first load issues in its
  * shadow and we serialise them. And `q * 4` being computed after `q * 32`
  * rather than before, at both of the two divisions.
+ *
+ * **The exact length above is three errors of +-4 cancelling, and the note's
+ * conclusion that "what is left is allocation and scheduling" was wrong.**
+ * `insn_histogram.py` reads `beq +4 / bne -4` and `nop +4 / srl -4` and
+ * nothing else, and each pair is a separate mechanism, one per textured loop:
+ *
+ * a. **The graph-type block is laid out in the wrong order.** The target is
+ *    `beq $v0,1 -> BIG` / `bne $v0,2 -> SMALL` with BIG first and a `j` to
+ *    the join -- i.e. blocks [BIG][SMALL]; the `!= 1 && != 2` form here emits
+ *    [SMALL][BIG] and is one instruction *short* per loop, because with the
+ *    arms adjacent that way a single `andi $v0,$s1,0xC0` in the `beq`'s delay
+ *    slot serves both. That is the whole of `beq +4 / bne -4`.
+ * b. **`tpBit = ((t >> 4) & 0x100) >> 4` folds here and does not in the
+ *    target.** combine's `simplify_shift_const` moves the shift inside the
+ *    `and` (0x100 >> 4 = 0x10 is exact) and merges the two shifts, so we emit
+ *    `srl 8` / `andi 0x10` where the target emits `srl 4` / `andi 0x100` /
+ *    `srl 4`. That is `srl -4`, and it is *minus*: the fold makes us shorter.
+ * c. **The last two UV lookups of each textured loop serialise**, costing one
+ *    load-delay `nop` each -- `nop +4`. The target computes the final
+ *    address in `v`'s own register (`srl $v1,$v1,0x18` in place) so the
+ *    previous `lhu` issues in its shadow; we compute it into the register the
+ *    previous load just wrote, which is a false dependency sched2 cannot
+ *    break.
+ *
+ * So the three fixes move the length by +4, +4 and -4 and each reads as a
+ * regression alone. Measured: `GetGraphType() == 1 || GetGraphType() == 2`
+ * with the arms in the target's order gives the target's CFG *exactly* and is
+ * 272/33 at 731 -- and its whole +4 is one extra `andi $v0,$s1,0xC0` per
+ * loop. The target computes `t & 0xC0` twice, once in each branch's delay
+ * slot, and its SMALL arm carries no copy of its own; ours computes it three
+ * times, because reorg fills the `bne`'s delay slot with the SMALL arm's
+ * `f & 0x60` instead of a recomputation (our constant 2 lives in `$v1` and
+ * the target's in `$t0`, which is what frees `$v1` there for the `andi`).
+ * Fixing (a) alone therefore *costs* 4; it has to land with (b) or (c).
+ *
+ * Also measured and rejected: reading the texture coordinates as a `u16[]`
+ * subscript -- `uv[v & 0xFF]`, `uv[(v >> 8) & 0xFF]`, `uv[(v >> 16) & 0xFF]`,
+ * `uv[v >> 24]`, which produce byte-identical address arithmetic to the four
+ * `*(u16*)(... + (s32)uv)` casts at every site -- is 259 at the exact length,
+ * and 284 combined with the `||` form. It does not touch (c).
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(

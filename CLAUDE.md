@@ -2419,6 +2419,22 @@ a near-miss, in rough order of frequency:
   `FieldBackgroundInitPackets` trap in advance; check the table before landing
   one.
 
+* **An alias fold is only safe for aliases splat does *not* itself write, and
+  the histogram's fold was not.** The opcode table decodes objdump's aliases
+  back to the mnemonic the `.s` spells, which is right for `li`, `move` and
+  `not` — splat never writes those — and was wrong for `negu` and `b`, which
+  splat writes 261 and 13 times across `asm/us/` respectively (and it writes
+  `subu $rD, $zero, $rT` **never**). Folding those renamed *our* side alone,
+  so the table reported a balanced `subu +N / negu -N` pair that is pure
+  artifact: `FieldModelCreatePktsForPart` read `+4/-4` with the `negu` at all
+  four sites already byte-identical in the diff, and `FieldEntityMove`
+  `+6/-6` — in both, the real cluster was elsewhere and this pair was the
+  loudest row in the table. Fixed in the tool. The general shape is worth
+  keeping: a *balanced* pair in the opcode table is either a wrong
+  declaration or a naming asymmetry, and the cheap way to tell them apart is
+  to grep the target `.s` for both mnemonics — if it spells one of them, the
+  tool must not rewrite it.
+
 * **`variant_eval.py` prints the compiled length too, and that is the number
   to read.** It reports `length <ours> against <target> (+N instructions)`
   whenever the two differ, taken from the function's ELF symbol size rather
