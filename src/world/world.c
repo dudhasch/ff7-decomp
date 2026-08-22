@@ -1975,7 +1975,13 @@ void func_800AF324(u8 arg0, u8 arg1, u8 arg2) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF364);
+void func_800AF364(u8 arg0, u8 arg1, u8 arg2) {
+    if (D_8010B3B8 != NULL) {
+        D_8010B3B8->unk18 = arg0;
+        D_8010B3B8->unk19 = arg1;
+        D_8010B3B8->unk1A = arg2;
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF3A4);
 
