@@ -113,13 +113,13 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034350);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_800343F0);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034410);
+int func_80034410(void) { return D_80071A60; }
 
 void func_80034420(void) {}
 
 void func_80034428(void) {}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034430);
+void func_80034430(void) { D_80071A60 = 0x10; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034444);
 
@@ -192,7 +192,37 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034CAC);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", ChangeClearSIO);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034D18);
+/* Parked 2 rows out at the exact 5 instructions. The residue is the address
+ * sum alone: the target has `addu $v1, $a0, $a1` -- base first, into a fresh
+ * register, because `base` is still live for the final `addu $v0, $v0, $a0` --
+ * where every spelling measured here emits `addu $a1, $a1, $a0`, reusing the
+ * dying index pseudo. fold canonicalises `PLUS(NOP_EXPR(base), MULT(index,4))`
+ * with the MULT as op0 whatever the source says, so the operand order is not
+ * reachable from C here; CLAUDE.md's `n + (s32)p` escape does not apply,
+ * because the integer form folds back to the same tree.
+ *
+ * Measured, all at 5 instructions and all 2 rows except where noted:
+ *   ((u_long*)base)[index] + (u_long)base            3 (also swaps the tail)
+ *   *((u_long*)base + index) + (u_long)base          3
+ *   (u_long)base + *((u_long*)base + index)          3
+ *   (u_long)base + ((u_long*)base)[index]            3
+ *   u_long* p = ...; *p + (u_long)base               3
+ *   u_long* p = ...; (u_long)base + *p               3
+ *   u_long ofs = ((u_long*)base)[index]; ofs + base  2   <- the #else below
+ *   u_long ofs = *((u_long*)base + index); ...       2
+ *   u_long ofs = *(u_long*)((u_char*)base + i * 4)   2
+ *   u_long* p = ...; u_long ofs = *p; ...            2
+ *   u_long ofs = *(u_long*)((u_long)base + i * 4)    2
+ * The `ofs` local is what fixes the tail sum; nothing moves the address. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/psxsdk", func_80034D18);
+#else
+void* func_80034D18(void* base, int index) {
+    u_long ofs = ((u_long*)base)[index];
+
+    return (void*)(ofs + (u_long)base);
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80034D2C);
 
