@@ -1466,6 +1466,32 @@ a near-miss, in rough order of frequency:
   statements — the parameter load first, then the base — which is the same
   `scan_loop` ordering lever as the bullet above, applied to a straight-line
   block instead of a loop.
+* **Between two integer operands fold puts the *more complex* one first, so a
+  named local is how a plain variable stays `op0` of an `addu`.** The
+  companion to the bullet above with no pointer in sight: `base + (p->count *
+  8)` is `VAR + MULT`, fold swaps them, and the multiply's register is the
+  first operand -- `addu v0,v0,<base>` where the target has
+  `addu v0,<base>,v0`. Two same-class operands tie and source order stands, so
+  assigning the product to a local first is what fixes it. When the target
+  *recomputes* that product (because an intervening store invalidated the
+  load it came from), the local is **assigned twice**, once before each use:
+
+  ```c
+  numEnt = scripts->numEntities * 8;
+  lo = (scriptBase + numEnt + numExtras + (s32)scripts)[0x20];
+  *slot = lo;
+  numEnt = scripts->numEntities * 8;              /* the target's reload */
+  *slot = lo | ((scriptBase + numEnt + (s32)scripts + numExtras)[0x21] << 8);
+  ```
+
+  One assignment is **-3 instructions** (the reload disappears) and inline is
+  12 rows; the pair is what also lets the second sum accumulate *into*
+  `scriptBase`'s own register, the way the target does. `FieldEventRunInit`
+  in `src/field/field4.c`. Note the two sums' *later* addends keep source
+  order in both spellings, which is why a target whose two copies of one
+  address add their operands in different orders is telling you the original
+  wrote them differently -- swapping them is a real lever and is not folded
+  away.
 * **`&((T*)(base + K))[i]` is an ARRAY_REF and survives fold; `i * sizeof(T) +
   K + (s32)base` is a PLUS_EXPR and does not.** For a packet at a fixed offset
   inside a big buffer, the integer sum is reassociated to `(base + K) + i *
@@ -2261,6 +2287,22 @@ a near-miss, in rough order of frequency:
   re-test with the barrier placed between a definition and its use before
   concluding a local cannot be moved.
 
+  **And it is a register-allocation probe, which is its most useful third
+  use: it can tell you a residue is reachable before you know how.** Moving
+  the one barrier `FieldEventRunInit` already carried from after `pcBase` to
+  after `scriptBase` took it from 12 rows to **10** and reproduced the
+  target's register assignment exactly -- the two competing quantities
+  swapped, nine of the twelve rows went, and what was left was two `nop`s the
+  split block could no longer fill. That is +2 instructions, so it is not a
+  fix and must not be landed; what it *is* is proof that the assignment is
+  reachable at all, plus a picture of which two quantities are competing,
+  which is what turns "12 rows of register naming" into a question with an
+  answer. Eleven placements were measured there and only one produced it, so
+  sweep the boundary rather than picking one. The mechanism is that the
+  boundary changes which quantities `local_alloc` sees as block-local, and
+  therefore the order registers are handed out in — the same lever the
+  `size` term reaches for free.
+
 * **A diff of 0 insertions and 0 deletions refutes an `allocno_compare` or
   `QTY_CMP_PRI` diagnosis by construction, and that is a proof rather than an
   argument.** Same instruction stream means the same RTL, which means the same
@@ -2480,6 +2522,17 @@ a near-miss, in rough order of frequency:
   `(reg:SI 13 t5)`) and looking the same insn number up in `.lreg`
   (pre-allocation, prints `(reg:SI 73)`).
 
+  **`.lreg` already prints the answer, though: `;; Register 73 in 3.` is
+  `reg_renumber`, i.e. pseudo 73 got hard register 3 (`$v1`).** Those lines
+  come after the per-function `Registers live at start:` block, one per
+  pseudo `local_alloc` placed, and they make the dump self-contained — refs,
+  live length and outcome in one file, with no `.greg` cross-reference and no
+  guessing from the emitted asm. Name the pseudos by grepping the same
+  function's RTL for `reg/v` (declared locals keep the `/v` and their mode:
+  `(reg/v:SI 73)` is a pointer local, `(reg/v:HI 75)` a `u16` one), and read
+  everything else off the insn that defines it. On `FieldEventRunInit` that
+  turned a twelve-row diff into five numbers and one arithmetic comparison.
+
   **Caller-saved ties are `local_alloc`, and its formula is a different one.**
   A pseudo the dump describes as "in block N" never reaches `global_alloc` at
   all -- it is allocated by `block_alloc`, which ranks *quantities* by
@@ -2488,6 +2541,56 @@ a near-miss, in rough order of frequency:
   `$v1`, `$a0`..`$a3` is a statement about that ratio and nothing else, and the
   `.lreg` dump prints both terms. `OpcodeFuncMove`'s three-quantity tie scores
   0.75 / 0.62 / 0.33 where the target needs the reverse order outright.
+
+  **`size` in that formula is `GET_MODE_SIZE` in *bytes*, so a local's
+  declared width is a register-allocation lever that emits no instruction.**
+  This is the third term and this file spent four sessions treating the
+  formula as if it had two. An HImode quantity is scored at *half* an SImode
+  one, so `s16 x = expr;` and `s32 x = (s16)expr;` -- identical value,
+  identical instructions, identical `n_refs` and `live_length` -- rank a
+  factor of two apart. `FieldEventRunInit` in `src/field/field4.c` sat at 12
+  rows because its `s16 numExtras` scored `2*6*2/11 = 2.18` against the
+  competing `lo` at 4.0 and lost `$a1` to it; widening the declaration and
+  moving the truncation into the expression flips the ranking and the
+  function **matches**. Nothing else in the body changed.
+
+  Two consequences worth having in front of you. A residue that reads as
+  "two block-local quantities holding each other's register" is *always*
+  worth a width sweep before anything else, because the sweep varies exactly
+  this term and `variant_eval` scores the whole cross-product in a minute.
+  And the check that a width is right for the right reason is still the
+  target's extension opcode: `u16`/`u8 numExtras` reach the same allocation
+  (3 rows) and cannot emit the `sll 18` / `sra 16` the target has, so they
+  are a coincidence, where `s32` carrying the `(s16)` cast is the same
+  arithmetic *and* the same ranking.
+
+* **A value the target keeps in a *global* allocno's register has to be
+  assigned to that variable at every step, not computed by one expression.**
+  `local_alloc` runs before `global_alloc`, so every block-local pseudo takes
+  its register first and the cross-block value gets what is left. A value
+  computed in two arms and read in the shared tail is a global allocno; write
+  its address as one expression and each intermediate is a *fresh block-local
+  pseudo* that `local_alloc` hands `$v0`, which then pushes whatever else the
+  block needs up a register. Assign the same variable at each step and the
+  whole chain is one pseudo -- the global's -- and comes out in place:
+
+  ```c
+  pc = g_CurrentEntity;                  /* lbu  a0, ...      */
+  pc = pc * 2;                           /* sll  a0,a0,1      */
+  pc = pc + (s32)g_FieldScriptPC;        /* addu a0,a0,s0     */
+  ```
+
+  against `pc = &g_FieldScriptPC[g_CurrentEntity];`, which gives
+  `lbu v0 / sll v0,v0,1 / addu a0,v0,s0` and costs the neighbouring
+  `g_FieldState` pointer `$v0` as well. `OpcodeFuncVwoft` in
+  `src/field/field4.c` was parked on exactly this for three sessions with a
+  note that had correctly identified the tie and concluded neither term was
+  reachable; 12 rows to 0. Two steps instead of three is 9 rows and **+1
+  instruction** -- the load still needs its own register and the delay slot
+  after it takes a `nop` -- so the chain has to start at the variable, not
+  merely end there. The tell is an `addu` whose destination is a
+  callee-of-the-join register and whose first source is a different one,
+  where the target has the same register twice.
 
   **When it *is* reachable, one loop-weighted reference is the whole lever.**
   The counter-case to the paragraph below, and the numbers say which you are
@@ -2545,6 +2648,18 @@ a near-miss, in rough order of frequency:
   `FieldCalcPointOnLine`'s 150 variants over 30 locals come back flat in
   about a minute, which closes a whole dimension that
   `perm_randomize_internal_type` would otherwise spend a search on.
+
+  **Run it on a residue that reads as pure register naming too, not only on
+  one that reads as a wrong declaration.** The width is a term in
+  `QTY_CMP_PRI` (see the `size` bullet above), so a sweep is a sweep of the
+  *allocation*, not only of the load opcodes -- and it is the cheapest way to
+  vary that term, because every other way of changing a quantity's ranking
+  emits an instruction. `FieldEventRunInit`'s last twelve rows were a
+  two-quantity swap that nine hand-shaped attempts, a `.lreg` dump and eleven
+  barrier placements had failed to move, and `width_sweep` named it on the
+  first run: `numExtras s16 -> u16, 3 rows, exact`, with everything else in
+  the table flat at 12. Reading *why* that row was 3 rather than 0 gave the
+  matching spelling in one more measurement.
 
   (The `ori +2 / addiu -2` in the histogram quoted above was taken before the
   opcode fold was fixed and is the alias artifact described further down, not
