@@ -9424,76 +9424,40 @@ s32 OpcodeFuncSolid(void) {
     return 0;
 }
 
-/* Set the camera's view offset. A non-zero mode eases from the current offset
- * to the target over N steps; mode 0 applies it immediately and clears the
- * animation state. */
-/* Every instruction matches except the tail merge: gcc cross-jumps the whole
- * shared PC_INC(7) tail, where the original keeps the
- * &g_FieldScriptPC[g_CurrentEntity] computation duplicated in both arms. */
 /* VWOFT: set the view offset, either as a ramp (mode nonzero: start, target,
  * step count and mode, with the current step reset) or immediately (mode 0:
  * everything cleared and the offset written straight).
  *
- * 24 rows / -4 -> 12 / exact, on two things, and both had been measured before
- * against a body that made them look worse than they are:
+ * Two levers on the shared tail and one on the address, and the third is the
+ * one that was called unreachable for three sessions:
  *
- *   - the four instructions this was short are a *second* copy of
- *     `&g_FieldScriptPC[g_CurrentEntity]`, one per arm, with only the
- *     `lhu`/`addiu`/`sh` shared. Duplicating `PC_INC(7); return 0;` cannot
- *     produce that -- cross-jumping runs after reload, both copies are the
- *     identical eight-insn sequence, and the merge walks all the way back
- *     through `lui a0` (58 rows here, 48 before). A named `u16* pc` assigned
- *     as the last statement of each arm, with `*pc += 7;` after the if/else,
- *     does: the else arm's last insns are then its two `sh zero` stores and
- *     the if arm's is the address, so the suffixes differ at the first insn
- *     and nothing merges. Worth 3 of the 4.
- *   - the fourth is the else arm's statement order. `viewOffsetNumSteps = 0;`
- *     written before `viewOffset = FieldEventReadMemoryS16(1, 2);` makes gcc
- *     load g_FieldState before the call and put the store in its delay slot;
- *     with the call first, g_FieldState is not touched until after it and one
- *     load serves both the 0x12 and 0x16 stores, which is the target's
- *     grouping. 28 -> 12. Hoisting the call result into a local instead is 20
- *     -- it gets the call up but keeps the two loads apart.
- *
- * The 12 left are one quantity-ordering tie, twice: the target computes the
- * PC index in place (`lbu a0` / `sll a0,a0,1` / `addu a0,a0,s0`) and gives
- * g_FieldState $v0 for the trailing stores, where this build puts the index
- * in $v0 and g_FieldState in $v1. Both are three-reference block-local
- * quantities born a few insns apart, so this is `block_alloc`'s tie-break on
- * qty number, i.e. insn order -- and source order does not reach it: `pc`
- * assigned after `viewOffsetMode`, after `viewOffsetStart`, or last in the
- * arm all measure exactly 12, and first in the arm 18. Every spelling of the
- * address is inert too (`g_FieldScriptPC + g_CurrentEntity`, the
- * `n + (s32)p` cast form, `pc[0] += 7`).
- *
- * The permuter has now had that run, from a scratch re-imported at 12 rows --
- * the 101,000-candidate run CLAUDE.md records predates the 24 -> 12 work, so
- * it was hill-climbing a different body. Clean scratch (no diagnostics,
- * relocations identical, 466 bytes against 460), **base score 85**, and a
- * `PERM_GENERAL` set enumerating a `do { } while (0);` boundary either side
- * of each arm's `pc` assignment, that assignment one statement earlier, and
- * three spellings of `*pc += 7` comes to **48 candidates, every one 85**. No
- * output directory; the run terminated on its own.
- *
- * The analysis it forced is what settles this. Each arm holds two block-local
- * quantities of three references each -- the PC index and the `g_FieldState`
- * pointer -- and `block_alloc` gives `$v0` to whichever ranks first by
- * `floor_log2(refs)*refs*size/(death-birth)`. The index is born at its `lui`
- * and dies at the `addu`; `g_FieldState` is born at its `lui` and lives on to
- * the two `sh`, so its range is longer, its priority lower, and it loses
- * `$v0` -- which is this build. The target wants the reverse, so the index
- * has to be *demoted*, i.e. given a longer range. That lever does not exist
- * here: naming it lets cse share the load between the arms where the target
- * reads `D_800722C4` once per arm, so `idx` at the top of each arm and `idx`
- * before the `if` are both **-8 instructions**, a `u8` idx -3, and a named
- * `base` pointer -7. Inline, its range is fixed by the arithmetic. Neither
- * term of the tie is reachable from C, which by CLAUDE.md's rule makes this a
- * park rather than permuter food. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncVwoft);
-#else
+ *   - the four instructions this used to be short are a *second* copy of the
+ *     PC address, one per arm, with only the `lhu'/`addiu'/`sh' shared.
+ *     Duplicating `PC_INC(7); return 0;' cannot produce that -- cross-jumping
+ *     runs after reload and both copies are the identical eight insns, so the
+ *     merge walks back through `lui a0' (58 rows). A named `pc' assigned as
+ *     the last statement of each arm, with the increment after the if/else,
+ *     makes the arms' suffixes differ at the first insn and nothing merges.
+ *   - the else arm writes `viewOffset' from the call *first*; with
+ *     `viewOffsetNumSteps = 0' ahead of it gcc loads g_FieldState before the
+ *     call and the two 0x12/0x16 stores stop sharing a load.
+ *   - **the address is built by three assignments to one variable, not by one
+ *     `&g_FieldScriptPC[g_CurrentEntity]'.** `pc' is live into the shared
+ *     tail, so it is a global allocno and gets $a0; every intermediate of a
+ *     single-expression address is a fresh block-local pseudo, and
+ *     `local_alloc' runs first and hands them $v0 -- which then costs
+ *     g_FieldState $v0 as well, six rows per arm. Assigning `pc' three times
+ *     (`pc = g_CurrentEntity; pc = pc * 2; pc = pc + (s32)g_FieldScriptPC;')
+ *     puts the load, the shift and the add on *one* pseudo, so all three land
+ *     in the global's $a0 in place -- `lbu a0' / `sll a0,a0,1' /
+ *     `addu a0,a0,s0' -- and g_FieldState takes $v0 the way the target has
+ *     it. 12 rows to 0. Two steps instead of three is 9 rows and +1
+ *     instruction (the load still needs its own register, so the delay slot
+ *     after it takes a nop); `u16* pc' with the same three casts is
+ *     byte-identical, so the `.s' cannot say which of the two the original
+ *     wrote. */
 s32 OpcodeFuncVwoft(void) {
-    u16* pc;
+    s32 pc;
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("vwoft", 6);
     }
@@ -9503,7 +9467,9 @@ s32 OpcodeFuncVwoft(void) {
         g_FieldState->viewOffsetNumSteps = FieldEventReadMemoryS16(2, 4);
         g_FieldState->viewOffsetMode = GET_PARAM_U8(6);
         g_FieldState->viewOffsetCurrentStep = 0;
-        pc = &g_FieldScriptPC[g_CurrentEntity];
+        pc = g_CurrentEntity;
+        pc = pc * 2;
+        pc = pc + (s32)g_FieldScriptPC;
     } else {
         g_FieldState->viewOffset = FieldEventReadMemoryS16(1, 2);
         g_FieldState->viewOffsetNumSteps = 0;
@@ -9511,12 +9477,13 @@ s32 OpcodeFuncVwoft(void) {
         g_FieldState->viewOffsetMode = 0;
         g_FieldState->viewOffsetStart = 0;
         g_FieldState->viewOffsetTarget = 0;
-        pc = &g_FieldScriptPC[g_CurrentEntity];
+        pc = g_CurrentEntity;
+        pc = pc * 2;
+        pc = pc + (s32)g_FieldScriptPC;
     }
-    *pc += 7;
+    *(u16*)pc += 7;
     return 0;
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_party_manage.c
