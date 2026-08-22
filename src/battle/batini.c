@@ -276,6 +276,27 @@ void func_801B085C(s32 arg0) {
     D_800F5F44.D_800F7DA6 = 0x10000 / ((arg0 * 480 / 256 + 0x78) * 2);
 }
 
+/* Not started. Reconnaissance so the next pass does not re-derive it:
+ *
+ * 410 instructions, and the frame opens by zeroing EIGHT stack slots
+ * (0x10, 0x18, 0x20, 0x30, 0x38, 0x40, 0x48, 0x50) that the loop body then
+ * reloads one at a time -- eight spilled induction variables, all live across
+ * the whole outer loop. That is the hardest shape in this codebase: which slot
+ * each reduced giv gets is the order `strength_reduce` creates their pseudos,
+ * which is the REVERSE of the order it discovers them, i.e. reverse insn order
+ * in the body. Read cc1's `.loop` dump rather than inferring it from a diff --
+ * see CLAUDE.md's "Two spilled induction variables holding each other's slot".
+ *
+ * The bases the eight offsets index, read off the preheader:
+ *   g_CombatantTurnState            (+0x2A8 = party[0], +0x344 = setup[0])
+ *   D_8009CBDC                      a byte per party slot
+ *   D_801636B8                      a byte per party slot
+ *   D_8009D84C                      stride 0x40 (`sll v1,t4,6`)
+ *   g_BattleState.combatant         stride 0x68
+ *   g_BattleState.unk10 (D_800F83BC)  zeroed at entry
+ *
+ * func_801B0490 in this file is the sibling that already matches and shares
+ * much of the shape; read it before reading the target. */
 INCLUDE_ASM("asm/us/battle/nonmatchings/batini", func_801B08C0);
 
 // The per-party work area at 0x800F5BB8: the turn state, the three party
