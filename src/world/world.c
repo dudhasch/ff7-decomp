@@ -510,7 +510,11 @@ void func_800A6B8C(VECTOR* dst) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A6BCC);
+void func_800A6BCC(SVECTOR* arg0) {
+    if (arg0 != NULL) {
+        func_800A6884(&D_80109D44, arg0, NULL, NULL);
+    }
+}
 
 void func_800A6C00(s32 arg0) {
     if (func_800A1DB0() != 2)
