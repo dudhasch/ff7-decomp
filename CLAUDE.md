@@ -4533,6 +4533,40 @@ a near-miss, in rough order of frequency:
   `addiu v1,v0,1` with `v0` still live — is `next = D_80163604 + 1;` as its
   own statement *before* the D_8009D2FC store, and `next` has to be `u8`: an
   `s32` local costs 3 rows. `func_800E05E4`'s last two rows.
+* **A compound assignment is the cheapest way to give a value two more
+  references, and two can be the whole diff.** `block_alloc` ranks quantities
+  by `floor_log2(n_refs) * n_refs * size / (death - birth)`, and the
+  `floor_log2` step between 3 and 4 references is worth a factor of two -- so
+  a value with 2 references sits at the *bottom* of the tie group and the same
+  value with 4 sits at the top, which on a short function is the difference
+  between `$a3` and `$a0` and, with the other three quantities each shifting
+  up one register, every row of the diff.
+  `lo = D_800F4AC0[pc++]; return lo | (hi << 8);` gives `lo` two references
+  (def, use) and 13 rows of pure caller-saved naming;
+  `lo |= hi << 8; return lo;` gives it four (def, use, def, use) and
+  `func_800B1368` in `src/battle/battle.c` **matches** -- same instructions,
+  same length, nothing else changed. Six other spellings (the expression
+  inline, two named locals, `u8`/`u32` for the first byte, a pointer local for
+  the struct, an explicit `pc` local) all measure 13. The tell is that the
+  rotation is *cyclic*: every quantity exactly one register up means one of
+  them crossed a `floor_log2` step, not that the allocator did anything
+  structural. This is the same lever as the `do { } while (0);` reference
+  multiplier and much cheaper, because it emits no instruction and needs no
+  basic-block boundary.
+* **A call that passes fewer arguments than the callee takes needs the callee
+  defined K&R, and the diagnostic is the only symptom.** These sources do it
+  deliberately -- a wrapper that forwards whatever the caller left in
+  `$a0`/`$a1` without naming it -- and against a *prototyped* definition gcc
+  2.6.3 reports `too few arguments to function`, substitutes for the missing
+  argument and keeps generating code, so ninja is happy, the overlay's SHA-1
+  is right, and the only casualty is that `checkfn.py` refuses every verdict
+  in the file. An old-style definition (`void f(a, b) s32 a; s32 b; { ... }`)
+  creates no prototype, so the call is legal again, and for `int`-width
+  parameters it is codegen-identical -- the default argument promotions are
+  the identity on `int`, and `clang-format` leaves the form alone.
+  `src/battle/battle.c` carried three of these plus one genuinely conflicting
+  forward declaration, and between them they blocked every measurement in a
+  109-function file.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc
