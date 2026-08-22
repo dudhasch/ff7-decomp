@@ -29,6 +29,41 @@ typedef struct EndingModel {
     /* 0x40 */ SVECTOR trans;
 } EndingModel;
 
+/* An animated sprite/actor. func_800A343C fixes the colour block (0x10 current,
+ * 0x14 per-step delta, 0x18 final) and the step counter at 0x2; func_800A34C4
+ * fixes the animation pointer at 0xC with its delay and frame counters. */
+typedef struct EndingActor {
+    /* 0x00 */ u16 flags;
+    /* 0x02 */ s16 fadeSteps;
+    /* 0x04 */ s16 unk04;
+    /* 0x06 */ u16 delay;
+    /* 0x08 */ u16 frame;
+    /* 0x0A */ u16 unk0A;
+    /* 0x0C */ u_long* anim;
+    /* 0x10 */ u8 r;
+    /* 0x11 */ u8 g;
+    /* 0x12 */ u8 b;
+    /* 0x13 */ u8 unk13;
+    /* 0x14 */ u8 stepR;
+    /* 0x15 */ u8 stepG;
+    /* 0x16 */ u8 stepB;
+    /* 0x17 */ u8 unk17;
+    /* 0x18 */ u8 endR;
+    /* 0x19 */ u8 endG;
+    /* 0x1A */ u8 endB;
+    /* 0x1B */ u8 unk1B;
+    /* 0x1C */ u8 unk1C[0x40];
+    /* 0x5C */ s16 unk5C;
+    /* 0x5E */ s16 unk5E;
+    /* 0x60 */ s16 unk60;
+    /* 0x62 */ u8 unk62[0x6];
+    /* 0x68 */ s32 unk68;
+    /* 0x6C */ s32 unk6C;
+    /* 0x70 */ s32 unk70;
+    /* 0x74 */ u8 unk74[0x4];
+    /* 0x78 */ u8 unk78[0x4];
+} EndingActor;
+
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
 extern s32 D_800A6390;
@@ -38,14 +73,32 @@ extern s32 D_800A6390;
 extern s32 D_800A6398[];
 extern s32 D_800A63B0;
 extern u_long* D_800A6524;
+extern DRAWENV D_800AF2E0[];
+extern DISPENV D_800AF398[];
+extern u32 D_800AF3C0;
+extern u32 D_800AF3C4;
+extern EndingTask D_800AF3C8;
+extern EndingTask* D_800AF3CC;
+extern EndingTask D_800AF3D8;
+extern u32 D_800AF3EC;
+extern u32 D_800AF3F0;
+extern u32 D_800AF3F4;
+extern u32 D_800AF3F8;
+extern s32 D_800AF408;
 extern s32 D_800AF40C;
 extern s32 D_800AF410;
-extern EndingTask* D_800AF3CC;
+
+extern DRAWENV* D_8007EBD0;
+extern DISPENV* D_8007EBD8;
+extern u8* D_8003623C;
 
 /* Not declared anywhere shared: libgte's ScaleMatrix has no prototype in
  * include/psxsdk, and the three psxsdk.c helpers are still INCLUDE_ASM. */
 MATRIX* ScaleMatrix(MATRIX* m, VECTOR* v);
+s32 VectorNormal(VECTOR* v0, VECTOR* out);
+u32 func_8001C808(void);
 s32 func_80034410(void);
+void func_80036244(u_long* anim, s32 frame);
 u_long* func_80034D18(u_long* base, s32 index);
 s32 func_80034D2C(u_long* src, u_long* dst);
 s32 func_80034D5C(void);
@@ -53,7 +106,7 @@ s32 func_80034FC8(u_long* dst, s32 index);
 s32 func_800484A8(void);
 s32 func_80048540(s32 arg0);
 void func_800A2504(s32 x, s32 y, s32 w, s32 r, u8 g, u8 b);
-void func_800A273C(s32 arg0);
+s32 func_800A273C(s32 arg0);
 void func_800A2888(u_long* tim, u16* tpage, u16* clut);
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0030);
@@ -251,7 +304,67 @@ void func_800A24A8(void) {
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A2504);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A273C);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/ending/nonmatchings/ending", func_800A273C);
+#else
+/* 9 rows at the exact 83 instructions, and every one of them is a register
+ * name: `pad1` and `prev0` hold each other's register (target a3/a1, ours
+ * a1/a3) and everything downstream of the two `and`s follows. `pad0` -> $a2
+ * and `prev1` -> $a0 are already right, so this is one adjacent pair in
+ * local_alloc's quantity order and nothing else.
+ *
+ * What the compiler discovery was worth here: the whole function was 15 rows
+ * and -3 instructions until `return D_800AF408;` -- the target's `lw v0`
+ * after the call is not a dead load, it is the return value, and it is also
+ * what forces the `move a2,v0` that a void version coalesces away.
+ *
+ * Measured and rejected, all at the same 83 instructions:
+ *   reading D_800AF3C0/C4 inline instead of into prev0/prev1   13
+ *   the six stores in nine other orders (b,c,e,f,g,h,i,j,k)    9 (k), 13-16
+ *   prev1 loaded before prev0                                   9
+ *   declaration order prev0/prev1 ahead of pad0/pad1            9
+ *   D_800AF3F8 written as `pad0 >> 16` (one fewer pad1 ref)     9
+ *   a `pad` local kept alongside pad0                           9
+ *   ~pad0/~pad1 hoisted into inv0/inv1 locals                   9
+ *   pad1 assigned after the two prev loads                      9
+ *   `pad0 & prev0` operand order                               12
+ *   prev0 loaded late, just above the D_800AF3C0 store          18
+ *   prev0 inline / prev1 inline                                10 / 21
+ *   D_800AF408 read into a local before the stores             16
+ *   chained `D_800AF3F4 = pad0 = func_8001C808()`              21
+ *   pad0/pad1 as s32                                           13
+ *
+ * Nine of those measure exactly 9, which is CLAUDE.md's flat-dimension
+ * signature: the residue is allocno_compare/QTY_CMP_PRI arithmetic, and
+ * prev0 would have to go from 2 references to 3 (a floor_log2 step) to
+ * overtake pad1's 4. There is no way to spell that without emitting an
+ * instruction, so this is a park and not a permuter target. */
+s32 func_800A273C(s32 arg0) {
+    u32 pad0;
+    u32 pad1;
+    u32 prev0;
+    u32 prev1;
+
+    D_800AF408 ^= 1;
+    DrawSync(0);
+    VSync(arg0);
+    PutDispEnv(&D_800AF398[D_800AF408]);
+    PutDrawEnv(&D_800AF2E0[D_800AF408]);
+    D_8007EBD8 = &D_800AF398[D_800AF408];
+    D_8007EBD0 = &D_800AF2E0[D_800AF408];
+    pad0 = func_8001C808();
+    pad1 = pad0 >> 16;
+    prev0 = D_800AF3C0;
+    prev1 = D_800AF3C4;
+    D_800AF3C0 = ~pad0;
+    D_800AF3F4 = pad0;
+    D_800AF3F8 = pad1;
+    D_800AF3C4 = ~pad1;
+    D_800AF3EC = prev0 & pad0;
+    D_800AF3F0 = prev1 & pad1;
+    return D_800AF408;
+}
+#endif
 
 void func_800A2888(u_long* tim, u16* tpage, u16* clut) {
     TIM_IMAGE image;
@@ -312,13 +425,61 @@ s32 func_800A2F1C(EndingModel* model) {
     return flag;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A2FB8);
+s32 func_800A2FB8(EndingModel* model, VECTOR* target, VECTOR* dir, s32 speed) {
+    VECTOR delta;
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A310C);
+    delta.vx = target->vx - model->trans.vx;
+    delta.vy = target->vy - model->trans.vy;
+    delta.vz = target->vz - model->trans.vz;
+    VectorNormal(&delta, dir);
+    if (delta.vx >= -2 && delta.vx < 2 && delta.vy >= -2 && delta.vy < 2 &&
+        delta.vz >= -2 && delta.vz < 2) {
+        dir->vx = delta.vx << 12;
+        dir->vy = delta.vy << 12;
+        dir->vz = delta.vz << 12;
+        return 1;
+    }
+    if (speed != 0x1000) {
+        dir->vx = speed * dir->vx / 0x1000;
+        dir->vy = speed * dir->vy / 0x1000;
+        dir->vz = speed * dir->vz / 0x1000;
+    }
+    return 0;
+}
+
+void func_800A310C(void) {
+    D_800AF3C8.id = 0;
+    D_800AF3C8.state = 1;
+    D_800AF3C8.prio = 0xFF;
+    D_800AF3C8.prev = NULL;
+    D_800AF3C8.next = &D_800AF3D8;
+    D_800AF3D8.id = 1;
+    D_800AF3D8.state = 1;
+    D_800AF3D8.prio = 0;
+    D_800AF3D8.prev = &D_800AF3C8;
+    D_800AF3D8.next = NULL;
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A3178);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A3210);
+void func_800A3210(void) {
+    EndingTask* t;
+
+    t = D_800AF3CC;
+    while (t->next != NULL) {
+        if (t->state == 4) {
+            t->fn(t);
+        }
+        t = t->next;
+    }
+    t = D_800AF3CC;
+    while (t->next != NULL) {
+        if (t->state == 2) {
+            t->state = 4;
+        }
+        t = t->next;
+    }
+}
 
 void func_800A32D8(EndingTask* arg0) {
     EndingTask* prev = arg0->prev;
@@ -348,9 +509,40 @@ EndingTask* func_800A3314(s16 arg0) {
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A3368);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A343C);
+void func_800A343C(EndingActor* actor) {
+    if (actor->flags & 8) {
+        actor->r += actor->stepR;
+        actor->g += actor->stepG;
+        actor->b += actor->stepB;
+        if (--actor->fadeSteps == 0) {
+            actor->flags ^= 8;
+            actor->r = actor->endR;
+            actor->g = actor->endG;
+            actor->b = actor->endB;
+        }
+    }
+}
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A34C4);
+void func_800A34C4(EndingActor* actor) {
+    u16 count;
+
+    if (actor->flags & 2) {
+        count = *(u16*)actor->anim;
+        if (actor->delay == 0) {
+            actor->frame++;
+            if (actor->frame >= count) {
+                if (actor->flags & 4) {
+                    actor->frame = 0;
+                } else {
+                    actor->frame--;
+                }
+            }
+            func_80036244(actor->anim, actor->frame);
+            actor->delay = D_8003623C[1];
+        }
+        actor->delay--;
+    }
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A358C);
 
