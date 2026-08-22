@@ -1510,13 +1510,120 @@ static void AkaoStreamTransferCallbackSplit(void) {
     D_80099FD8 &= ~D_80062F00;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002D530);
+void func_8002D668(void);
+void func_8002D8E8(void);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002D668);
+// The two halves of the CD stream's SPU double buffer. Each SPU-IRQ callback
+// fills its own 0x1000-byte half and arms the IRQ on the other one, so the
+// pair hand off to each other until the stream runs out; when it does, the
+// next block is taken from D_80063000/D_80062F08, and when there is no next
+// block the IRQ goes back to the stop handler.
+void func_8002D530(void) {
+    if (D_80063004 != 0) {
+        SpuSetTransferStartAddr(0x77000);
+        func_80038F04(D_80062FE0, 0x1000);
+        SpuSetIRQ(0);
+        if ((u32)D_80063004 > 0x1000) {
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_8002D668);
+            SpuSetIRQ(1);
+            D_80063004 -= 0x1000;
+            D_80062FE0 += 0x1000;
+        } else if (D_80063000 != 0) {
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_8002D668);
+            SpuSetIRQ(1);
+            D_80062FE0 = D_80063000;
+            D_80063004 = D_80062F08;
+        } else {
+            D_80063004 = 0;
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_80029A50);
+            SpuSetIRQ(1);
+        }
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002D7A0);
+void func_8002D668(void) {
+    if (D_80063004 != 0) {
+        SpuSetTransferStartAddr(0x78000);
+        func_80038F04(D_80062FE0, 0x1000);
+        SpuSetIRQ(0);
+        if ((u32)D_80063004 > 0x1000) {
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_8002D530);
+            SpuSetIRQ(1);
+            D_80063004 -= 0x1000;
+            D_80062FE0 += 0x1000;
+        } else if (D_80063000 != 0) {
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_8002D530);
+            SpuSetIRQ(1);
+            D_80062FE0 = D_80063000;
+            D_80063004 = D_80062F08;
+        } else {
+            D_80063004 = 0;
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_80029A50);
+            SpuSetIRQ(1);
+        }
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002D8E8);
+// As the pair above, for a stream played through two voices: each half also
+// re-points both voices' loop addresses, and the single SpuSetIRQ(1) after
+// the chain is one call rather than one per arm.
+void func_8002D7A0(void) {
+    if (D_80063004 != 0) {
+        SpuSetTransferStartAddr(0x77000);
+        func_80038F04(D_80062FE0, 0x1000);
+        SpuSetIRQ(0);
+        SpuSetVoiceLoopStartAddr(0x10, 0x77000);
+        SpuSetVoiceLoopStartAddr(0x11, 0x77800);
+        if ((u32)D_80063004 > 0x1000) {
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_8002D8E8);
+            D_80063004 -= 0x1000;
+            D_80062FE0 += 0x1000;
+        } else if (D_80063000 != 0) {
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_8002D8E8);
+            D_80062FE0 = D_80063000;
+            D_80063004 = D_80062F08;
+        } else {
+            D_80063004 = 0;
+            SpuSetIRQAddr(0x77000);
+            SpuSetIRQCallback(&func_80029A50);
+        }
+        SpuSetIRQ(1);
+    }
+}
+
+void func_8002D8E8(void) {
+    if (D_80063004 != 0) {
+        SpuSetTransferStartAddr(0x78000);
+        func_80038F04(D_80062FE0, 0x1000);
+        SpuSetIRQ(0);
+        SpuSetVoiceLoopStartAddr(0x10, 0x78000);
+        SpuSetVoiceLoopStartAddr(0x11, 0x78800);
+        if ((u32)D_80063004 > 0x1000) {
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_8002D7A0);
+            D_80063004 -= 0x1000;
+            D_80062FE0 += 0x1000;
+        } else if (D_80063000 != 0) {
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_8002D7A0);
+            D_80062FE0 = D_80063000;
+            D_80063004 = D_80062F08;
+        } else {
+            D_80063004 = 0;
+            SpuSetIRQAddr(0x78000);
+            SpuSetIRQCallback(&func_80029A50);
+        }
+        SpuSetIRQ(1);
+    }
+}
 
 void func_8002DA30(Unk8002B7E0** out_msg) {
     *out_msg = D_80081DC8;
