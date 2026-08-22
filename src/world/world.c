@@ -2613,7 +2613,19 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B4244);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B45DC);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5274);
+void func_800B5274(void) {
+    u8* e;
+
+    *(s16*)0x1F800010 = 0;
+    *(s16*)0x1F800012 = 0x32;
+    *(s16*)0x1F800014 = 0;
+    *(s16*)0x1F800020 = 0;
+    func_800AA0E0((VECTOR*)0x1F800000);
+    *(s16*)0x1F800018 = *(s16*)0x1F80001A = *(s16*)0x1F80001C = 0;
+    func_800B39B4(0, 0, 7, 0);
+    e = (u8*)(D_800C6940 * 12 + (s32)D_800C6A10);
+    e[2] = e[3] = 0x10;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5314);
 
