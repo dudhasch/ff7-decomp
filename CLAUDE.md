@@ -2945,6 +2945,52 @@ a near-miss, in rough order of frequency:
   This is the counter-case to the name-the-temporary idioms: here the local is
   what is wrong, and CLAUDE.md's standing advice to repeat the whole indexed
   expression applies to arithmetic too.
+* **`ori` against the target's `addiu` off the same base is combine merging an
+  address into its consumer, not a way of spelling the address.** For a pointer
+  local whose value gcc knows (`s32* p = (s32*)0x1F800000;`), `p + 4` reaches
+  RTL as `(set (reg X) (plus (reg p) (const_int 16)))`; combine folds that into
+  the argument move `(set (reg a0) (reg X))` and rewrites `PLUS` to `IOR`,
+  because `reg_nonzero_bits[p]` proves the low bits clear. The rewrite is
+  visible as `86 {iorsi3}` in the `.combine` dump against `3 {addsi3_internal}`
+  in `.flow`. Two facts follow and both are load-bearing. `reg_nonzero_bits` is
+  a **function-global union over every set of the pseudo**, computed in
+  combine's own first pass, so a second identical assignment teaches it nothing
+  and there is no per-block escape — which is why the same function emits `ori`
+  in every block once it emits it in one. And the rewrite happens only when
+  combine can *merge*: an address with **two** uses has no LOG_LINK to fold and
+  survives as `addsi3` — a three-line probe with `f(s, s + 4, s + 8)` inside a
+  goto loop and `s + 4` used again after it compiles `s + 8` to
+  `ori $6,$16,0x20` and `s + 4` to `addu $17,$16,16`. So when the target has
+  `addiu` where you have `ori`, stop respelling the address (`fold` normalises
+  every form of it) and ask what gave that address a second use — and price the
+  extra pseudo, which conflicts with the base across the loop and usually costs
+  a callee-saved register. `FieldEntityWalkmechCross` in `src/field/field2.c`
+  is parked on exactly these two rows.
+* **A branch polarity that survives every spelling of its condition belongs to
+  reorg, and one `-da` run tells you so instead of a sweep.** Track the
+  `jump_insn` across the dumps: `FieldEntityWalkmechCross`'s fast path is
+  `(if_then_else (ge:SI ...) (label_ref <done>))` followed by `j <chain>` —
+  the target's shape, instruction for instruction — in `.jump`, `.loop`,
+  `.combine`, `.lreg`, `.greg`, `.jump2` **and `.sched2`**, and only `.dbr` has
+  it as `(lt:SI ...) (label_ref <chain>)` with the following jump retargeted at
+  a fresh label one insn into `done`. That is reorg inverting the pair so the
+  unconditional jump lands somewhere it can steal a delay-slot insn from. When
+  the dumps show the branch correct at `sched2`, **no C spelling of the
+  condition can reach it** — the residue is reorg's cost decision, and the only
+  lever left is what sits at the branch target. Note the corollary about pass 1:
+  expand emits a `TRUTH_ANDIF` guard as N `lt` branches to the drop-through
+  plus a `j` to the then-clause, and `jump_optimize`'s
+  conditional-jump-around-an-unconditional-jump rule inverts the last one
+  immediately — so every guard spelling funnels into one shape before anything
+  interesting happens. Thirteen were measured byte-identical on that function.
+* **`fold` collapses `A ? B : 0` to `A && B`, so a ternary is not a way to
+  reach `do_jump`'s COND_EXPR case.** That case is the one place in `expr.c`
+  that passes *both* `if_true_label` and `if_false_label` down to a nested
+  `TRUTH_ANDIF`, which is the only front-end route to `bcc <success>` /
+  `j <failure>` rather than the usual `bcc <failure>` / `j <success>`. It
+  cannot be reached from C: `!(a && b)` is De Morgan'd by `build_unary_op`'s
+  `invert_truthvalue` at parse time, and every ternary spelling is folded back
+  to an `ANDIF`/`ORIF` before `do_jump` runs.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

@@ -2579,7 +2579,80 @@ extern s16 D_801144CC;
  *     mechanism, and it means no number of assignments will reach this. The
  *     target emits `addiu` in the loop and `ori` at `done` off the same `$s0`,
  *     so whatever decides is per-block state inside combine or cse and has no
- *     source-level handle. */
+ *     source-level handle.
+ *
+ * Both groups have now been traced to the pass that makes them, out of cc1's
+ * own RTL dumps rather than out of the diff, and neither is a spelling.
+ *
+ *   - **Group one is combine, and the escape costs a register.** The `.combine`
+ *     dump shows `(insn 110) (set (reg 115) (plus (reg/v 82) (const_int 16)))`
+ *     and `(insn 142) (... (const_int 32))` disappearing into
+ *     `(insn 120) (set (reg:SI 4 a0) (ior:SI (reg/v:SI 82) (const_int 16)))`
+ *     `86 {iorsi3}` -- combine merges the address into its single consumer, the
+ *     argument move, and rewrites `PLUS` to `IOR` because
+ *     `reg_nonzero_bits[82]` is `0x1F800000`. That array is a **function-global
+ *     union over every set of the pseudo**, computed in combine's first pass,
+ *     so no placement of a second identical assignment can change it, and the
+ *     `done` block's two `ori`s are the same rewrite. The one thing that stops
+ *     it is combine not being able to merge at all, which is exactly the
+ *     two-use case: a three-line probe
+ *     (`int* s = (int*)0x1F800000; f(s, s + 4, s + 8);` inside a goto loop with
+ *     `s + 4` also used after it) compiles `s + 8` to `ori $6,$16,0x20` and
+ *     `s + 4` -- two uses, so no LOG_LINK to fold -- to `addu $17,$16,16`,
+ *     i.e. the target's `addiu`. Every way of giving these two addresses a
+ *     second use puts them in their own pseudo, which then conflicts with
+ *     `scratch` across the loop and costs a callee-saved register: a named
+ *     local per call is inert (6), the same locals at the loop top inert (6),
+ *     hoisted above the loop 44 rows / +7 instructions, reused for the arm
+ *     loads 60 / +6, an `s32` base local re-cast per call 36 / +2. The target
+ *     holds everything in one `$s0` and saves the same seven registers we do,
+ *     so there is no room for the second pseudo -- which means the model is
+ *     still incomplete, not that the lever is a spelling. Do not re-sweep the
+ *     address expression; `fold` normalises all of them and the operator is
+ *     decided in combine.
+ *
+ *   - **Group two is reorg, and the front end already produces the target's
+ *     branch.** Tracked across every dump (`-da`), the fast path's third test
+ *     is `(jump_insn 246) (if_then_else (ge:SI (reg 78)) (label_ref 603))` --
+ *     `bgez cross2, done` -- followed by `(jump_insn 255) (label_ref 364)` --
+ *     `j chain` -- and it stays that way through `jump`, `loop`, `combine`,
+ *     `lreg`, `greg`, `jump2` and **`sched2`**. That is the target,
+ *     instruction for instruction. `dbr` then has `(jump_insn 246)
+ *     (lt:SI (reg 4 a0)) (label_ref 364)` and the following jump pointing at a
+ *     new `label 720`: **reorg inverts the pair** so the unconditional jump
+ *     lands on `done` and it can steal `done`'s first insn, `addu
+ * $a0,$s0,$zero`, into the delay slot. That single decision is all four rows --
+ * the polarity, both jump targets, the duplicated `move` (`addu +1`) and the
+ *     `nop` it displaces (`nop -1`). Note the target's reorg makes the *same*
+ *     steal one block later: `.L800A8BFC j .L800A8D9C` carries
+ *     `addu $a0,$s0,$zero` in its slot, which is why `done` has two labels.
+ *
+ *     Two consequences. First, the guard dimension is closed by *mechanism*,
+ *     not by sampling: expand emits three `lt` branches to the ANDIF's
+ *     drop-through plus `j done` (seen in `.rtl`), and jump_optimize's
+ *     conditional-jump-around-an-unconditional-jump rule inverts the last one
+ *     into `ge -> done` in pass 1. Every spelling funnels into that, which is
+ *     why the note's earlier five and this pass's eight all measure 6:
+ *     three separate `if (crossN < 0) goto chain;` statements with the last
+ *     written `if (cross2 >= 0) goto done;`, the same with an explicit
+ *     `goto chain;` before the label, `if (c0 >= 0 && c1 >= 0) { if (c2 >= 0)
+ *     goto done; }`, the same with the inner test inverted over a `goto
+ *     chain;`, `((c0 >= 0 && c1 >= 0) ? c2 >= 0 : 0)`, `(c0 < 0 ? 0 : (c1 >= 0
+ *     && c2 >= 0))`, `(c0 >= 0 ? (c1 >= 0 && c2 >= 0) : 0)` and explicit
+ *     `((c0 >= 0 && c1 >= 0) && c2 >= 0)`. The ternaries are worth recording
+ *     separately: `do_jump`'s COND_EXPR case is the one place that hands both
+ *     labels down, which would give the target's shape, and `fold` collapses
+ *     `A ? B : 0` to `A && B` before `do_jump` ever sees it.
+ *     Second, the lever has to be something that makes reorg's steal
+ *     unprofitable or unavailable at `done`, and the `done` block is three
+ *     statements long. Measured there: hoisting the fourth argument into the
+ *     dead `v` local is 35 rows, splitting `pos->vz = f(...)` into a local and
+ *     a store is exactly inert.
+ *
+ *   - `tools/width_sweep.py`: **105 variants over 21 scalar locals, nothing
+ *     below 6 and nothing shorter than exact.** The three `triN` are inert as
+ *     s16/s32/u32 and cost a row as `u8`; every `s32 -> u32` is inert. That
+ *     dimension is closed at this baseline. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
