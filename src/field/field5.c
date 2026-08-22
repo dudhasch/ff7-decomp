@@ -2705,99 +2705,96 @@ extern u8 D_800E1036[];
  * switch is the jump table at .rodata+0x3D8; the default arm maps digits,
  * upper case and lower case by three additive ranges.
  *
- * 94 changed / 6 inserted, from a raw m2c seed that did not compile. What is
- * settled, each measured against the alternative:
+ * **66 changed / 0 inserted, at the exact 191, and `insn_histogram.py` reports
+ * the opcode table *identical*** -- every remaining row is register naming
+ * cascading off two hoist placements, stated as loop.c arithmetic at the end.
+ * Down from 96 rows on three changes, of which the first is the whole story.
  *
- *   - `x` and `y` are `s32`, not `s16`: the target copies a3 with a plain
- *     `move` and never sign-extends it.
- *   - the 8-byte frame holds a local nothing names. `s32 unusedLocal` and
- *     `u8 unusedLocals[1]` are both optimised away and give no frame at all;
- *     `u8 unusedLocals[4]` is the smallest that reserves the slot, and [8]
- *     and `s32[2]` give the same 8 bytes.
- *   - the default arm's two range tests read a `u8` local and the three
- *     additions re-read `*str`. Written with `*str` in the tests as well,
- *     cse folds all five reads into one and the arm is 16 rows out: a QImode
- *     pseudo costs an `andi` to widen, which ties `lbu` on cost, so cse keeps
- *     the load -- but only when the tested value is a *variable*.
- *   - the two u0/v0 index expressions are spelled
- *     `g_FieldDebugRChars * 0x10 + g_FieldDebugRb * 0x1580`, i.e. with the
- *     operands in the *opposite* order to the emitted code. fold swaps them,
- *     and writing them the way the target reads costs 35 rows.
- *   - `rb` and `chars` are locals read once, and the OT slot is
- *     `&D_800E41C8[rb][page]`. Reading the globals again after the clut store
- *     costs two reloads: that store is `(plus (symbol) (reg))`, an unknown
- *     offset from a symbol, which cse cannot disambiguate from a scalar
- *     global. `g_FieldDebugRChars = chars + 1` for the same reason -- `++`
- *     after the clut store reloads with `lhu`.
- *   - the clut goes through its own symbol `D_800E1036` (= D_800E1028 + 0xE).
- *     Reached as `&D_800E1028[0xE] + idx` cse relates the two and hoists a
- *     second base out of the loop; `sprite->clut` gives `sh 0xE(a2)`, which
- *     is a third wrong answer.
+ * Settled, each measured against every alternative that was tried:
  *
- * The residue is two constants and two hoisting placements, and the register
- * naming cascades off them:
+ *   - **`addPrim`'s second argument is a separate address computation, built
+ *     offset-first as an integer sum**, and *not* the `sprite` pointer:
+ *     `(u8*)(charOff + (s32)D_800E1028 + rbOff)`. The macro uses the pointer
+ *     twice, as an address for `setaddr(p, ...)` and as a *value* for
+ *     `setaddr(ot, p)`, and the target computes the two differently --
+ *     `a2 = (rbOff + charOff) + base` for the stores, `a1 = rbOff + (charOff +
+ *     base)` for the value. Written as `&D_800E1028[rbOff + charOff]` the two
+ *     are one expression, cse shares them, and the target's two extra `addu`
+ *     have nowhere to come from. **96 -> 63 rows.** Measured: the
+ *     `&(D_800E1028 + charOff)[rbOff]` subscript form is identical at 63;
+ *     `(u8*)(rbOff + (charOff + (s32)D_800E1028))` and
+ *     `(u8*)(rbOff + ((s32)D_800E1028 + charOff))` are both 81.
+ *   - **`charOff` is `s32`.** The note this replaces landed `s16` because it
+ *     reached the exact length on the *old* body; with the addPrim change it
+ *     is +1 instruction, the `sll 20`/`sra 16` pair that a plain `sll 4`
+ *     replaces. `width_sweep.py` re-run after every change now plateaus at 66
+ *     over all 35 variants, and only `ch u32`, `charOff u32`, `chars u32`,
+ *     `off u32`, `rb s16`/`u32` and `rbOff u32` hold both the rows and the
+ *     length -- i.e. the widths are closed and none of them is the residue.
+ *   - **`page * 378` is written inline at the colour lookup**, not taken from
+ *     the `off` local. With `off` the `%hi/%lo(D_800E08A8)` movable wins a
+ *     *callee-saved* register, which is `sw s0` in the prologue and `lw s0` in
+ *     the epilogue plus a nop: **63 rows but +3 instructions**. Inline it is
+ *     66 and exact, and the length is the arbiter (a row count only compares
+ *     between bodies of the same length).
  *
- *   - `addiu v1,v1,0x80` where the target has `-0x80`, twice. combine's
- *     force_to_mode masks the addend against the QImode store, turning -128
- *     into +128. Measured and inert: `(s8)` cast on the expression, `s32`
- *     glyph (which also turns the `srl` into `sra` and is wrong), `s16` and
- *     `s32` temporaries for the two values (both much worse).
- *   - `page * 378` is only half hoisted: gcc lifts the `*3` subexpression
- *     into the preheader and leaves `*63` and `*2` at the loop top, where the
- *     target has all five insns in the preheader. Computing `off` before the
- *     `while` puts them there but costs 8 extra instructions elsewhere;
- *     inlining `page * 378` at the three use sites costs 5.
- *   - `%hi/%lo(D_800E08A8)` is hoisted here and is not in the target, which
- *     rebuilds it in the loop and adds `off` before `row`. Both subscript and
- *     pointer-arithmetic spellings measure identically, and an index local is
- *     6 rows worse.
+ * Everything below was measured against the finished body above, and each
+ * sweep varied exactly one dimension with the other two held at the values
+ * that landed. Re-derive them if any of the three changes moves.
  *
- * Also measured and rejected: a guarded `do`/`while` (the shape m2c prints)
- * at +29 instructions, the whole guard written as a `&&` chain in the `while`
- * condition at +3, `g_FieldDebugRChars++` before the sprite stores at +8, and
- * `addPrim`'s second argument spelled `D_800E1028 + charOff + rbOff` to force
- * the target's second address computation -- which does reproduce it but
- * costs more than the two insns it buys.
+ *   - *address spelling of the colour lookup*, seven forms -- subscript,
+ *     pointer arithmetic, `(s32)` integer sum with the base first, in the
+ *     middle and last, and `(page * 378 + row) + (s32)D_800E08A8`. The result
+ *     is binary and nothing sits between the two values: every form written
+ *     with the `off` local is 63/+3, every form with `page * 378` inline is
+ *     66/exact. The spelling does not reach the hoist.
+ *   - *naming the colour index or the colour pointer*, at the top of the loop
+ *     body and immediately above the store: `idx = off + row` 86/+6 and 95/+5,
+ *     `colors = D_800E08A8 + off` 88/+10 and 94/+7. All far worse.
+ *   - *loop shape*: `while (*str != 0)`, `for (;;)` with a leading `break`,
+ *     the two guards as `goto done`, and the two guards as `return` are
+ *     **exactly 66, all four**. `off = page * 378;` hoisted above the loop is
+ *     68/+8. Loop shape is not a lever here, which is worth knowing because it
+ *     is the obvious explanation for a hoist that fires in one body and not
+ *     the other.
+ *   - *`addPrim` written out by hand as two `setaddr`s*, with the
+ *     `g_FieldDebugRChars` store between the halves, with `x += 8` between
+ *     them, with both, and with the store moved after the call: **exactly 66
+ *     in every arrangement**, and the plain expansion with nothing moved is
+ *     also exactly 66 -- so the expansion itself is inert and statement order
+ *     inside it buys nothing.
  *
- * **100 rows / -1 instruction -> 96 changed / 0 inserted, at the exact 191.**
- * Two local widths, found by `tools/width_sweep.py` and neither of them in
- * the list above -- which measured `glyph` only as `s32` and never swept
- * `charOff` at all.
+ * The residue is two `move_movables` decisions, and cc1 prints both. Dump it
+ * with `-dL` (see CLAUDE.md; write the dump to a container path or it comes
+ * out 0 bytes) and the loop's header reads `Loop from 22 to 524: 185 real
+ * insns`, then one line per movable. A movable is hoisted iff
+ * `threshold * savings * life >= insn_count`:
  *
- *   - **`charOff` is `s16`, not `s32`**, and that is the length: 100/-1 ->
- *     98 and exact. `chars` is capped at 0x158 by the guard above, so
- *     `charOff = chars * 0x10` is at most 0x1570 and an `s16` holds it. The
- *     `s8`/`u8` variants score identically and are a different program.
- *   - **`glyph` is `s16`, not `u32`.** 98 -> 96, with the opcode histogram
- *     unchanged, so this one is alignment rather than a real instruction. The
- *     note above rejects `s32` glyph for turning the `srl` into an `sra`; the
- *     `sra +1` in the histogram is present at every width including the
- *     original `u32`, so it is not this. Every assignment is a constant
- *     <= 0xDA or `*str + 0x73` with `*str` a `u8`, i.e. at most 0x172 and
- *     always positive, so the signed shift is the same value.
+ *   - `(set (reg) (const_int 16777215))` -- the 0x00FFFFFF half of `setaddr`'s
+ *     bitfield read-modify-write -- is `life 10, savings 1, not desirable`.
+ *     The target hoists it: `lui t4,0xff / ori t4,t4,0xffff` is the last pair
+ *     in its preheader and we materialise it inside the loop.
+ *   - `(set (reg) (symbol_ref "D_800E08A8"))` is `life 8, savings 2, moved`,
+ *     and drags the two `plus` insns after it (`cond forces`). The target does
+ *     the opposite -- `lui/addiu/addu/addu` inside the loop, every iteration.
  *
- * The sweep has to be re-run after each change and that is the whole method
- * here: `charOff` only became visible once nothing else moved, and `glyph`
- * only after `charOff` landed. After both, all 35 variants plateau at 96.
+ * Every other movable in the list agrees with the target. The moved/not-moved
+ * pairs bound the threshold: savings 2 x life 8 is moved and savings 1 x life
+ * 12 is not, so **11.6 <= threshold < 15.5**. That prices both fixes exactly.
+ * The mask needs `life >= 13` (and at most 16); putting the
+ * `g_FieldDebugRChars` store between the two `setaddr` halves raises it from
+ * 10 to 12 -- measured in a second `-dL` dump -- and there is nothing else
+ * left in the loop body to put there. The symbol needs `life <= 7` (and at
+ * least 5) against its current 8, which means its load has to be emitted
+ * *after* the `page * 378` recomputation that feeds the same address, and no
+ * association of the sum moves it there: expand emits the sign-extension of
+ * `row`, then the symbol, then the multiply, whichever way the operands are
+ * written.
  *
- * `insn_histogram.py` states the remainder exactly and it is worth having
- * written down, because it is two facts rather than a hundred rows: every
- * opcode count matches except **addu 22 against 24** and **nop 13 against 12**,
- * so the body needs two more `addu` and one fewer `nop` and nothing else. The
- * `%hi` table is clean apart from our jump table being a local `.rodata`
- * label where the target names `jtbl_800A12E8`, which `checkfn` aliases.
- *
- * Still two `addu` short with one extra `sra` and one extra `nop`.
- * The obvious candidate for the two `addu` -- `*(D_800E08A8 + off + row)`,
- * where the target adds `off + row` first and the base last -- is not it.
- * CLAUDE.md's `n + (s32)p` lever does not apply when both addends are plain
- * `s32` locals and the base is an array symbol: `off + row + (s32)D_800E08A8`,
- * `(off + row) + (s32)D_800E08A8` and `row + off + (s32)D_800E08A8` are all
- * *exactly* inert at 100 rows and still -1. And `off = page * 378;` lifted
- * above the `while` -- which the note above says puts all five insns of the
- * multiply in the preheader -- is 103 rows and still -1, so the hoisting
- * placement is not the length either (it moves five insns, it does not
- * create any). Codegen pinned via MASPSX_OVERRIDE. */
+ * So both halves are threshold misses of one to four insns of lifetime in
+ * loop.c, in opposite directions, and neither term is reachable from C without
+ * emitting an instruction -- which by CLAUDE.md's own rule makes this a park
+ * rather than a permuter target. Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderString);
 #else
@@ -2806,7 +2803,7 @@ void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
     s32 rb;
     s32 chars;
     s32 rbOff;
-    s16 charOff;
+    s32 charOff;
     s16 glyph;
     u8 ch;
     SPRT_16* sprite;
@@ -2884,9 +2881,10 @@ void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y) {
         sprite->x0 = x;
         sprite->y0 = y;
         *(u16*)(D_800E1036 + rbOff + charOff) =
-            D_800E4200[*(D_800E08A8 + off + row)];
+            D_800E4200[*(D_800E08A8 + page * 378 + row)];
         g_FieldDebugRChars = chars + 1;
-        addPrim(&D_800E41C8[rb][page], &D_800E1028[rbOff + charOff]);
+        addPrim(
+            &D_800E41C8[rb][page], (u8*)(charOff + (s32)D_800E1028 + rbOff));
         x += 8;
     }
 }
