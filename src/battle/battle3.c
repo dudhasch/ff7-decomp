@@ -927,8 +927,45 @@ static void func_800E5358(void) {
     }
 }
 
-void func_800E53C8();
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E53C8);
+// Called from func_800E0274 with no argument at all, so arg0 is whatever the
+// caller happened to leave in $a0 unless the switch below overwrites it.
+void func_800E53C8(s32 arg0) {
+    s32 i;
+    u8* p;
+
+    for (i = 6, p = &D_800F33A0[6]; i >= 0; i--, p--) {
+        *p = 0;
+    }
+    D_800F5760 = 10;
+    D_800F5764 = 2;
+    D_800F33AA = 0;
+    switch (D_8009C84E) {
+    case 1:
+        arg0 = 3;
+        break;
+    case 2:
+        arg0 = 6;
+        break;
+    case 3:
+        arg0 = 9;
+        break;
+    case 4:
+        arg0 = 10;
+        break;
+    }
+    D_800F5774 = 0;
+    for (i = 0; i < arg0; i++) {
+        // Both halves are load-bearing: the `&` gives the address its own
+        // pseudo (hoisted into the loop preheader as lui/addiu) and the
+        // `volatile` keeps cse from folding it back into the mem.  Declaring
+        // the global volatile instead, or taking the address without
+        // volatile, each measures 6 rows and one instruction short.
+        if (((s32)(*(volatile u16*)&D_8009C862) >> i) & 1) {
+            D_80163B70[D_800F5774] = i;
+            D_800F5774++;
+        }
+    }
+}
 
 s32 func_800E54EC(void) {
     if (D_800F33A0[0] == 0) {
