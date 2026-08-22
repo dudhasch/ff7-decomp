@@ -1999,6 +1999,24 @@ a near-miss, in rough order of frequency:
   the counter at an offset that was wrong at every width. Read the target's
   opcode at the slot (`lhu` means `u16`, `lh` means `s16`) rather than
   ranking widths by rows.
+* **A memory-resident value loaded into a *high* caller-saved register is a
+  reload, not an allocation, and that distinction decides whether the residue
+  is reachable at all.** `init_reload` fills `potential_reload_regs` from
+  `REG_ALLOC_ORDER` **reversed**, so reload hands out spill registers from
+  `$t9` downwards while `local_alloc`/`global_alloc` hand out `$v0`, `$v1`,
+  `$a0`… upwards. A `lw $t7,0x38(sp)` in the target against your
+  `lw $v0,0x38(sp)` at the same slot therefore does not mean the allocator
+  ranked something differently — it means that in the original the pseudo got
+  no hard register at all and reload materialised the value, where in your
+  build it is an ordinary allocated pseudo. Nothing written at the *access*
+  can change that: on `LoadLocalFieldModelAndInitAll` in `src/field/field2.c`
+  four spellings of the address (`&models[i]`, the integer sum, the sum at
+  only one of the two reads, and a named record pointer) are **all exactly 5
+  rows at the exact length**. The lever has to be register *pressure* at that
+  point, which is a fact about what else is live, not about the expression.
+  Read the neighbours before spending anything: if the same load elsewhere in
+  the function already matches (loop 1's `lw $t5,0x38(sp)` does), the
+  construct is right and only the local pressure is wrong.
 * **A frame that is larger than your code needs, with the extra between the
   outgoing-argument area and the register saves, is a local you cannot see.**
   gcc's `expand_decl` gives every aggregate local a stack slot whether or not

@@ -321,7 +321,15 @@ typedef struct {
  * `80 preferences: 5` is the concrete lever nobody has pulled: that copy
  * preference is what pins `num` to $a1 ahead of its conflict set, and
  * finding where `global_conflicts` records it -- and what in the source
- * feeds it -- is the next pass's first job. */
+ * feeds it -- is the next pass's first job.
+ *
+ * **This note is live, not stale.** Two of its entries were re-measured
+ * against the current pin before anything else was spent: the shared dot-
+ * product local is 52 and the per-arm pair is 25, to the row. Both histogram
+ * tables are `(identical)` at the exact 137 with 0 insertions and 0
+ * deletions, which is the strongest form of the pure-permutation verdict --
+ * so the open question really is the pseudo structure and specifically that
+ * copy preference, and not any spelling of the arithmetic. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
@@ -2869,7 +2877,34 @@ extern s16 D_801144CC;
  *   - `tools/width_sweep.py`: **105 variants over 21 scalar locals, nothing
  *     below 6 and nothing shorter than exact.** The three `triN` are inert as
  *     s16/s32/u32 and cost a row as `u8`; every `s32 -> u32` is inert. That
- *     dimension is closed at this baseline. */
+ *     dimension is closed at this baseline.
+ *
+ * The six rows are two clusters and both now have a mechanism rather than a
+ * count. `insn_histogram` reads `ori +2 / addiu -2` and
+ * `bltz +1 / bgez -1 / addu +1 / nop -1`, at the exact 291 with both `%hi`
+ * tables identical.
+ *
+ *   - **The `ori`/`addiu` pair is the second-use question and the second use
+ *     cannot come from a subscript.** CLAUDE.md's rule is right -- combine
+ *     rewrites `PLUS` to `IOR` only when it can *merge*, so an address with two
+ *     uses survives as `addiu` -- but on MIPS a subscript never materialises
+ *     the address at all: `e1[0]` is `lw <r>,0x10(s0)`, a displacement off the
+ *     base, so routing the cross-product reads through a named
+ *     `s32* e1 = scratch + 4;` adds no use and is **exactly inert**. Measured:
+ *     both pointers with the reads through them, either one alone, the
+ *     pointers named but the reads left on `scratch`, and the declarations at
+ *     the head or the tail of the local list -- all 6 rows. `&scratch[4]` for
+ *     the call argument is inert too (an ARRAY_REF folds to the same PLUS).
+ *     And the address is not a separate constant either: writing the two call
+ *     arguments as `(s32*)0x1F800010` / `(s32*)0x1F800020` costs **+1
+ *     instruction each** (a second `lui`) and 21-22 rows. So the second use has
+ *     to be something that needs the address in a *register* twice -- a second
+ *     call in the same basic block, or a store through a variable index off it
+ *     -- and there is no such thing in this block to spell.
+ *   - The other four rows are the reorg branch inversion CLAUDE.md already
+ *     records for this function (correct at `.sched2`, inverted at `.dbr`),
+ *     plus the `move a0,s0` our build puts in the resulting `j`'s delay slot
+ *     and the target does not. Not reachable from C. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
@@ -5198,7 +5233,37 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  * (45 variants over 9 scalar locals -- nothing beats s32/u32 anywhere).
  * Raising `modelIndex`'s loop weight with one or two `do { } while (0);`
  * around its assignment is 13, so more references on it is the wrong
- * direction; walking a `mw` cursor instead of indexing is 59. */
+ * direction; walking a `mw` cursor instead of indexing is 59.
+ *
+ * **The address expression in that loop is closed by mechanism, not by
+ * exhaustion.** Four spellings of `&models[i]` -- the plain subscript, the
+ * integer sum `((FieldModelLoaderData*)(i * 8 + (s32)models))` at both reads,
+ * the same at only the second read (the "one record reached two ways" shape),
+ * and a named `mp = &models[i];` inside the guard -- are **all exactly 5 rows
+ * at the exact length**. CLAUDE.md's operand-order and ARRAY_REF-versus-PLUS
+ * levers therefore do not reach this residue, and neither does anything else
+ * written at the two `models[i]` sites.
+ *
+ * And the memory residence is load-bearing, which is worth knowing before
+ * anyone "tidies" the never-dereferenced `pmodels`: deleting the declaration
+ * and its assignment is **62 rows and -3 instructions**, i.e. `models` wins a
+ * register and the three `lw` of it disappear. Reading loop 3 through the
+ * pointer instead (`(*pmodels)[i]`) is 60 rows and +4.
+ *
+ * What the five rows actually are, read off the target rather than off the
+ * diff: `models` lives at `0x38(sp)` and is loaded **twice**, once per loop,
+ * and both target loads land in *high* caller-saved registers --
+ * `lw t5,0x38(sp)` in loop 1 and `lw t7,0x38(sp)` in loop 3. Loop 1's `t5`
+ * already matches; only loop 3's does not, where this body allocates `$v0`.
+ * A high caller-saved register is what `reload` hands out (its
+ * `potential_reload_regs` is `REG_ALLOC_ORDER` **reversed**, so spills come
+ * from `$t9` downwards), so the target's loop-3 load is a *reload* of a pseudo
+ * global_alloc could not place, where ours is an ordinary allocated pseudo.
+ * That reframes the residue: it is not which register the address expression
+ * gets, it is that in the original that pseudo does not get one at all. The
+ * lever therefore has to be loop-3 register *pressure* -- something live
+ * across the loop head that this body does not have -- and not anything
+ * written at the access itself. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
@@ -6358,6 +6423,56 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * loop notes?** None is known -- loop notes are the only source of depth and
  * gcc treats them as a scheduling barrier -- so unless one turns up, this
  * function is finished at 1 row and the last row is not reachable from C.
+ *
+ * **The paragraph above states the wall in the wrong place, and the block cut
+ * is not it.** The cut is payable: write `d = data;` *before* the store and
+ * the deep-nest body reproduces the target's block 0
+ * (`move t1,a0 / move a3,zero / move t0,a1 / sb`) register for register, with
+ * every register in the whole function correct at the exact 123 instructions.
+ * Two shapes reach it, both **1 row**:
+ *   - triple nest on the first reset, then `d = data;`, then the store
+ *     (`fms_w2_x3`);
+ *   - four nests on the reset with `d = data;` at depth 2 inside the outermost
+ *     wrapper and the store outside it (`fms_q2`).
+ * The nest depth is a straight reading of the arithmetic and it is tight: at
+ * depth 4 `i` is 17 refs (4*17/99 = 0.687) against `d` at 16 (4*16/97 = 0.660)
+ * and `i` wins; one level shallower `d` wins outright and the body is 18 rows.
+ * `fms_q1`/`q3`/`q4` -- the same nest with `d = data` one level in, or with the
+ * store pulled inside the wrapper -- are all 18, because `d` picks the depth up
+ * too.
+ *
+ * So the residue is **one instruction and it is cse, not the allocator**: the
+ * target stores `sb zero,0(a1)` through the *parameter* and we emit
+ * `sb zero,0(t0)` through the copy. Once `d = data;` precedes it, cse
+ * canonicalises the store's base register to `d` -- which also hands `d` the
+ * 16th reference the arithmetic above is fighting. Six spellings of the store
+ * were measured against that and every one is the same 1 row:
+ * `data->modelCount = 0`, `*(u8*)data = 0`, `*(u8*)&data->modelCount = 0`,
+ * `data[0].modelCount = 0`, an empty `do { } while (0);` between the copy and
+ * the store, and `models = desc->models;` between them.
+ * `*(volatile u8*)data = 0` does defeat the rewrite and costs 4 rows elsewhere.
+ *
+ * That is the same two-hats shape as before, one level out: the store must
+ * follow the copy to get the emission order, and it must precede it to keep the
+ * parameter's register. The remaining question is therefore sharper and is
+ * about one pass -- **what source shape stops cse rewriting a store's base
+ * register to a copy made just above it?** -- rather than about loop_depth.
+ *
+ * The route that leaves block 0 alone is closed at 3 rows and the residue there
+ * is scheduling, not allocation. A double nest on the *second* reset
+ * (`fms_w1_r2`) is 3 rows: the loop notes pin `d->unk2 = 0` first in the new
+ * block where the target hoists the `lbu v1,0(t0)` of `d->modelCount` into
+ * position 2 and covers its load-delay slot with the `addiu v0,t0,0xc`. Five
+ * middle-block statement orders were swept under that nest (`next` first, `
+ next`
+ * last, `modelEntries` first, and two more) and the floor is the same 3; moving
+ * `next` to the head is 6.
+ *
+ * And the loops are closed by length rather than by rows: every wrap inside
+ * loop 2 costs **+1 instruction** -- around `boneCount`/`partCount` as two
+ * wraps or as one (25 rows, 124 insns) and around the `next +=` statement
+ * (22 rows, 124) -- so no reference taken from inside a loop can be landed
+ * whatever it scores.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
