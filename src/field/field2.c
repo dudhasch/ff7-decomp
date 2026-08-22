@@ -2543,7 +2543,43 @@ extern s16 D_801144CC;
  * destinations and three shapes of the `done:` block enumerates **108
  * candidates**; every one scored 800 and the run terminated on its own. So
  * the two groups are inert not only individually but crossed, which is what
- * the single-lever sweeps above could not establish. */
+ * the single-lever sweeps above could not establish.
+ *
+ * Unlike the other two parked bodies in this unit, this one is *not* pure
+ * register naming and `insn_histogram.py` says so: at the exact 291 the
+ * opcode table reads `ori +2 / addiu -2` (group one) and `bgez -1 / bltz +1`
+ * plus `addu +1 / nop -1` (group two), with the `%hi` table identical. Both
+ * groups are therefore a spelling or a declaration in principle. Two more
+ * dimensions have now been closed, and both were dimensions the sweeps above
+ * held fixed rather than varied:
+ *
+ *   - **The guard's *structure*, not just its condition.** `do_jump` passes
+ *     `if_true_label`/`if_false_label` down a `TRUTH_ANDIF`, and the target's
+ *     `bgez -> done` / `j <chain>` with both delay slots empty is the shape
+ *     you get when the last comparison has *both* labels non-null -- which
+ *     `jumpifnot` cannot produce and a negated guard whose body is the chain
+ *     can. So the predicted source is `if (!(c0 >= 0 && c1 >= 0 && c2 >= 0))
+ *     { <the chain> }` with the tail falling through and **no `done:` label at
+ *     all**. Measured: byte-identical to the `goto done` body, 6 rows. So are
+ *     the `||` spelling of that structure, the `!(a) || !(b) || !(c)` one, and
+ *     a `goto chain; goto done; chain:` inversion that keeps the label.
+ *     `jump_optimize` normalises block layout across all five, so the
+ *     structure is as inert as the condition and the polarity is decided
+ *     after the front end.
+ *   - **The base's provenance, not the address expression.** Group one is
+ *     combine turning `(plus scratch 0x10)` into `(ior ...)` once
+ *     `nonzero_bits` proves the low bits clear, so the lever ought to be
+ *     making `scratch`'s value unprovable rather than respelling the address
+ *     (which fold normalises -- eight spellings, above). It is not: a second
+ *     `scratch = (s32*)0x1F800000;` at the loop top is +9 instructions, one at
+ *     `done:` is +2 and **still emits `ori` at both `FieldEntityVectorSub`
+ *     calls**, and a separate pointer copied from `scratch` for the `done`
+ *     block is exactly inert. combine unions the `nonzero_bits` of *all* sets
+ *     of a pseudo, so two identical sets teach it nothing -- which is the
+ *     mechanism, and it means no number of assignments will reach this. The
+ *     target emits `addiu` in the loop and `ori` at `done` off the same `$s0`,
+ *     so whatever decides is per-block state inside combine or cse and has no
+ *     source-level handle. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
@@ -3932,7 +3968,50 @@ extern u8 D_801144D8; // blink RNG cursor
  * keeps loops 1 and 2 rematerialising 0x1F800000 through the `$at` macro,
  * the same coupling that makes routing those two stores through `faceSel`
  * cost 5 instructions. So `live_length` is unreachable from this end as
- * well, and the 2/3/13 trichotomy stands. */
+ * well, and the 2/3/13 trichotomy stands.
+ *
+ * Two things settle it, and the first is the one to read.
+ *
+ * **The two halves of the fix are the same insn, so they cannot both be
+ * had.** The 13-row shape is not "the right movable order plus an unrelated
+ * allocation accident": adding `blinkOpen = 1;` *above* `blinkClosed = 2;` is
+ * what reverses the movable order, and it does so by putting one insn in
+ * front of `blinkClosed`'s def -- which shortens `blinkClosed`'s live range by
+ * exactly one insn. Its priority is `2*5/84 = 1190` against `faceSel`'s
+ * `4*19/644 = 1180`, a 0.8% gap, so one insn of live range is precisely the
+ * margin. The order lever *is* the swap lever. That is why every attempt to
+ * fix the swap while keeping the order has failed and will: it is not two
+ * problems, it is one insn wearing two hats.
+ *
+ * **The residue is allocation, not scheduling, and that is now measured
+ * rather than argued.** CLAUDE.md's free test -- a `do { } while (0);`, which
+ * emits nothing and can only end a basic block -- is *exactly inert* on the
+ * 13-row body both immediately below the loop-top assignments and below the
+ * two guards (13 either way). So every barrier, statement reordering and
+ * re-spelling still untried in that loop is inert too, and the only live
+ * question is the priority. Below the guards it is 79 rows and -1 insn,
+ * which is the hoist being lost, not scheduling.
+ *
+ * Also measured against the current body and all dead:
+ *   - `blinkClosed = 2;` moved below the first `continue`, below both, or
+ *     into the `KawaiA == 0` arm: **55 rows and -3 instructions** in all
+ *     three. The loop-top position is what makes the 2 a movable at all, so
+ *     the insn that costs the swap is not optional.
+ *   - `faceSel = (u8*)0x1F800000;` moved *one* or *two* statements down at
+ *     function scope (the note above only ever tried it next to loop 4):
+ *     exactly inert, 2 rows on the base body and 13 on the 13-row one. Three
+ *     statements down -- below `models = ...` -- is 54 rows and +1 insn.
+ *     `live_length` does not respond to small moves either.
+ *   - arm A's stores reordered to `[0], [2], [3], [1]`, so `blinkClosed`'s
+ *     last use is two insns later: **byte-identical to 13**. The note above
+ *     rejected stretching that range with a dead *assignment* (flow deletes
+ *     it); this stretches it with a real *use* and it still does not move,
+ *     which is the stronger negative and closes the `live_length` side.
+ *   - one or both of loop 1's `*(s32*)0x1F800000 = 3;` through `faceSel`, on
+ *     the 13-row body: 31 rows / -1 insn, 44 / +1, and 27 / 5 insertions.
+ *     Raising `n_refs` always emits something, as the note above found.
+ * The 2/3/13 trichotomy stands, and it now has a mechanism rather than a
+ * list. Park it. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
@@ -5805,6 +5884,48 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * the reference, but here it survives to the object: `if (i < desc->count)
  * { i += 1; } else { i += 1; }` is 15 rows and **+2 instructions**, and the
  * `npcFlag` variant of it 9 rows and **+1**.
+ *
+ * The residue is now **provably** nothing but register naming, which is a
+ * stronger statement than a row count can make and costs one command:
+ * `insn_histogram.py src/field/field2.c FieldModelStructInit` returns
+ * `(identical)` for *both* tables -- every opcode in the same quantity, every
+ * `%hi` materialisation against the same address -- at the exact 123
+ * instructions. (It did not always: the tool folded objdump's `li` to `ori`
+ * by name, so this function's `kawaiType = -1`, which GAS spells
+ * `addiu $v0,$zero,-1`, read as a convincing `ori +1 / addiu -1` column that
+ * does not exist. Fixed in the same change as this paragraph; fold by the
+ * encoding, never by the mnemonic.)
+ *
+ * Every earlier sweep here varied *which pointer names each site* with the
+ * variable set held at {d, data}. That set was itself swept, 20 variants over
+ * six independent levers crossed pairwise, and it is closed too. Rows, all at
+ * the exact length unless noted:
+ *   - the second `i = 0` moved below the middle block: **1, byte-identical**
+ *     on this body, and **17** crossed with the `d->modelCount` read -- so
+ *     `i`'s live range simply does not move. gcc places that reset in loop 1's
+ *     exit block either way (the target has `addu $a3,$zero,$zero` there, and
+ *     the loop guard branches *past* it), so the source position is inert and
+ *     the -9 insns the arithmetic asks for are not available from this end.
+ *   - the first `i = 0` moved inside loop 1's guard: 7 alone, 19 crossed.
+ *   - no `models` local, `desc->models[i]` written out at all 14 sites: **33**
+ *     alone, 48 crossed. `models` is a source variable; that is settled.
+ *   - a `de = desc` copy carrying `count` and `models`: 4 alone, 18 crossed.
+ *     The target's `addu $t1,$a0,$zero` is the `desc` parameter's own pseudo
+ *     landing in `$t1`, not a second variable.
+ *   - `d = data;` as the very first statement: 17 alone, and **14** crossed
+ *     with the `d->modelCount` read -- the best body containing the required
+ *     change, and it is not a near miss but a complete `$t0`/`$a1` exchange:
+ *     `d` takes the parameter's own register and `data`/`next` take `$t0`, so
+ *     all fourteen rows are the same swap seen at fourteen sites. That is the
+ *     copy preference (`d = data` makes `d` prefer `data`'s register), not the
+ *     ranking, and it is a third register-naming dead end rather than a lever.
+ *   - width sweep: 10 variants over both scalar locals. `partsOff` is inert at
+ *     s32/u16/u32 and costs an instruction at u8/s8; `i` is 3 rows at s32 and
+ *     63-68 rows and +8/+12 instructions at every narrow width. `u32 i` is
+ *     right and nothing else is.
+ * Do not re-open this one on a spelling. The next thing that could move it is
+ * a fact about `find_reg`'s conflict set rather than about `allocno_compare`'s
+ * ranking, and the `.s` cannot show that.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);

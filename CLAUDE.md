@@ -412,6 +412,23 @@ a near-miss, in rough order of frequency:
   an early `return`, `beq` means an `if` wrapping everything. Duplicated tail
   statements after such a guard are fine; cross-jumping merges them, which is
   what the target's shared `j` into the common epilogue already shows.
+* **But a `&&` guard over a `goto` is *not* one of those: its polarity is
+  fixed after the front end, and reasoning from `do_jump` will send you to
+  five byte-identical bodies.** `do_jump` threads an `if_true_label` and an
+  `if_false_label` through `TRUTH_ANDIF`, and the shape a target with
+  `bgez <fast> / j <slow>` and both delay slots empty appears to want — the
+  last comparison emitted with *both* labels non-null — is reachable in theory
+  only from a negated guard whose body is the slow path, with no label at all
+  on the fast one. It is not reachable in practice: on
+  `FieldEntityWalkmechCross` the `goto done` form, `!(a >= 0 && b >= 0 &&
+  c >= 0)` with the chain as the if-body and no `done:`, the `a < 0 || b < 0
+  || c < 0` form of the same structure, `!(a) || !(b) || !(c)`, and a
+  `goto chain; goto done; chain:` inversion are **all byte-identical**.
+  `jump_optimize` normalises block layout across every one of them, so the
+  guard's *structure* is exactly as inert as this file already records its
+  *condition* to be. The `OpcodeFuncLader` bullet above is about a `switch`
+  default's block order, which `expand_end_case` fixes at expand time; do not
+  generalise it to an ordinary conditional.
 * **A loop bound as `s16` buys a `move` that `u16` folds away.** For
   `for (i = 0; i < count; i++)` with `count` assigned from a `lbu` plus a
   constant, gcc knows the value is small and non-negative, so the widening to
@@ -2029,6 +2046,18 @@ a near-miss, in rough order of frequency:
   park note already names. Fixed in 7e68f5f; the `.s` side needs no folding at
   all.
 
+  Two sessions hit this independently and in opposite units, which is how much
+  it costs: `FieldModelStructInit` read the same way at the exact length with
+  *one* row differing — precisely the shape the table exists to adjudicate —
+  and the invented column said "findable spelling" where the truth is
+  "register naming, park it". The fix decodes the primary-opcode and funct
+  fields out of the 32-bit word, which cannot drift, and the same trap is
+  latent in every name-keyed fold (`move` is `addu` *or* `or`, `b` is `beq`).
+  Stated generally, because it is the same bug as counting `%hi` per name one
+  table over: **a tool that normalises two sides of a comparison must
+  normalise on something the *assembler* decided, not on something the
+  *disassembler* chose to print.**
+
   **The check that catches both without knowing either: add the columns up.**
   A naming or folding artifact moves counts between rows and cannot change the
   total, so its rows are complementary and balance. `AddBackgroundToRender`
@@ -2177,6 +2206,26 @@ a near-miss, in rough order of frequency:
   inner loop bodies or all four at once. That second result is worth as much
   as the first: it is what turns "65 rows of register naming" from a guess
   into a finding, and it costs one sweep.
+
+* **Before deciding two residues are two problems, check whether the lever for
+  one is the cause of the other.** `HandleKawaiDataInModel` in
+  `src/field/field2.c` sits 2 rows out on a movable *order* (the target hoists
+  `li 1` before `li 2`), and the one spelling that reverses the order --
+  `blinkOpen = 1;` written above `blinkClosed = 2;` at the loop top -- lands 13
+  rows out on an unrelated-looking *register* swap, `faceSel` and
+  `blinkClosed` trading `$s5`/`$s6`. Three sessions attacked those as
+  independent, sweeping widths, declaration positions, reference counts and
+  pointer placements against each. They are one insn: `move_movables` records
+  in insn order, so reversing the order requires an insn in front of
+  `blinkClosed`'s def, and that insn shortens `blinkClosed`'s live range by
+  exactly one -- which is exactly the margin, since its priority is
+  `2*5/84 = 1190` against `faceSel`'s `4*19/644 = 1180`, a 0.8% gap. Any fix
+  for the order re-creates the swap by construction. The tell is a pair of
+  residues where each lever's *side effect* is the other's cause; work out the
+  arithmetic once and you save the whole cross-product. And note which way it
+  cuts: this is the counter-case to the paired-levers rule above -- there two
+  changes that each moved the length the wrong way cancelled, here two changes
+  that each fix half are the same change and cannot be added.
 
 * **Do not guess at `n_refs` and `live_length` -- cc1 prints them.** The
   `.lreg` dump names every pseudo with exactly the two numbers
@@ -2950,6 +2999,16 @@ verdict is the one `checkfn.py` would give (same alias discounting, same
 scoping). A variant is described as *edits against a pinned base*, and each
 `old` string must match exactly once or the run aborts, so a typo cannot
 silently score as "no change".
+
+**Name the spec files in one case.** `.variants/` sits on the repo's working
+tree, which on Windows is case-insensitive, so a sweep that tags its variants
+`fms_d` and `fms_D` writes *one* file and scores that lever twice — the
+summary shows the same tag twice with the same number and reads as a
+consistent measurement rather than as a lost one. A 20-variant cross-product
+generated with one letter per lever hit this on the first run of the session
+that wrote this paragraph; the shell glob passed 18 paths and 16 distinct
+variants were scored. Use distinct lowercase tags, or assert the file count
+matches the variant count before believing a sweep.
 
 The spec names its own source and function, so one tool serves the whole
 repo, and several specs given at once are scored concurrently:
