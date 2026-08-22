@@ -2355,14 +2355,67 @@ extern s16 D_801144CC;
  * just as a COMPONENT_REF does, so that spelling is not the non-struct one
  * it looks like).
  *
- * The residue is 34 rows of pure register naming at the exact length. 24 of
- * them are one pair swapping in the three `D_80114458` lookups -- the base
- * pointer and the scaled index trade `$v0`/`$v1`, and `link` trades
- * `$a0`/`$a1` behind them, identically in all three arms. The other rows
- * are the two sibling scratch slots (`addiu a0,s0,%lo(D_1F800010)` against
- * our `ori a0,s0,0x10`, which the old note already established is cse
- * choosing the operator with nothing in the C to steer it) and the arm-2
- * guard polarity. */
+ * **34 rows -> 6 changed / 0 inserted, still at the exact 291.** Both levers
+ * came out of cc1's `-dl` dump rather than out of the diff, and the second
+ * one contradicts this note's own earlier entry.
+ *
+ * Read the numbers first. `global_alloc` ranks by
+ * `(floor_log2(n_refs) * n_refs - live_length) / live_length`, and the three
+ * arms' quantities are printed by the dump: the HImode `link` is 3 refs over
+ * 12 insns (**-0.75**) and its sign-extension is 3 over 6 (**-0.50**), so the
+ * extension is allocated first and takes the lower register. That is our
+ * output, and it is the whole of the `$a0`/`$a1` swap. It also says exactly
+ * what is needed: `link` at 4 refs is `(2*4-12)/12 = -0.33` and wins, and so
+ * does any spelling that brings its live range under 6.
+ *
+ *   - **Nest the guard instead of `&&`.** `if (link >= 0) { shift = link >> 3;
+ *     if (bit == 0) ... }` rather than
+ *     `shift = link >> 3; if (link >= 0 && bit == 0)`. Moving the shift inside
+ *     shortens the extension's range and fixes the *other* pair outright --
+ *     the `D_80114458` base and the scaled index stop trading `$v0`/`$v1` in
+ *     all three arms. 34 -> 22.
+ *   - **One `link` shared by the three arms, not one per arm.** 3 refs become
+ *     9, `floor_log2(9)*9 = 27` clears the extension's -0.50 comfortably, and
+ *     the `$a0`/`$a1` swap goes with it. 22 -> **6**. Sharing `shift` as well
+ *     is exactly inert, so only `link` matters and the minimal change is kept.
+ *
+ * That second lever is the direct inverse of what this note said above --
+ * "one `link`/`shift` pair per arm ... 99 rows -> 86". Both measurements are
+ * real; the per-arm split was worth 13 rows on the body that still had the
+ * flat `&&` guard, and is worth -16 on the nested one. This is CLAUDE.md's
+ * standing warning about stale sweeps, and it cost nothing to re-check.
+ *
+ * The residue is 6 rows in two groups, both re-swept at the new baseline:
+ *
+ *   - **Two rows: `addiu a0,s0,%lo(D_1F800010)` against our `ori a0,s0,0x10`**
+ *     for the two sibling scratch destinations. Same operands, same length;
+ *     gcc folds `PLUS` to `IOR` because it can prove the base's low bits are
+ *     clear. Eight spellings measured inert -- `&scratch[4]`,
+ *     `(s32*)((u8*)scratch + 0x10)`, `(s32*)((VECTOR*)scratch + 1)`,
+ *     `(s32*)(0x10 + (s32)scratch)`, each at both the 34-row and the 6-row
+ *     baseline -- and the absolute constant `(s32*)0x1F800010` is +2
+ *     instructions. fold normalises every address spelling, so the operator
+ *     is not reachable from the expression. Note the target emits **both**
+ *     forms off `$s0` in one function: `addiu` at the two `FieldEntityVectorSub`
+ *     calls and `ori a1,s0,0x10` at the `FieldEntityCalculateZ` call, so
+ *     whatever chooses is per-block and not a property of the declaration.
+ *     `D_1F800010`/`D_1F800020` are splat inventions -- they are in no config
+ *     and appear in four `.s` files in the tree -- so there is no symbol to
+ *     name here.
+ *   - **Four rows: the fast path's last branch polarity.** The target has
+ *     `bgez a0,<done>` falling through to `j <chain>` with both delay slots
+ *     empty; ours has `bltz a0,<chain>` falling through to `j <done+4>`, and
+ *     reorg then steals `done`'s first insn (`move a0,s0`) into that slot and
+ *     retargets the jump -- which is also why the `~>` label at `done` lands
+ *     one instruction later than the target's. One phenomenon, four rows.
+ *     Rejected: all four spellings of the condition (nested `if`s,
+ *     `!(a || b || c)`, two-then-one, `else if`) are *exactly* inert, so fold
+ *     normalises them; duplicating the tail at the fast-path exit is +20
+ *     instructions (cross-jumping does not merge it); a named local for the
+ *     last argument is 35; and `do { } while (0);` in front of `done:` is
+ *     exactly inert, which by CLAUDE.md's own test says this residue is
+ *     allocation rather than sched2 and that further barriers will be inert
+ *     too. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
@@ -2380,9 +2433,7 @@ s32 FieldEntityWalkmechCross(
     s32 shift0;
     s32 shift1;
     s32 shift2;
-    s16 link0;
-    s16 link1;
-    s16 link2;
+    s16 link;
     u16 tri0;
     u16 tri1;
     u16 tri2;
@@ -2432,12 +2483,13 @@ loop:
         goto done;
     }
     if (cross0 < 0) {
-        link0 = D_80114458[*triId * 3];
-        shift0 = link0 >> 3;
-        if (link0 >= 0 &&
-            ((D_8009ACA6[shift0] >> (link0 - shift0 * 8)) & 1) == 0) {
-            *triId = link0;
-            goto loop;
+        link = D_80114458[*triId * 3];
+        if (link >= 0) {
+            shift0 = link >> 3;
+            if (((D_8009ACA6[shift0] >> (link - shift0 * 8)) & 1) == 0) {
+                *triId = link;
+                goto loop;
+            }
         }
         outEdge->vx = scratch[0];
         outEdge->vy = scratch[1];
@@ -2450,12 +2502,13 @@ loop:
         D_801144CC = 0;
         D_80113F28 = tri0;
     } else if (cross1 < 0) {
-        link1 = D_80114458[*triId * 3 + 1];
-        shift1 = link1 >> 3;
-        if (link1 >= 0 &&
-            ((D_8009ACA6[shift1] >> (link1 - shift1 * 8)) & 1) == 0) {
-            *triId = link1;
-            goto loop;
+        link = D_80114458[*triId * 3 + 1];
+        if (link >= 0) {
+            shift1 = link >> 3;
+            if (((D_8009ACA6[shift1] >> (link - shift1 * 8)) & 1) == 0) {
+                *triId = link;
+                goto loop;
+            }
         }
         outEdge->vx = scratch[4];
         outEdge->vy = scratch[5];
@@ -2468,12 +2521,13 @@ loop:
         D_801144CC = 1;
         D_80113F28 = tri1;
     } else if (cross2 < 0) {
-        link2 = D_80114458[*triId * 3 + 2];
-        shift2 = link2 >> 3;
-        if (link2 >= 0 &&
-            ((D_8009ACA6[shift2] >> (link2 - shift2 * 8)) & 1) == 0) {
-            *triId = link2;
-            goto loop;
+        link = D_80114458[*triId * 3 + 2];
+        if (link >= 0) {
+            shift2 = link >> 3;
+            if (((D_8009ACA6[shift2] >> (link - shift2 * 8)) & 1) == 0) {
+                *triId = link;
+                goto loop;
+            }
         }
         outEdge->vx = scratch[8];
         outEdge->vy = scratch[9];
