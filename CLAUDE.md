@@ -2060,6 +2060,32 @@ a near-miss, in rough order of frequency:
   different conflict set rather than a different ranking, and the target's
   `.s` cannot tell you which.
 
+* **On a parked body, sweep every local's *width* before anything else, and
+  let `insn_histogram.py` tell you whether to.** A wrong length plus a
+  `lhu`/`lh` or `andi`/`sll`+`sra` imbalance in the histogram is a
+  declaration fact, not codegen, and the fix is one word. `FieldMain` sat at
+  81 rows and +1 instruction with a histogram reading `ori +2 / addiu -2`,
+  `lhu +1 / lh -1`, `lui +1`, `andi +1`, `nop -1`; the lone `lh` the target
+  has and this build had nowhere is a `u16` global read into a local, and
+  declaring that local `s32` rather than `s16` takes it with a sign-extending
+  `lh` -- 81/+1 to 62 and the length exact, then 62 to 54 for the second
+  local in the same statement. Seven opcode counts named the fix where
+  eighty-one rows had not. The widths are a small finite cross-product
+  (`s16`/`u16`/`s32`/`u32` per local) and `variant_eval` scores the whole
+  sweep in one run, so there is no reason to sample it.
+* **A park note's numbers are only true of the body they were measured on,
+  and the body moves.** This file already says to re-check a note's
+  *diagnosis*; the stronger version is that its **rejected-spellings list
+  expires too**, and three functions in one session turned on exactly that.
+  `FieldEntityWalkmechCross`' note recorded per-arm locals as worth 13 rows;
+  merging them back is worth 16 once the guard is nested. `FieldMain`'s tail
+  paragraph quotes a 65/3 base while the function measured 81/9, so every
+  number in it was stale and the one width it never tried was the fix.
+  `LoadLocalFieldModelAndInitAll` carried "-1 instruction" for as long as the
+  note existed and nobody chased it as a *length*; it was one statement
+  order. The cheap habit: before spending a budget on a parked function,
+  re-measure two or three of the note's own rejected entries. If they still
+  agree, the note is live; if any has moved, re-run the whole list.
 * **Read the allocno arithmetic *forwards*: it does not only tell you when to
   stop, it tells you what the fix has to deliver.** This file already records
   the priority formulae as a stopping criterion -- work out which term you can

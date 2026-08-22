@@ -100,6 +100,25 @@ extern u8 D_800DF114;
  * change was worth the match outright; here it leaves the $t8 parameter copy
  * and one instruction still unaccounted for.
  *
+ * The 169 above is stale -- the body measures **181 rows / +1** now, and the
+ * note's own numbers should be re-run before any of them is trusted.
+ *
+ * `insn_histogram.py` states the +1 in three counts rather than 181 rows:
+ * `nop +4`, `addiu -2`, `addu -1`, and nothing else (the `nccs 0/8` against
+ * `c2 8/0` row is objdump not folding the GTE mnemonic, not a difference).
+ * So the target does three more address computations than this body and gets
+ * four load-delay slots filled for them, which is the same trade
+ * `FieldDebugRenderPage` makes at a larger scale.
+ *
+ * Loop 1's two cursors were re-tested against that reading, because the diff
+ * shows the target with a single `move t4,t1` where this build emits two
+ * copies of the same base -- and `c1[k * 4 + 4]` and `n1[7]` are the same
+ * walk three bytes apart, so one variable looks sufficient. It is not: one
+ * cursor indexed at `+4` and `+7` is **213 rows**, one cursor walked by 4 is
+ * 180 but **-2 instructions**, and two cursors both indexed rather than one
+ * walked is 213. The current pairing is right and the extra `move` is
+ * somewhere else.
+ *
  * What is left is register naming with the length within one, which is
  * decomp-permuter's job. Codegen pinned via MASPSX_OVERRIDE; the #else is the
  * verified C. */
