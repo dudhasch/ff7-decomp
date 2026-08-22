@@ -201,6 +201,7 @@ extern u8 D_80063690[];
 extern Unk800696AC D_800696AC;
 extern u32 D_80062FA0; // Some sort of pad state
 extern u16 D_80069490[];
+extern u8 D_80069800[48];
 extern DRAWENV D_80070700; // active draw environment (double-buffered)
 extern DISPENV D_8007075C; // active display environment (double-buffered)
 extern u16 D_800707BC;
@@ -215,11 +216,13 @@ extern u8 D_800722DC[];
 extern u8 D_800730DC[][0x14];
 extern WeaponRecord g_WeaponTable[]; // weapon kernel table, by weapon id
 extern s32 D_80095DD8;               // LBA len for func_80014540
+extern s8 D_8009A0D3;
 extern s16 g_isFieldLoading;
 extern u16 D_8009C560; // refer to Subsystem enum
 extern SavePartyMember D_8009C738[8];
 extern u8 D_8009C754[];  // Savemap.party[0].weapon, with a 0x84-byte stride
 extern u8 D_8009C755[];  // Savemap.party[0].armor, with a 0x84-byte stride
+extern u16 D_8009CBE0[]; // item inventory (320 slots; (count << 9) | id)
 extern u8 D_8009D44C[8]; // party-level snapshot for endgame battle AI
 extern u16 D_8009ABF6;
 extern u16 D_8009AC32;

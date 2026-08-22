@@ -14,12 +14,17 @@
 // rather than seeing two definitions.
 s32 D_80062DF8;
 s8 D_80062DFC;
+s32 D_80062ECC;
+s32 D_80062F0C;
+s32 D_80062F20;
+s32 D_80062F90;
+s32 D_80062F94;
 s32 D_80062FC0;
 u_long* D_80062FC4; // also declared extern in game.h, for the units at -G0
 Gpu D_80063008;
 u_long* D_8006300C;
 
-s8 D_80062EBC = 0;
+u8 D_80062EBC = 0;
 static s8 _D_80062EBD = 0;
 static s8 _D_80062EBE = 0;
 static s8 _D_80062EBF = 0;
@@ -42,7 +47,56 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80022FE0);
 
 s32 func_80023050(void) { return D_80062DF8; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_8002305C);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/1255C", func_8002305C);
+#else
+/* PARKED -- 12 changed, 3 inserted, 27 against 26 (+1 instruction).
+ * The prologue (six insns) and all three arm bodies are byte-identical; the
+ * whole residue is the shape of the switch's compare tree.
+ *   target: li 2 / beq -> case2, slti 3 / bnez -> default, li 4 / beq,
+ *           li 5 / beq, j default   -- a tree rooted at 2 with an EMPTY left
+ *           subtree and right = {4,5}, so the `< 3` test falls straight to
+ *           the default and case 5's `ori v0,0x10` rides its beq's delay slot
+ *   ours:   li 4 / beq, slti 5 / beqz, li 2 / beq, li 5 / beq -- rooted at 4,
+ *           left = {2}, right = {5}, which costs the extra j/nop pair
+ * That is `balance_case_nodes`, and nothing tried moves it. Measured, all
+ * against the same body (rows / length against the target's 26):
+ *   switch {2,4,5}, three separate arms      15 / +1   (this body)
+ *   switch, `case 2: case 4:` sharing an arm 15 / +1
+ *   switch with an empty `case 3: break;`    17 / +3
+ *   `if (==2) else if (>2) { if (==4) ... }` 12 / -2
+ *   flat `if/else if/else if` chain          12 / -4
+ *   `if (arg0 < 3) {...return;}` + switch{4,5} 14 / +1
+ * The enum hypothesis is measured and dead: `balance_case_nodes` consults an
+ * ASCII cost table only when `estimate_case_costs` accepts the case values
+ * (all within -1..127, which 2/4/5 are) and the index is not an
+ * ENUMERAL_TYPE, so an enum-typed index should take the plain median split
+ * instead. All four spellings -- `switch ((Subsystem)arg0)`, the parameter
+ * declared `Subsystem`, enumerator names in the labels, and the shared-arm
+ * form of each -- measure *exactly* 15 / +1, i.e. the cast does not reach
+ * `orig_index`'s type at all.
+ * Next: read cc1's tree dump for the case list rather than guessing at the
+ * split, or hand it to the permuter with perm_ins_block weighted. */
+void func_8002305C(s32 arg0, s32 arg1) {
+    s32 old = D_80062F94;
+    D_80062DF8 = arg0;
+    D_80062F94 = arg1 - 1;
+    D_80062F0C = old;
+    switch (arg0) {
+    case 2:
+        D_80062F20 = 0x10;
+        break;
+    case 4:
+        D_80062F20 = 0x10;
+        break;
+    case 5:
+        D_8009A0D3 = old;
+        D_80062ECC = 0;
+        D_80062F20 = 0x10;
+        break;
+    }
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800230C4);
 
@@ -198,7 +252,21 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025174);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025288);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025310);
+// Find the inventory slot holding item `arg0` and return the whole packed
+// entry ((count << 9) | id), or 0xFFFF if the item is not carried.
+s32 func_80025310(s32 arg0) {
+    s32 i;
+    u16 ret;
+
+    arg0 &= 0x1FF;
+    ret = 0xFFFF;
+    for (i = 0; i < 0x140; i++) {
+        if (D_8009CBE0[i] != 0xFFFF && arg0 == (D_8009CBE0[i] & 0x1FF)) {
+            return D_8009CBE0[i];
+        }
+    }
+    return ret;
+}
 
 void func_80025360() { func_8001FA28(0x19F); }
 
@@ -223,7 +291,10 @@ s32 func_8002542C(s32 arg0) {
 
 void func_800254D8() { D_80062EBC = 0; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800254E4);
+void func_800254E4(s8 arg0) {
+    D_80069800[D_80062EBC] = arg0;
+    D_80062EBC = D_80062EBC + 1;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025514);
 
@@ -468,7 +539,15 @@ s32 func_8002603C(u8 arg0) {
     return D_80049520[D_80049528[D_800730DC[arg0][1] & 0xF]];
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026090);
+void func_80026090(void) {
+    do {
+    } while (SystemCdromReadChain());
+    func_800211C4(7);
+    do {
+    } while (SystemCdromReadChain());
+    func_801D11A8();
+    D_80062F90 = 0;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_800260DC);
 
