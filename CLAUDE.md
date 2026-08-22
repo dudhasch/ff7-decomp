@@ -5573,11 +5573,17 @@ creating a fresh one per task. Bootstrapping a new one from that copy is
 ```shell
 git worktree add -b claude/wt-<n> .claude/worktrees/wt-<n> HEAD
 cp -r <bootstrapped>/{asm,bin,disks,expected} .claude/worktrees/wt-<n>/
-cp -r <bootstrapped>/tools/{asm-differ,maspsx,builder} .claude/worktrees/wt-<n>/tools/
+cp -r <bootstrapped>/tools/{asm-differ,maspsx,builder,m2c} .claude/worktrees/wt-<n>/tools/
 cp <bootstrapped>/config/sym_export*.us.txt .claude/worktrees/wt-<n>/config/
 mkdir -p .claude/worktrees/wt-<n>/{.venv,build,.variants}
 ```
 
+* **`tools/m2c` is a fourth submodule and it is the one nobody lists.** Without
+  it `./mako.sh dec` dies with `ModuleNotFoundError: No module named 'm2c.main'`,
+  which reads like a broken venv rather than an empty submodule directory --
+  and it only bites on the first *fresh* function, long after the worktree has
+  been proved by a green `make build`. Copy it with the other three and drop
+  the `.git` file the copy brings along.
 * **`expected/` is needed too**, not just `asm/` -- `variant_eval.py` and
   `checkfn.py` compare against `expected/build/us/**.o`, so a worktree without
   it can build green and still be unable to *measure* anything.
