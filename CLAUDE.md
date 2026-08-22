@@ -5498,6 +5498,44 @@ cluster.** A contiguous run means an original translation unit and a bounded
 fix; a scatter through the file means something else is going on and the
 paragraph above applies.
 
+**That split has happened and it works: `akao.c` is `0x800293D0`–`0x80029A50`
+at `G=8`, `akao2.c` is `0x80029A50` on at `-G0`.** Three things about how the
+boundary was found, none of which needed a build:
+
+* **The cut is one function later than the last `%gp_rel`.** `0x80029C48` is
+  where the *next `INCLUDE_ASM`* is, not where the unit ends — the four
+  functions between `func_800299C8` and it are already matching C, so they
+  have no `.s` to grep and are invisible to `grep -l gp_rel`. The end of the
+  last `%gp_rel` function's `.s` gives the offset directly: its final
+  `/* 1A24C 80029A4C … */` comment means the boundary is `0x1A250`, and
+  `vram = 0x80010000 + offset - 0x800` for `main` (the 0x800 is the PS-EXE
+  header, which is why `0x19BD0` is `0x800293D0` and not `0x80029BD0`).
+* **The proof that the cut is in the right place is a symbol used on both
+  sides.** `D_80062F00` is `%gp_rel` in `func_800294BC` and `%hi`/`%lo` in
+  `func_80029A50`, which is already matching C at `-G0`. Two functions
+  0x150 bytes apart addressing one global two ways is the boundary stated
+  outright, and it also fixes which side each has to be on.
+* **Cross-check that no in-window symbol is `%hi`/`%lo` *inside* the new
+  unit**, or `-G8` will change a function that already matched. For akao's
+  block every `%hi` names an address ≥ `0x80075F28` or ≤ `0x8004A60C` —
+  nothing in `0x80062D44 ± 0x8000` — so the unit is clean by construction.
+
+The mechanical cost is small and the value is immediate. `func_800293D0` and
+`func_800293F4` are two- and three-statement functions that no amount of
+codegen work could have matched at `-G0`, and both MATCH on the first
+attempt after the split. The whole change is `git mv akao.c akao2.c`, a
+`sed` over that file's `INCLUDE_ASM` path strings, one new `c` subsegment in
+`config/us.yaml`, and a new `akao.c` carrying `G=8` plus the 21 tentative
+definitions the block's `.s` files name. A `.comm` whose symbol some other
+unit really defines contributes nothing to the link, so the declarations are
+byte-neutral on their own — `make build` stayed at 19x `OK` across the split
+with not one function's code changed.
+
+**Do the same triage on any unit before believing a `%gp_rel` park note.**
+`grep -l gp_rel` names the functions; the last one's `.s` names the offset;
+a symbol addressed both ways names the side. It is three commands and no
+build.
+
 ### 4. Last-mile: decomp-permuter
 
 If step 3 stalls — zero diff rows are out of reach by hand, or you're stuck

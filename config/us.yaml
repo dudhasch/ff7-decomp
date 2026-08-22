@@ -25,6 +25,7 @@ overlays:
       - [0x18B8, c, 18B8]
       - [0x1255C, c, 1255C]
       - [0x19BD0, c, akao]
+      - [0x1A250, c, akao2]
       - [0x24370, c, psxsdk]
       - [0x394E0, data]
       - [0x39BA8, .data, ovl]
