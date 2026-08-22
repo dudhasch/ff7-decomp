@@ -632,11 +632,21 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", StopCallback);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", RestartCallback);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CheckCallback);
+extern u16 D_800504AE;
+u16 CheckCallback(void) { return D_800504AE; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetIntrMask);
+extern u_short* D_8005153C;
+int GetIntrMask(void) { return *D_8005153C; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetIntrMask);
+/* The pointer has to be `volatile`: without it reorg moves the `sh` into the
+ * `jr ra` delay slot and the function comes out one instruction short. */
+int SetIntrMask(int mask) {
+    volatile u_short* p = D_8005153C;
+    int old = *p;
+
+    *p = mask;
+    return old;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", startIntr);
 
@@ -676,19 +686,29 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", def_cbready);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", def_cbread);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DCD8);
+extern u_char D_80051638;
+int func_8003DCD8(void) { return D_80051638; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DCE8);
+extern u_char D_80051648;
+int func_8003DCE8(void) { return D_80051648; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DCF8);
+extern u_char D_80051649;
+int func_8003DCF8(void) { return D_80051649; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CdLastPos);
+extern CdlLOC D_80051644;
+CdlLOC* CdLastPos(void) { return &D_80051644; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CdReset);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DD84);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DDA4);
+extern int D_80051634;
+int func_8003DDA4(int arg0) {
+    int old = D_80051634;
+
+    D_80051634 = arg0;
+    return old;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DDBC);
 
@@ -698,9 +718,21 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DE2C);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DE4C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DE6C);
+extern int D_80051628;
+int func_8003DE6C(int arg0) {
+    int old = D_80051628;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003DE84);
+    D_80051628 = arg0;
+    return old;
+}
+
+extern int D_8005162C;
+int func_8003DE84(int arg0) {
+    int old = D_8005162C;
+
+    D_8005162C = arg0;
+    return old;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CdControl);
 
@@ -742,7 +774,8 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CD_datasync);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CD_getsector);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_8003FA9C);
+extern int D_800518D0;
+void func_8003FA9C(int arg0) { D_800518D0 = arg0; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", callback);
 
@@ -804,7 +837,13 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80041D28);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80041E30);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", func_80041EFC);
+extern int D_80051A1C;
+int func_80041EFC(int arg0) {
+    int old = D_80051A1C;
+
+    D_80051A1C = arg0;
+    return old;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DecDCTReset);
 
@@ -812,7 +851,8 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DecDCTGetEnv);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DecDCTPutEnv);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DecDCTBufSize);
+extern u_short DecDCTBufSize(u_short* p);
+u_short DecDCTBufSize(u_short* p) { return *p; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DecDCTin);
 
@@ -960,9 +1000,16 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetDefDrawEnv);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetDefDispEnv);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetVideoMode);
+extern long D_80062BB4;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetVideoMode);
+long SetVideoMode(long mode) {
+    long old = D_80062BB4;
+
+    D_80062BB4 = mode;
+    return old;
+}
+
+long GetVideoMode(void) { return D_80062BB4; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", ResetGraph);
 
@@ -972,9 +1019,11 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetGraphDebug);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetGraphQueue);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetGraphType);
+extern u_char D_80062C00;
+int GetGraphType(void) { return D_80062C00; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetGraphDebug);
+extern u_char D_80062C02;
+int GetGraphDebug(void) { return D_80062C02; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DrawSyncCallback);
 
@@ -1034,7 +1083,8 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", get_tw);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", get_dx);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _status);
+extern long* D_80062CD4;
+long _status(void) { return *D_80062CD4; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _otc);
 
@@ -1046,7 +1096,8 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _drs);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _ctl);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _getctl);
+extern u_char D_80070590[];
+int _getctl(int i) { return D_80070590[i]; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", _cwb);
 
@@ -1076,81 +1127,114 @@ INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GPU_cw);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetTPage);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", GetClut);
+u_short GetClut(int x, int y) { return getClut(x, y); }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DumpTPage);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DumpClut);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", NextPrim);
+void* NextPrim(void* p) {
+    return (void*)((*(u_long*)p & 0xFFFFFF) | 0x80000000);
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", IsEndPrim);
+int IsEndPrim(void* p) { return (*(u_long*)p & 0xFFFFFF) == 0xFFFFFF; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", AddPrim);
+void AddPrim(void* ot, void* p) { addPrim(ot, p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", AddPrims);
+void AddPrims(void* ot, void* p0, void* p1) { addPrims(ot, p0, p1); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", CatPrim);
+void CatPrim(void* p0, void* p1) { catPrim(p0, p1); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", TermPrim);
+void TermPrim(void* p) { *(u_long*)p |= 0xFFFFFF; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetSemiTrans);
+void SetSemiTrans(void* p, int abe) { setSemiTrans(p, abe); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetShadeTex);
+void SetShadeTex(void* p, int tge) { setShadeTex(p, tge); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyF3);
+void SetPolyF3(POLY_F3* p) { setPolyF3(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyFT3);
+void SetPolyFT3(POLY_FT3* p) { setPolyFT3(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyG3);
+void SetPolyG3(POLY_G3* p) { setPolyG3(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyGT3);
+void SetPolyGT3(POLY_GT3* p) { setPolyGT3(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyF4);
+void SetPolyF4(POLY_F4* p) { setPolyF4(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyFT4);
+void SetPolyFT4(POLY_FT4* p) { setPolyFT4(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyG4);
+void SetPolyG4(POLY_G4* p) { setPolyG4(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetPolyGT4);
+void SetPolyGT4(POLY_GT4* p) { setPolyGT4(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetSprt8);
+void SetSprt8(SPRT_8* p) { setSprt8(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetSprt16);
+void SetSprt16(SPRT_16* p) { setSprt16(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetSprt);
+void SetSprt(SPRT* p) { setSprt(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetTile1);
+void SetTile1(TILE_1* p) { setTile1(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetTile8);
+void SetTile8(TILE_8* p) { setTile8(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetTile16);
+void SetTile16(TILE_16* p) { setTile16(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetTile);
+void SetTile(TILE* p) { setTile(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineF2);
+void SetLineF2(LINE_F2* p) { setLineF2(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineG2);
+void SetLineG2(LINE_G2* p) { setLineG2(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineF3);
+void SetLineF3(LINE_F3* p) { setLineF3(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineG3);
+/* Not the setLineG3() macro: the library never clears p2. */
+void SetLineG3(LINE_G3* p) {
+    setlen(p, 7);
+    setcode(p, 0x58);
+    p->pad = 0x55555555;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineF4);
+void SetLineF4(LINE_F4* p) { setLineF4(p); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetLineG4);
+/* Not the setLineG4() macro: the library never clears p2/p3. */
+void SetLineG4(LINE_G4* p) {
+    setlen(p, 9);
+    setcode(p, 0x5C);
+    p->pad = 0x55555555;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetBlockFill);
+void SetBlockFill(BLK_FILL* p) {
+    setlen(p, 3);
+    setcode(p, 0x02);
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", SetDrawMove);
+/* rect/x/y are unused: the retail library only stamps the tag and the
+ * MoveImage command word here. */
+void SetDrawMove(DR_MOVE* p, RECT* rect, int x, int y) {
+    setlen(p, 5);
+    setcode(p, 1);
+    p->code[1] = 0x80000000;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", MargePrim);
+int MargePrim(void* p0, void* p1) {
+    int len = getlen(p0) + getlen(p1) + 1;
+
+    if (len > 0x20) {
+        return -1;
+    }
+    setlen(p0, len);
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DumpDrawEnv);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", DumpDispEnv);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", OpenTIM);
+extern u_long* D_80070690;
+int OpenTIM(u_long* addr) {
+    D_80070690 = addr;
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/psxsdk", ReadTIM);
 

@@ -188,6 +188,41 @@ to the region's start and rename the symbol out of `func_` -- `make build`
 stays green because the bytes and their order do not move, and splat rewrites
 the callers' `.s` with the new name for free.
 
+**`src/main/psxsdk.c` is fenced, and the fence is a comment in the middle of
+the file that no tool reads.** At the head of the SDK region it says
+
+```c
+// NOTE: please do not decompile any of these functions.
+// Please refer to psyz/decomp for decompiled PSX SDK functions:
+// https://github.com/Xeeynamo/psyz/tree/main/decomp
+```
+
+with no closing delimiter, and **417 of the unit's 459 remaining
+`INCLUDE_ASM` lines sit below it** -- everything from `_SpuInit` to the end of
+the file, i.e. all of libspu, libgpu, libetc, libapi, libcd, libc and the
+kernel stubs. `worklist.py` reports the unit as 432 actionable functions and
+knows nothing about it. Only the 42 above the note (FF7's own CD-streaming and
+LZS code, `func_80033BE0` through `ChangeClearSIO`) are unambiguously in
+scope. Confirm with whoever owns the repo before spending a session below the
+line; the note reads as either "leave these alone" or "import them from psyz
+rather than re-deriving them", and both answers make hand-decompiling them
+the wrong work.
+
+**A library unit's actionable count is inflated by things that can never be
+C, and `worklist.py`'s handwritten screen does not catch them.** splat marks
+`/* Handwritten function */` on its own heuristics, and in `psxsdk.c` it marks
+83 of 515 while **54 more are BIOS syscall stubs** --
+`addiu $t2, $zero, 0xA0 / jr $t2 / addiu $t1, $zero, N`, which is a jump
+through a register and has no C spelling -- and **16 more are bare COP2
+wrappers** (`AverageSZ4` is one `avsz4` instruction; `SetVertex0` is two
+`lwc2`). Those 70 sort to the very top of the cheapest-first list, because
+they are one to four instructions long. Screen them before picking:
+
+```shell
+grep -lE 'jr +\$t[0-9]' asm/us/<ovl>/nonmatchings/<unit>/*.s      # syscall stubs
+grep -lE 'lwc2|swc2|ctc2|cfc2|mtc2|mfc2|avsz|rtps|nclip' .../*.s  # COP2 wrappers
+```
+
 **`P` says a note exists, not how close it is -- run `parked_queue.py` for
 that.** The row count written into a park note is true of the moment it was
 written and of nothing after: anything that changes the function's own body,
@@ -1409,6 +1444,44 @@ a near-miss, in rough order of frequency:
   inert as far as the emitted address goes -- cse folds it back, and the
   preheader is byte-identical either way -- so this is not the "cache a
   re-read global pointer" idiom and reads as a no-op change.
+
+* **A store in the `jr ra` delay slot is what a *non*-`volatile` store looks
+  like; a target with a `nop` there and the store above it wants the
+  qualifier.** reorg's `fill_simple_delay_slots` happily takes the last insn
+  of the body into the return's slot, so a two-statement accessor
+  (`old = *p; *p = v; return old;`) comes out one instruction *shorter* than a
+  target that keeps the `nop`. `volatile u_short* p` is what stops it, and the
+  cost is nothing else: the loads and the store are the same three
+  instructions either way. `SetIntrMask` in `src/main/psxsdk.c` is the case
+  (6 instructions against 7, the whole residue), and it is worth reading
+  together with the `void`/non-`void` bullet above -- both are "the delay slot
+  after `jr ra` is a *declaration* fact", reached from the return type in one
+  case and from the pointer's qualifier in the other. Note this is a
+  *hardware* register behind the pointer, so `volatile` is also what the
+  original meant; do not reach for it on an ordinary global, where the
+  qualifier costs `lhu` plus a separate `sll`/`sra` at every read.
+
+* **For a function whose whole body is one two-way return, the early exit and
+  the `if`/`else` lay the two blocks out in opposite orders.**
+  `if (ok) { work; return 0; } return -1;` puts the *failure* block in the
+  fall-through and the success block at the branch target; the inverted
+  `if (!ok) return -1; work; return 0;` puts success in the fall-through,
+  which is what a target with `beqz` over `move v0,zero / <work> / j` is
+  telling you. Same program, same instruction count, 4 rows apart, and the
+  reflex reading -- "the target's `beqz` means the guard is spelled the
+  positive way" -- is backwards. `MargePrim` in `src/main/psxsdk.c` needs
+  `if (len > 0x20) return -1;`. Read which block sits immediately after the
+  conditional branch, not which way the comparison points.
+
+* **A convenience macro in `include/psxsdk/` is not evidence about the library
+  function of the same name.** The headers carry the PSY-Q macro forms
+  (`setPolyF3`, `setLineG3`, `addPrim`), and for most of the primitive
+  helpers the retail function really is one macro expansion -- 31 of 33
+  matched that way at the first attempt. Two do not: `setLineG3` and
+  `setLineG4` also clear `p2` and `p2`/`p3`, and the retail `SetLineG3` /
+  `SetLineG4` emit no such stores. Diff the macro's store list against the
+  target's before using it, since a macro with one store too many reads as an
+  insertion in an otherwise perfect five-instruction function.
 
 * **`x++` on a `volatile` re-reads it; `x = x + 1` does not.** The increment is
   an expression whose value gcc materialises even when the statement discards
