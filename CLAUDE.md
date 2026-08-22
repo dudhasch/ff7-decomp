@@ -4030,7 +4030,52 @@ A worktree needs three things the `git worktree add` does not give it:
   fails **silently**, producing objects that diff cleanly against nothing
 
 Cheapest path: keep one bootstrapped worktree around and reuse it rather than
-creating a fresh one per task.
+creating a fresh one per task. Bootstrapping a new one from that copy is
+~45 MB and four steps, and two of them are not guessable:
+
+```shell
+git worktree add -b claude/wt-<n> .claude/worktrees/wt-<n> HEAD
+cp -r <bootstrapped>/{asm,bin,disks,expected} .claude/worktrees/wt-<n>/
+cp -r <bootstrapped>/tools/{asm-differ,maspsx,builder} .claude/worktrees/wt-<n>/tools/
+cp <bootstrapped>/config/sym_export*.us.txt .claude/worktrees/wt-<n>/config/
+mkdir -p .claude/worktrees/wt-<n>/{.venv,build,.variants}
+```
+
+* **`expected/` is needed too**, not just `asm/` -- `variant_eval.py` and
+  `checkfn.py` compare against `expected/build/us/**.o`, so a worktree without
+  it can build green and still be unable to *measure* anything.
+* **`cp` resets every mtime, and that makes `make` re-extract the toolchain.**
+  The rule chain is `bin/%: bin/%.gz: bin/%.gz.sha256`, so with all three
+  stamped the same second make re-downloads the `.gz`, gunzips it, and then
+  dies on `chmod +x`: `Operation not permitted`, because the Windows bind mount
+  will not take a mode change. It also deletes the `.gz` on the way out, so the
+  second attempt fails differently. Stamp the prerequisites old and the
+  products new and make leaves the toolchain alone:
+
+  ```shell
+  rm -f bin/*.gz
+  touch -d 2020-01-01 bin/*.sha256 bin/*.tag bin/clang-format.gz tools/str.c
+  touch bin/cc1-psx-26 bin/cc1-psx-272 bin/clang-format bin/objdiff-cli-linux-x86_64 bin/str
+  ```
+
+**`tools/docker-build.ps1` hardcodes `-v ff7_build:/ff7/build`**, so out of the
+box every worktree on Windows shares one build volume -- which is the exact
+corruption this section warns about, silently. The file is gitignored, so each
+worktree carries its own copy and each has to be patched; derive the volume
+from the checkout so the main clone keeps `ff7_build` and nothing it already
+has is orphaned:
+
+```powershell
+$buildVol = if ($env:FF7_BUILD_VOLUME) { $env:FF7_BUILD_VOLUME }
+  elseif ($repoRoot -match '[\/]\.claude[\/]worktrees[\/]([^\/]+)') {
+    'ff7_build_' + ($Matches[1] -replace '[^A-Za-z0-9_.-]', '_') }
+  else { 'ff7_build' }
+```
+
+Prove the result before handing work to anyone: `make build` to 19x `OK` **and**
+one `variant_eval.py` run whose row count matches what the source worktree
+reports for the same function. The build alone is not enough -- an empty
+`maspsx` or a missing `expected/` fails in ways that look like a result.
 
 **`asm/` cannot be regenerated from scratch any more — copy it.** splat only
 writes `nonmatchings/<fn>.s` for functions the `.c` still references through
