@@ -543,23 +543,109 @@ extern s16 D_80071E3C;
  * which the `lh` is a *declaration* fact rather than codegen, and it named
  * the one local in the function whose type had never been swept wide.
  *
- * What is left is 54 rows and the length is now exact, so the remaining
- * clusters are comparable to each other for the first time:
+ * **47 rows / 8 insertions -> 27 / 4**, measured the honest way with
+ * `D_800A0000` deleted as an unparking build must. On the other footing --
+ * the object left in place, which is what the 54 quoted above was -- the
+ * same pair reads **54 -> 34**; the seven-row gap is the `.rodata` offsets
+ * the duplicated RECT blob causes and is constant across every measurement
+ * below. Length stayed at the exact 786 throughout. Two changes did it, and
+ * the first of them is a lesson about how this note was being read:
  *
- *   - `ori +2 / addiu -2`. The `FieldEventInit(&g_FieldState, ...)` argument:
- *     the target keeps `&g_FieldStateData.layer2_bgScrollXSpeed` (+0xA6) in a
- *     general register for the first of the three scroll-speed stores and
- *     then reuses it as `addiu a0,a0,-0xa6` in the `jal`'s delay slot, where
- *     this build materialises `&g_FieldState` with its own `lui`/`addiu` and
- *     leaves the slot a `nop`. Spelling the argument so cse relates the two
- *     does work -- `(void*)((u8*)&g_FieldStateData.layer2_bgScrollXSpeed -
- *     0xA6)`, the `(s32)` form, and simply `&g_FieldStateData` are all
- *     byte-identical -- but all three come out **58 rows and -1 instruction**,
- *     so they buy the delay slot and lose an instruction elsewhere. Worse by
- *     the length rule; not taken.
- *   - `andi +1` against the target's extra `sll`/`sra` pair, which is the
- *     `fieldId` masking this note already describes. Unchanged by either
- *     width above.
+ *   - **Two clusters had to move together, and each is a regression alone.**
+ *     The `FieldEventInit` argument (`ori +2 / addiu -2` above) is worth the
+ *     `addiu a0,a0,-0xa6` delay slot and costs an instruction: 47 -> 51 at
+ *     **785**. `s16 fieldId` -- the width the paragraph above had just
+ *     changed to `s32` -- buys the target's `sll`/`sra` sign-extension and
+ *     costs the `andi`, +1 instruction: 47 -> 74 at **787**. Applied
+ *     together they cancel exactly and the pair is 47 -> **39** at 786. The
+ *     previous pass had measured each on its own, read "-1 instruction" and
+ *     "+1 instruction" as two independent failures, and parked both. When
+ *     two residues in one function have opposite length signs, try the
+ *     product before believing either sum.
+ *     The argument spelling that works is plain `&g_FieldStateData`: the old
+ *     `&g_FieldState` is a *different* `symbol_ref` for the same address, so
+ *     cse's `use_related_value` could not relate it to the `%lo` the scroll
+ *     stores had already materialised. checkfn aliases the two names, which
+ *     is why the row only ever read as register naming.
+ *   - **The `*ev == 0xC` arm needs its own field-id local.** It shared
+ *     `fieldId` with the `*ev == 1` arm; giving it `s16 exitId` is **39 ->
+ *     27** and closes the 0xC arm outright *and* three of the 0x1 arm's
+ *     rows. This is CLAUDE.md's "split what describes two things" run on a
+ *     scalar: one pseudo serving two unrelated live ranges in two unrelated
+ *     blocks loses `$v0` to the other quantity in both, and every row of it
+ *     reads as `v0`/`v1` noise. Declaration position of `exitId` is inert
+ *     (first or last in the local list, both 27).
+ *
+ * The residue is **27 rows / 4 insertions at 786**, in four clusters. Every
+ * one of them is now measured to the end of its dimension:
+ *
+ *   1. the pre-loop `ev` derivation -- 12 rows, and unchanged in kind from
+ *      cluster 1 above. Ours derives `ev` in the pre-loop block (one
+ *      instruction before the ClearImage guard, which is why five `beq`
+ *      offsets read 0x77c against 0x778); the target derives it in the
+ *      preheader as `addiu s1,s3,-0x4b` after the fade base, and puts
+ *      `li s4,0xd` *before* the fade base rather than after. Re-swept at
+ *      this base: pre-loop (27, best), function top 29, in-loop after the
+ *      fade `if` 40, own-symbol pre-loop store + that 40, in-loop before the
+ *      `D_800965EC == 2` block 42, between the ClearImage guard and the loop
+ *      78, loop top 106, before the `D_80095DD4` spin 140. `ev` spelled
+ *      `&g_FieldStateData.eventCmd` is byte-identical to the `-0x4B` form
+ *      (27). `D_8009AC40[0] = 0` for the pre-loop store is 41 at the 39-base
+ *      and 40 combined with an in-loop `ev`. The two requirements -- hoisted
+ *      by `move_movables`, *and* derived from a fade base the same block has
+ *      already materialised -- still have no position that satisfies both.
+ *   2. the fade block, 7 rows: the target emits `sh s2,0(s3)` (fadeType)
+ *      before `sh v0,4(s3)` (fadeSpeed) and this build emits them the other
+ *      way round. Nothing else in the block differs. **The source-order
+ *      dimension is now exhausted**: all 24 permutations with R/G/B in
+ *      order were measured, plus the six of type/speed/adjust from the
+ *      earlier sweep. Every one of them emits `sh v0,4` first, so no
+ *      spelling reaches it -- this is sched2's tie-break between two ready
+ *      stores off one hoisted base, one of which needs the constant the
+ *      branch delay slot already carries. Four orders score **24**
+ *      (T,S,R,G,B,A and T,R,S,G,B,A and T,R,G,S,B,A and T,R,G,B,S,A) and
+ *      **none of them is taken**: they win three rows only by moving the
+ *      `fadeAdjust` store to the end of the block, where the target does not
+ *      have it, so the emitted order goes from one fault (0/4 swapped) to
+ *      two (0/4 swapped *and* 2 displaced past 6/8/0xa). At equal length a
+ *      row count is the metric, but it is the metric for the *same* set of
+ *      faults; a body one transposition from correct is closer than a body
+ *      three, whatever the differ's alignment says. The natural order --
+ *      type, speed, adjust, red, green, blue, which is what anyone would
+ *      type -- is kept.
+ *      Barriers are worse in every position: after fadeType 104, after
+ *      fadeSpeed 91, after fadeAdjust 92 (they cost the `li v0,0x10` its
+ *      branch delay slot). A chained `fadeRed = fadeGreen = fadeBlue = 0` is
+ *      inert (27), which is the descending-store rule holding.
+ *   3. the rain fill loop, 4 rows: reorg copies the join's `li v1,0xf` into
+ *      the delay slot of the first arm's `j` and retargets it, where the
+ *      target leaves the slot a `nop`. Measured and rejected at this base:
+ *      `fill = &D_8009A057;` before `i = 0xF;` 43, the `do`/`while` written
+ *      as a `for` with the same swap 43, the arms inverted 45, both inits
+ *      hoisted above the if/else 48, `i` alone hoisted 68, `fill` alone
+ *      hoisted 74, `i = 0x10` with `while (--i != 0)` 28 at +1 instruction,
+ *      `while (--i != -1)` 56 at +1, `*fill = fillVal; fill--;` split into
+ *      two statements inert, the if/else written as an explicit
+ *      `goto rainDone;` inert, a `do { } while (0);` between the if/else and
+ *      `i = 0xF` inert. Inert barriers say this is reorg's, not sched2's.
+ *   4. the `*ev == 1` arm, 4 rows: the target puts `lui`/`lh D_80071A5C`
+ *      into the load-delay slot after `lhu %lo(g_CurrentFieldIndex)` and
+ *      this build puts it four instructions later, into the *other* delay
+ *      slot. Same instructions, same count, two `nop`s trading places.
+ *      Every statement order measured is exactly inert at 27: `preloadId`
+ *      read after the 0x63 store, after the `ev + 1` load, read inline at
+ *      the compare, the compare operands swapped, the `(u16)` cast dropped,
+ *      a `u16 curId` local for the `g_CurrentFieldIndex` read. `preloadId`
+ *      as `s16` is 60, read through a `volatile s16*` 51, and moving the
+ *      `g_CurrentFieldIndex` store inside the `if` 64. A `do { } while (0);`
+ *      in the arm is +1 instruction and 61.
+ *
+ * Two further things measured at this base and worth not re-deriving:
+ * `exitKind` as `s32` or `u32` is inert; reading it before the `ev + 1` load
+ * is 57 and dropping the 0xC arm's field-id local entirely is 47.
+ * `insn_histogram.py` disagrees with `variant_eval` on this function's opcode
+ * counts (it reports `ori +2 / addiu -1 / nop -1` where the rows account for
+ * one `ori`/`nop` pair only); the rows are the ones to trust here.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
@@ -571,8 +657,9 @@ void FieldMain(void) {
     s8* fill;
     s32 fillVal;
     s32 i;
-    s32 fieldId;
+    s16 fieldId;
     s32 preloadId;
+    s16 exitId;
     u8 exitKind;
 
     ClearOTagR(&g_FieldRenderData[0].OtFadeDrenv, 1);
@@ -685,7 +772,7 @@ void FieldMain(void) {
             D_80071E3C = 0;
             g_FieldBGCameraHeightBias =
                 ((FieldTriggerHeader*)g_FieldTriggers)->camHeightBias;
-            FieldEventInit(&g_FieldState, g_FieldEntity, *D_8007EB64);
+            FieldEventInit(&g_FieldStateData, g_FieldEntity, *D_8007EB64);
             g_FieldEntity[D_8009AC1E].Dir = D_8009AC18;
             fillVal = -1;
             if ((g_RainControl & 0x80) == 0) {
@@ -753,9 +840,9 @@ void FieldMain(void) {
         }
         if (*ev == 0xC) {
             *(volatile u16*)(ev + 0x63) = (u16)g_CurrentFieldIndex;
-            fieldId = *(volatile u16*)(ev + 1);
+            exitId = *(volatile u16*)(ev + 1);
             exitKind = ev[0xF1];
-            g_CurrentFieldIndex = fieldId;
+            g_CurrentFieldIndex = exitId;
             switch (exitKind) {
             case 0:
                 g_FieldNextModule = 6;
