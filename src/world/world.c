@@ -485,7 +485,17 @@ s32 func_800A5A94(s16 arg0) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5AD8);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5B88);
+void func_800A5B88(Unk800E5768* arg0) {
+    WorldChunkHeader* chunk;
+
+    for (chunk = D_80109D40; chunk != NULL; chunk = chunk->next) {
+        if (((s32)((u16)chunk->z << 16) >> 18) * 9 +
+                ((s32)((u16)chunk->x << 16) >> 18) ==
+            arg0->unk4) {
+            func_800A5AD8(chunk);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5C08);
 
