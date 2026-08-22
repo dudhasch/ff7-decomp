@@ -244,7 +244,7 @@ typedef struct {
 
 extern AttackEntry D_800708C4[]; // kernel-resident attack table, indexed by
                                  // attack id (see func_800B2EBC)
-extern u8 D_800730D0[]; // materia AP thresholds, 0x14-byte rows of u16
+extern u8 D_800730D0[];          // materia AP thresholds, 0x14-byte rows of u16
 extern u8 D_800708C8[];       // kernel-region table, 0x1C-byte rows, indexed by
                               // attack/effect id
 extern u8 D_800708D0[][0x1C]; // kernel-region table, indexed by
