@@ -1161,13 +1161,13 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D52A0);
 void func_800D5350();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D5350);
 
-void func_800D5444(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
+void func_800D5444(int arg0, int arg1, int arg2, void (*arg3)(int)) {
     Unk80162978* temp_v0 = &D_80162978[func_800BBEAC(func_800D5350)];
     temp_v0->D_80162978 = 0;
     temp_v0->D_8016297C = arg0;
     temp_v0->D_8016297E = arg1;
     temp_v0->D_80162980 = arg2;
-    *(s32*)&temp_v0->unk8 = arg3;
+    *(s32*)&temp_v0->unk8 = (s32)arg3;
 }
 
 s32 func_800D54BC(s32 arg0) {
@@ -1188,8 +1188,6 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D54EC);
 s32 func_800D55A4(s32 arg0) {
     return (D_801518E4[arg0].unk12 * 0x10) * D_801518E4[arg0].D_801518EA >> 0xC;
 }
-
-void SystemAkaoExecute(void*, s32, s32, void**);
 
 // Generic AKAO sound-command dispatcher: the first vararg's low 16 bits are
 // the command id, which selects how many trailing u32 params get copied into
@@ -1225,7 +1223,9 @@ void func_800D55F4(s32 arg0, ...) {
             *dst++ = *src++;
         }
     }
-    SystemAkaoExecute(dst, count, nExtra, args);
+    // The four values below are already live in $a0..$a3 at this point; the
+    // original passes nothing, and SystemAkaoExecute reads them as registers.
+    SystemAkaoExecute();
 }
 
 // Project a point through the current view matrix and convert its clamped
