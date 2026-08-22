@@ -704,6 +704,29 @@ a near-miss, in rough order of frequency:
   inner loops still look right after the change; here the real loops are the
   inner `do`/`while`s and only the outer walks are gotos.
 
+  **Read the absence of hoisting as the tell, not the duplicated test, and the
+  whole of `src/battle/battle1.c` becomes cheap.** The rotation is two rows;
+  the loop *notes* are worth tens, because without them there is no invariant
+  hoisting, no strength reduction and no giv. So a counted walk whose target
+  rebuilds a symbol's address at every iteration, re-reads a bound that is
+  obviously invariant, keeps an `sll`/`sra` conversion inside the body, or
+  computes `i * stride` per iteration where you emit a walking pointer, is a
+  backward `goto` -- and *all four* of those show up together, which makes it
+  easy to recognise from one reading of the diff. Three functions in
+  `src/battle/battle1.c` measured 39 -> 14, 32 -> 27 and 29 -> 27 rows on the
+  spelling alone, and `func_800B45F0` went on to match. The corollary is that
+  the usual advice about `for` increments does not apply in such a loop: with
+  no loop note there are no bivs and no givs, so every counter is an ordinary
+  variable and the increments come out in written order wherever you put them.
+
+  In a goto walk the one lever left is **which symbol addresses are
+  materialised before the loop and in what order**, since nothing will be
+  moved for you. A named `u8* base = (u8*)SYM;` assigned *between* the two
+  counters' initialisations and the arithmetic that uses it is what took
+  `func_800B45F0` from 14 rows to a match: written inside the pointer
+  expression instead, the `lui`/`addiu` is emitted among the multiplies rather
+  than ahead of them, and every register downstream renames.
+
   **Run the other way -- the *target* has the test twice and you have one --
   no spelling of the loop reaches it, because the transformation has a
   precondition on the test's contents.** `duplicate_loop_exit_test` starts

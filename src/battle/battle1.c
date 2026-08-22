@@ -352,7 +352,46 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B3FFC);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B430C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B45F0);
+extern u8 D_800FA6D0;
+extern s16 D_800E8F94[];
+extern u16 D_800E8E88[];
+
+// nudge each of the three party slots' stored angle by +/-0x204 depending on
+// its stance. The walk has to be a backward goto: as a `for` it is a loop to
+// loop_optimize, which hoists the 0x204 constants and strength-reduces the
+// D_800E8E88 offset into a walking pointer -- the target rebuilds the address
+// at all three sites. `base` likewise has to be named, or the symbol is
+// materialised inside the pointer expression rather than ahead of it.
+void func_800B45F0(void) {
+    s32 i;
+    s32 off;
+    s32 k;
+    s16* p;
+    u8* base;
+
+    i = 0;
+    k = 0;
+    base = (u8*)D_800E8F94;
+    off = D_800FA6D0 * 18;
+    p = (s16*)(base + D_800FA6D0 * 6);
+loop:
+    if (*(u16*)((u8*)D_801636B8 + k + 6) & 1) {
+        if (*p == 0) {
+            *(s16*)((u8*)D_800E8E88 + off) =
+                *(u16*)((u8*)D_800E8E88 + off) + 0x204;
+        } else {
+            *(s16*)((u8*)D_800E8E88 + off) =
+                *(u16*)((u8*)D_800E8E88 + off) - 0x204;
+        }
+    }
+    off += 6;
+    p++;
+    i++;
+    k += 0x10;
+    if (i < 3) {
+        goto loop;
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B46B4);
 
@@ -368,7 +407,46 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B588C);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5AAC);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5C1C);
+/* 9 rows at the exact length (46), of which SIX are not real: splat prints
+ * the bare `lui`s of 0x801B0000, 0x801AFFC0 and 0x801AFFC4 as
+ * %hi/%lo(func_801B0000) / D_801AFFC0 / D_801AFFC4 by pairing them with the
+ * following displacement, and neither D_801AFFC0 nor D_801AFFC4 is defined
+ * anywhere in config/ or asm/. Those operands assemble to identical bytes;
+ * see the splat-heuristic bullet in CLAUDE.md.
+ *
+ * The three real rows are $v0/$v1 trading places between the `lbu` of
+ * r[0x411] and the reload of p[0]: the target puts the byte in $v1 and keeps
+ * func_80025788's return in $v0 for one more instruction, this body reuses
+ * $v0 in place (`lbu v0,0x411(v0)`), which is block_alloc tying a destination
+ * to a source that dies there.
+ *
+ * Measured and rejected, all exactly 9 rows: `(r[0x411] & 0xF) + p[0]` (both
+ * operand orders), a named `nib` local as s32 and as u8, a named `k` for the
+ * raw byte, a named `idx` for the whole sum, and reading the table through
+ * *(u32*)0x801B0000 instead of through `p`. `void func_800B5C1C(s16)` is what
+ * the header said and is wrong -- the target's `move s0,a0` cannot come from
+ * a narrow parameter; s32 is worth 4 rows and the three callers are unmoved
+ * by the change (measured). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800B5C1C);
+#else
+extern u8 D_80163F34[];
+Unk8009D84C* func_80025788(s32 arg0);
+
+void func_800B5C1C(s32 arg0) {
+    u_long* p;
+    u8* r;
+
+    p = (u_long*)0x801B0000;
+    func_8001C3CC(D_80103200 + arg0 * 0xF000, (u_long*)0x801B0000,
+                  *(u32*)(0x801AFFC0 + p[0] * 4));
+    r = (u8*)func_80025788(arg0);
+    func_8001C3CC(
+        D_80163F34 + arg0 * 4108,
+        (u_long*)(*(u32*)(0x801AFFC4 + (p[0] + (r[0x411] & 0xF)) * 4) + (s32)p),
+        0x1000);
+}
+#endif
 
 void func_8001C3CC(u8*, u_long*, s32);
 
@@ -394,7 +472,54 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5E64);
 void func_800B60E0(s16);
 void func_800B5FC4(s16 arg0) { func_800B60E0(arg0); }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B5FE8);
+/* 20 rows, 2 instructions short of 62. Both walks are backward gotos for the
+ * same reason as func_800BB430 and func_800B45F0 (as `do`/`while` loops gcc
+ * hoists the re-read bound and strength-reduces the second walk's index:
+ * 29 rows), and the second walk has to reach D_800FA6D8 by byte offset
+ * rather than through the declared struct (27 -> 20).
+ *
+ * Two things left, both in the second walk. The target rebuilds
+ * %hi/%lo(D_800FA6D8+0x3C) for the bound at the bottom of every iteration;
+ * this body reaches it as `-2(a1)` off the element base, because cse relates
+ * two constants that share a symbol_ref. And the target reads arg0 straight
+ * out of $a0 for both `arg0 * 64` sites, sharing only the `sll 16`, where
+ * this body copies it to $a3 first and re-shifts.
+ *
+ * Frame: the target's is a bare -0x10 with nothing saved, so the 0x10 is pure
+ * declared locals. `unusedLocals` measured 25 at 0, 22 at 8, 20 at 12 and 20
+ * at 16. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800B5FE8);
+#else
+void func_800B5FE8(s16 arg0) {
+    s32 i;
+    s32 off;
+    u8* p;
+    u8 unusedLocals[12];
+
+    off = arg0 * 0xB9C;
+    if (*(s16*)((u8*)D_801518E4 + 0x10 + off) > 0) {
+        i = 0;
+        p = (u8*)D_801518E4 + 0x3F + off;
+    loop1:
+        *p |= 8;
+        i++;
+        p++;
+        if (i < *(s16*)((u8*)D_801518E4 + 0x10 + off)) {
+            goto loop1;
+        }
+    }
+    if (*(s16*)((u8*)D_800FA6D8 + 0x3C + arg0 * 64) > 0) {
+        i = 0;
+    loop2:
+        *(u8*)((u8*)D_800FA6D8 + 0x3E + arg0 * 64 + i) |= 8;
+        i++;
+        if (i < *(s16*)((u8*)D_800FA6D8 + 0x3C + arg0 * 64)) {
+            goto loop2;
+        }
+    }
+}
+#endif
 
 void func_800B60E0(s16);
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B60E0);
@@ -671,7 +796,47 @@ static void func_800B88CC(s32 arg0) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B8944);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B8A34);
+/* 18 rows, 4 instructions long -- and the four are `nop`s in load-delay
+ * slots. The target hoists each *next* source load above the current store
+ * (`lhu a0,D_800F99EE(v1)` issues before `sh v0,D_80162978+0xC(a1)`), which
+ * fills the slot; this body cannot move them and pays a nop at each of the
+ * four sites.
+ *
+ * The obvious diagnosis is aliasing -- true_dependence lets a MEM_IN_STRUCT_P
+ * load float past a store that is not one -- and it is wrong, or at least not
+ * reachable this way. Measured: the source reads as subscripts on a cast
+ * pointer, `((u16*)(D_800F99EC + s))[1]`, exactly 18 (a subscript on a
+ * *pointer* is an INDIRECT_REF, not an ARRAY_REF, so no flag is set); the
+ * source reads as COMPONENT_REFs through a struct-pointer cast, which does
+ * set the flag, also exactly 18; the destination through a named
+ * `Unk80162978*` local, 48 rows and 20 instructions short, because the
+ * pointer collapses all eight $at expansions. So both sides of the flag are
+ * closed and the lever is elsewhere.
+ *
+ * The prototype in battle_private.h said `(s16, s32)`; the target has no
+ * entry conversion on either parameter, so it is `(s32, s32)`. That is
+ * already fixed in the header. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800B8A34);
+#else
+extern u8 D_800F99EC[];
+
+void func_800B8A34(s32 arg0, s32 arg1) {
+    s32 s;
+    s32 d;
+
+    s = arg0 * 12;
+    d = arg1 * 32;
+    *(s16*)((u8*)D_80162978 + 0xA + d) = *(u16*)(D_800F99EC + s);
+    *(s16*)((u8*)D_80162978 + 0xC + d) = D_801590CC;
+    *(s16*)((u8*)D_80162978 + 0xE + d) = *(u16*)(D_800F99EC + 2 + s);
+    *(s32*)((u8*)D_80162978 + 0x10 + d) = *(s16*)(D_800F99EC + 4 + s);
+    *(s32*)((u8*)D_80162978 + 0x14 + d) = *(s16*)(D_800F99EC + 6 + s);
+    *(u8*)((u8*)D_80162978 + 0x18 + d) = D_800F8CF0;
+    *(s16*)((u8*)D_80162978 + 6 + d) = *(u16*)(D_800F99EC + 8 + s);
+    *(u8*)((u8*)D_80162978 + 0x19 + d) = *(u8*)(D_800F99EC + 10 + s);
+}
+#endif
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800B8B48);
 
@@ -740,7 +905,44 @@ static void func_800BA24C(void) {
     D_80163B44[1] = (D_80163B44[1] - 1) & 0x1F;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BA2BC);
+/* 13 rows at the exact length (41). Every instruction and every opcode is
+ * right; the whole residue is register naming. The target keeps `off` in $v0
+ * and lets `arg0 * 2` and the loaded value share $v1; this body keeps `off` in
+ * $a1 and the value in $v0.
+ *
+ * Measured and rejected, all against the same 41 instructions:
+ *   - `off = arg0 * 52;` hoisted above the branch: 22 rows, -3 instructions
+ *     (the target computes the multiply once per arm, not once).
+ *   - no locals at all, the store written out in both arms: 27 rows, -1. That
+ *     shape is structurally right -- 2 offset computations, 3 $at expansions,
+ *     one cross-jumped store -- but a fourth reference to D_800F8182 makes cse
+ *     promote its address to a register and all three $at expansions go.
+ *   - the offset expression inline at all three sites: 13 rows, +4.
+ *   - `v` as s32 / u16 / s16, and `v` declared before `off`: exactly 13, all
+ *     four. A flat sweep over the declaration dimension.
+ * cc1 -dl says there are three global allocnos: $a0's parameter (7 refs / 21
+ * insns), `off` (6 / 8) and the loaded value (4 / 6). `off` already has the
+ * highest allocno_compare priority (2.0 against 1.33) and still does not get
+ * $v0, so the ranking is not the lever and neither term is reachable from C
+ * without emitting an instruction. This is a park, not a permuter target. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800BA2BC);
+#else
+void func_800BA2BC(s32 arg0) {
+    s32 off;
+    s16 v;
+
+    if (D_80163B44[arg0] < 0x10) {
+        off = arg0 * 52;
+        v = *(u16*)((u8*)D_800F8182 + off) - 0x19;
+    } else {
+        off = arg0 * 52;
+        v = *(u16*)((u8*)D_800F8182 + off) + 0x19;
+    }
+    *(s16*)((u8*)D_800F8182 + off) = v;
+    D_80163B44[arg0] = (D_80163B44[arg0] - 1) & 0x1F;
+}
+#endif
 
 extern s32 D_801590E8[];
 extern u8 D_801590E4[];
@@ -860,7 +1062,51 @@ static void func_800BB030(s16 arg0) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB2A8);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BB430);
+/* 18 rows, one instruction short of 50. The loop shape is settled: written as
+ * a `do`/`while` it is a loop to loop_optimize, which hoists the +0x78 base
+ * into a fourth callee-saved register, strength-reduces the index into a
+ * walking pointer and lifts the `(s16)arg1` conversion out of the body -- the
+ * target does none of those, which is what a backward goto buys (32 rows ->
+ * 27). The `q` local recomputed inside the loop is what puts the `+ off` on
+ * the symbol side of the sum rather than on the index side (27 -> 18), and
+ * `unusedLocals[8]` is the 8 bytes of frame between the outgoing-argument
+ * area and the register saves (26 -> 18).
+ *
+ * Measured and rejected: the flat `((u8*)D_801518E4 + 0x78 + off) + i * 4`
+ * and the subscript `((s32*)((u8*)D_801518E4 + 0x78 + off))[i]` written
+ * inline, both 19; the goto loop with no `q` local, 27; no pad, 26.
+ *
+ * The residue is where `move s2,a1` lands -- the target copies arg1 into its
+ * callee-saved register in the entry block, this body does it after the
+ * zero-trip guard -- plus the one instruction that costs. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800BB430);
+#else
+void func_800D3520(s32, s16);
+
+void func_800BB430(s16 arg0, s32 arg1) {
+    s32 i;
+    s32 off;
+    s32 p;
+    s32* q;
+    u8 unusedLocals[8];
+
+    off = arg0 * 0xB9C;
+    if (*(s16*)((u8*)D_801518E4 + 0x10 + off) > 0) {
+        i = 0;
+    loop:
+        q = (s32*)((u8*)D_801518E4 + 0x78 + off);
+        p = q[i];
+        i++;
+        if (p != 0) {
+            func_800D3520(p, arg1);
+        }
+        if (i < *(s16*)((u8*)D_801518E4 + 0x10 + off)) {
+            goto loop;
+        }
+    }
+}
+#endif
 
 // See func_800B5CD4 for why the 0x801B0000 base is a literal and not the
 // func_801B0000 symbol splat prints.
@@ -1149,7 +1395,25 @@ static void func_800BC72C(void) {
     func_800BCA58(3);
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BC754);
+extern u8 D_80163B3C;
+extern s16 D_80158D02;
+extern s16 D_80158D04;
+extern s16 D_801031EA;
+extern s16 D_801031EC;
+
+// publish camera placement D_80163B3C of the current formation into the same
+// six globals func_800BCA58 writes
+void func_800BC754(void) {
+    s32 off;
+
+    off = D_80163B3C * 12;
+    D_80158D00 = *(u16*)((u8*)&D_8016360C + 0x1C + off);
+    D_80158D02 = *(u16*)((u8*)&D_8016360C + 0x1E + off);
+    D_80158D04 = *(u16*)((u8*)&D_8016360C + 0x20 + off);
+    D_801031E8 = *(u16*)((u8*)&D_8016360C + 0x22 + off);
+    D_801031EA = *(u16*)((u8*)&D_8016360C + 0x24 + off);
+    D_801031EC = *(u16*)((u8*)&D_8016360C + 0x26 + off);
+}
 
 void func_800BC630(void);
 void func_800BCB1C(u8, s16, s16);
@@ -1680,7 +1944,38 @@ void func_800C55B8(void) {
     D_801621F0[D_801590D4].D_801621F4--;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C5694);
+/* 15 rows, one instruction over 71. The extra insn is a `move a1,v1` copying
+ * the D_80162978 byte offset: the target computes `D_8015169C * 32` straight
+ * into the register that serves all six accesses, this body computes it into
+ * a block-local and copies. The `li v0,-1` that the target puts in the guard
+ * branch's delay slot lands after the model-index load here, which is reorg
+ * having nothing better to steal once the copy exists.
+ *
+ * Measured and rejected: storing -1 before rather than after reading the
+ * model index (15 either way -- statement order is inert here), and writing
+ * `D_8015169C * 32` inline at all six sites instead of once (43 rows, 15
+ * instructions short: cse folds it to two expansions where the target has
+ * six). */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle1", func_800C5694);
+#else
+void func_800C5694(void) {
+    s32 a;
+    s32 m;
+
+    a = D_8015169C * 32;
+    if (*(s16*)((u8*)D_80162978 + 4 + a) == 0) {
+        *(s16*)((u8*)D_80162978 + a) = -1;
+        m = *(s16*)((u8*)D_80162978 + 6 + a);
+        *(u8*)((u8*)D_801518E4 + 0x26 + m * 0xB9C) = 1;
+    } else {
+        m = *(s16*)((u8*)D_80162978 + 6 + a) * 0xB9C;
+        *(s16*)((u8*)D_801518E4 + 6 + m) =
+            *(u16*)((u8*)D_801518E4 + 6 + m) + *(u16*)((u8*)D_80162978 + 2 + a);
+        *(s16*)((u8*)D_80162978 + 4 + a) = *(u16*)((u8*)D_80162978 + 4 + a) - 1;
+    }
+}
+#endif
 
 extern BattleModelSub D_8015E1E8[];
 s32 func_800B2F50(void);
