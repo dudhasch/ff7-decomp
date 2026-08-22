@@ -1625,7 +1625,21 @@ void func_80031CB0(AKAO_TRACK* track) {
     track->volume = val << 0x17;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031CE0);
+void func_80031CE0(AKAO_TRACK* track) {
+    s32 steps;
+    s32 cur;
+    s32 target;
+
+    steps = *track->addr++;
+    track->vol_slide_steps = steps;
+    if (steps == 0) {
+        track->vol_slide_steps = 0x100;
+    }
+    target = (s8)*track->addr++ << 23;
+    cur = track->volume & 0xFFFF0000;
+    track->volume = cur;
+    track->vol_slide_step = (target - cur) / track->vol_slide_steps;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031D6C);
 
@@ -1654,7 +1668,21 @@ void func_80031EEC(AKAO_TRACK* track) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031F30);
+void func_80031F30(AKAO_TRACK* track) {
+    s32 steps;
+    s16 cur;
+    s32 delta;
+
+    steps = *track->addr++;
+    track->vol_balance_slide_steps = steps;
+    if (steps == 0) {
+        track->vol_balance_slide_steps = 0x100;
+    }
+    cur = track->vol_balance & 0xFF00;
+    delta = (*track->addr++ << 8) - cur;
+    track->vol_balance = cur;
+    track->vol_balance_slide_step = delta / track->vol_balance_slide_steps;
+}
 
 void func_80031FC0(AKAO_TRACK* track) {
     track->vol_pan = *track->addr++ << 8;
