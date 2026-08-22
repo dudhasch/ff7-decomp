@@ -6,6 +6,8 @@ u8* func_80014C80(s32 arg0);
 s32 func_80015B50(void);
 s32 func_80015B88(void);
 extern u8 D_80083084[];
+extern u8 D_800694C4[];
+extern u8 D_800694D4[];
 extern u8 D_80063048[];
 extern void* D_800707C0;
 void func_80014804(void);
@@ -864,7 +866,19 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019338);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001937C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800193F4);
+void func_800193F4(s32 delta) {
+    s32 i;
+    s32 v;
+
+    for (i = 0; i < 0x10; i++) {
+        D_800694C4[i] += 1;
+        /* Read into a local first: written `D_800694D4[i] += delta` or
+         * `delta + D_800694D4[i]`, fold ranks the array reference as the more
+         * complex operand and makes it op0 of the `addu`. */
+        v = D_800694D4[i];
+        D_800694D4[i] = delta + v;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019440);
 
