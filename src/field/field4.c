@@ -1311,137 +1311,53 @@ extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
 /* Zero and default-initialise the whole field runtime state: the entity table,
  * the per-model flags, the script state, and the various counters.
  *
- * 82 rows, and -- the reason this is a good permuter target rather than a
- * codegen problem -- the instruction *count* is exact: 18 insertions against
- * 18 deletions, all of them one-slot shifts. Every remaining row is naming or
- * placement.
+ * `g_FieldState`, `g_FieldScripts` and `g_FieldModels` are pointer globals the
+ * target re-reads before nearly every store; writing them inline, as here, is
+ * what reproduces that. Caching either of the first two in a local is -17 and
+ * -61 instructions respectively.
  *
- * The three symbols m2c could not infer are settled: D_8009C6E0 is
- * g_FieldState, D_8009C6DC is g_FieldScripts and D_8009C544 is g_FieldModels,
- * all three pointer globals that the target re-reads before nearly every
- * store. Writing them inline, as here, is what reproduces that; a cached local
- * gives one load for the whole function.
+ * The whole function turned on one rule, which is now in CLAUDE.md: **a store
+ * to a `u8` struct member invalidates the cached pointer load and a store to a
+ * `s16`/`s32` one does not** (gcc 2.6.3's `true_dependence` disables its
+ * struct/non-struct disambiguation for QImode). So each run of stores through
+ * one loaded pointer is a *source* run ending at its first byte store, and the
+ * emitted position of that `sb` says nothing -- sched2 hoists it to fill the
+ * load's delay slot. Reading the target's runs back gave ten one-line moves
+ * (`characterLock` after `modelCount`, `battleMode1` after `battleMode2`,
+ * `shakeX.enabled` after `viewOffsetTarget`, `backgroundMovieEnabled` after
+ * `shakeY.currentStep`, and in the model loop `MoveDir`, `OfsType`, `visible`,
+ * `scriptedMoveMode`, `requestTalkScript` and `BlinkOn` each after the `sh`
+ * run they close): 87 rows -> 23 at the exact length.
  *
- * What took it from unmeasurable to 82:
- *   - Two loop counters for the whole function, not one per loop: the target
- *     puts every *outer* and every sequential loop on one variable ($a3) and
- *     both *inner* loops -- the script-bank walk and the palette clear -- on a
- *     second ($a2). Writing a third counter for the bank loop is 34 rows, all
- *     of them register renaming, and it reads as noise. This is CLAUDE.md's
- *     counter-merging idiom applied across a whole function rather than a run
- *     of adjacent loops.
- *   - D_8009AD38 is `u8`, not `s8`. `*p = 0xFF` through an `s8*` narrows the
- *     constant to QImode and gcc materialises it as `li v1,-1`; the target has
- *     `li v1,0xff`. Same stored byte, different instruction.
- *   - The FieldLine array is reached as byte offsets from D_8007E7AC, which is
- *     what gives the target's `lui at/addiu at/addu at,at,v1` per field. The
- *     interior labels the .s names (D_8007E7BD and friends) have no
- *     definition, so they cannot be declared -- checkfn resolves
- *     `%lo(D_8007E7AC+0x11)` against `%lo(D_8007E7BD)` as an alias, and the
- *     link works only in the offset form.
+ * Three levers closed the rest, and two of them only pay together:
+ *   - `D_80081DC4 = 0;` belongs *inside* the opening run, as its last
+ *     statement. Anywhere in the run is 21 rows and after it 40, because it is
+ *     a plain scalar store to a different symbol -- `memrefs_conflict_p`
+ *     proves the two addresses distinct, so it does not end the run.
+ *   - the `numModels` read belongs after `movieCommandState`, not second.
+ *     That is what makes sched1 emit the `g_FieldState` load before the
+ *     `g_FieldScripts` one, which shortens the scripts pointer's live range
+ *     enough for `block_alloc` to give it `$v0` and the eight-store pointer
+ *     `$v1` -- the target's assignment. Alone it is worth nothing (25 rows
+ *     against 23); with `D_80081DC4` already moved it is 21 -> 11.
+ *   - `off += 0x18;` before `i++` in the FieldLine loop: the two bivs'
+ *     increments come out in source order, and only that order lets sched2
+ *     leave `addiu a3,a3,1` next to the test instead of hoisting it to the
+ *     loop top.
  *
- * What is left is one phenomenon, in nine places: a group of stores that share
- * one loaded pointer is attached in the target to the *first* statement of the
- * group and here to the *last*. The preamble wants
- * {0x2,0x26,0x32,0x2e,0x2a,0x2c,0x30,0x28} on the pointer loaded for 0x2 and
- * gets it on the one loaded for 0x30; the entity loop wants
- * {0x36,0x66,0xc,0x10,0x14,0x72,0x74} on 0x36's and gets it on 0x38's; the
- * same shift recurs at 0x60, 0x37, and the Kawai fields at 0/2/4. The number
- * of loads is identical either way, which is why the instruction count is
- * exact.
+ * `fill` is a real local: the target materialises `ori v1,zero,0xFF` *before*
+ * `ori a3,zero,0x8`, and `move_movables` always inserts a hoisted invariant
+ * after the preheader's own statements, so the constant cannot be a hoist. Its
+ * width is not recoverable -- `u8` and `s32` are byte-identical.
  *
- * Measured and rejected:
- *   - m2c's temps written out as explicit `FieldEntity*` locals, exactly at
- *     the group boundaries the target has: 126 rows. The plain
- *     `g_FieldModels[i].member` spelling is right and the grouping is not
- *     something a local can pin.
- *   - the palette clear as `D_80095DE0[i * 0x20 + j * 2]`, to stop
- *     `check_dbra_loop` reversing the outer counter: 85. As a walked `u8* pal`
- *     with `pal += 0x20`: 83. As `&D_80095DE0[i * 0x20]` hoisted to the inner
- *     preheader (below): 82, and the outer loop is still reversed -- the
- *     target counts up with `slti v0,a3,0x40`, we count down with `bgez`.
- *   - the FieldLine loop indexed `i * 0x18` instead of a separate `off` biv:
- *     146 rows. The scaled subscript folds the symbol into the address
- *     register and the whole `$at` form is lost -- CLAUDE.md's
- *     scaled-subscript rule, seen from the wrong side.
-
- * Re-measured at 100 rows / +3, with the head's store grouping read against
- * the target rather than guessed. Two things are now settled:
- *   - the *order* of the 44 `g_FieldState->member = 0;` stores is already the
- *     target's, read straight off the `.s`.
- *   - both globals really are re-read at every use. Caching `g_FieldScripts`
- *     in a local is **-17 instructions** (135 rows), caching `g_FieldState`
- *     is **-61** (211), and both together **-80** (238). Those numbers are
- *     the count of reloads the target has, so the repeated-expression form
- *     the body already uses is right and is not what the residue is about.
- *
- * ---- 101 rows -> 87, and the histogram is now completely identical ----
- *
- * At 101 rows the whole residue was nameable in five numbers:
- * `addiu -2 / addu +1 / sll +1` and one `%hi` at `D_80095DFE` where the
- * target has `D_80095DE0`. That is the palette clear and nothing else. Two
- * statements fixed it and one of them is the reverse of the obvious move.
- *
- *   - **The palette row is a subscript gcc reduces, not a pointer you walk.**
- *     `cell = (s16*)&D_80095DE0[i * 0x20];` at the top of the outer body with
- *     `cell[j] = 0;` inside (j counting down from 0xF) compiles
- *     instruction-for-instruction to the target's loop: the outer address is
- *     a giv `strength_reduce` turns into a walking pointer, incremented by
- *     `addiu v1,v1,0x20` in the outer branch's delay slot, and `cell[j]` is
- *     an inner giv whose preheader init is `addiu v0,v1,0x1e` and whose step
- *     is `addiu v0,v0,-2`. The old body's `cell = (s16*)(&D_80095DE0[i *
- *     0x20] + 0x1E)` with `cell--` folds the `+0x1E` into the `%lo`, so the
- *     row is rebuilt with `sll`/`addu` at every iteration -- exactly the
- *     three-opcode imbalance above.
- *
- *     Writing the walk by hand is worse, and in the other direction: with a
- *     `u8* row` walked `row += 0x20`, `i` has no use left outside the exit
- *     test, `check_dbra_loop` reverses it (`bgez` in place of
- *     `slti`/`bnez`), and the `+0x1E` folds into `row`'s *initial* value so
- *     the target's per-iteration `addiu v0,v1,0x1e` disappears -- **-2
- *     instructions**, 105 rows, in all three spellings (`row + 0x1E` with
- *     `cell--`, `row + j * 2`, and either increment order). The subscript
- *     forms that keep `i` in the address are `+1` (`D_80095DE0[i * 0x20 + j *
- *     2]`, `&D_80095DE0[i * 0x20] + j * 2`, `((s16*)&D_80095DE0[i *
- *     0x20])[j]`, all 107 rows): they get the inner giv right and leave the
- *     outer row unreduced. Only the hoisted-base form gets both.
- *   - **`modelCount` is read into a local as the *second* statement and
- *     stored ten statements later.** The target reads `lbu a1,3(v0)` at head
- *     position 14 and stores `sh a1,0x28(v1)` at 26, between `runAnimId` and
- *     `suspendWalkAndAnim`, so the value is carried in a register across the
- *     whole opening run. Where the *read* goes is the whole lever and it is
- *     sharp: first statement 100 rows, **after `eventCmd = 0` 87**, after
- *     `eventCmdParam` 91, after `movieCommandState` 89 and +1, after
- *     `characterLock` 97 and +2. The local's width is inert (`u8`, `s16`,
- *     `u16`, `s32` all identical), and without the local -- the whole
- *     statement moved down instead -- it is 92 rows and +1.
- *
- * **The histogram is now identical: every opcode count and every `%hi`
- * address, at the exact 484.** So the 87 rows left are one phenomenon and
- * one only -- which `g_FieldState` load serves which store in the opening
- * run, plus the register naming downstream of it. The target puts
- * {0x2, 0x26, 0x32, 0x2e, 0x2a, 0x2c, 0x30, 0x28} on a single load; this
- * build splits that run after 0x32 and reloads, and then has the two
- * instructions the target spends on `D_80081DC4` free elsewhere, which is
- * why the length still comes out exact.
- *
- * Measured against that and still open:
- *   - `D_80081DC4 = 0;` moved up between `runAnimId` and `modelCount`, which
- *     is where the target emits it, is **86 rows and +1 instruction** -- and
- *     it was +1 on all three earlier bodies too, so it is a stable cost
- *     rather than a base-dependent one. Something else has to be -1 first;
- *     nothing measured yet is.
- *   - a `do { } while (0);` after `eventCmd = 0` is **exactly inert** (87),
- *     so by CLAUDE.md's probe the head residue is not sched2's and no
- *     placement of anything will reach it. It is cse's grouping of the
- *     pointer load, and the note's older claim that "the grouping is not
- *     reachable from statement order" survives this pass.
- *   - the same barrier one statement lower (after the `numModels` read) is
- *     97 rows and +3.
+ * The palette clear wants its row base hoisted as a subscript on the outer
+ * counter (`cell = (s16*)&D_80095DE0[i * 0x20];`) with `cell[j]` inside;
+ * walking a `u8* row` by hand is -2 instructions and any form that keeps `i`
+ * in the address is +1. The FieldLine array is reached as byte offsets from
+ * D_8007E7AC, which is what gives the target's `lui at/addiu at/addu at` per
+ * field; the scaled subscript folds the symbol into a base register and is
+ * 146 rows.
  */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
-#else
 void FieldInitDefaultValues(void) {
     s32 numModels;
     s32 i;
@@ -1450,47 +1366,48 @@ void FieldInitDefaultValues(void) {
     u8* q;
     s16* cell;
     s32 off;
+    u8 fill;
 
     g_FieldState->eventCmd = 0;
-    numModels = g_FieldScripts->numModels;
     g_FieldState->eventCmdParam = 0;
     g_FieldState->movieCommandState = 0;
-    g_FieldState->characterLock = 0;
+    numModels = g_FieldScripts->numModels;
     g_FieldState->walkAnimId = 1;
     g_FieldState->pcModelId = 0;
     g_FieldState->idleAnimId = 0;
     g_FieldState->runAnimId = 2;
     g_FieldState->modelCount = numModels;
+    g_FieldState->characterLock = 0;
+    D_80081DC4 = 0;
     g_FieldState->suspendWalkAndAnim = 0;
     g_FieldState->menuDisabled = 0;
     g_FieldState->unk35 = 0;
     g_FieldState->battlesDisabled = 0;
     g_FieldState->mapJumpDisabled = 0;
     g_FieldState->scrloSet = 0;
-    g_FieldState->battleMode1 = 0;
     g_FieldState->nextFieldMusic = 0;
     g_FieldState->nextBattleMusic = 0;
     g_FieldState->unk40 = 0;
     g_FieldState->battleMode2 = 0;
+    g_FieldState->battleMode1 = 0;
     g_FieldState->encounterTableId = 0;
     g_FieldState->viewOffsetNumSteps = 0;
     g_FieldState->viewOffsetCurrentStep = 0;
     g_FieldState->viewOffsetMode = 0;
-    g_FieldState->shakeX.enabled = 0;
     g_FieldState->viewOffsetStart = 0;
     g_FieldState->viewOffsetTarget = 0;
+    g_FieldState->shakeX.enabled = 0;
     g_FieldState->shakeY.enabled = 0;
     g_FieldState->shakeX.segmentActive = 0;
     g_FieldState->shakeY.segmentActive = 0;
-    g_FieldState->backgroundMovieEnabled = 0;
     g_FieldState->shakeX.amplitude = 0;
     g_FieldState->shakeY.amplitude = 0;
     g_FieldState->shakeX.numStepsPerSegment = 0;
     g_FieldState->shakeY.numStepsPerSegment = 0;
     g_FieldState->shakeX.currentStep = 0;
     g_FieldState->shakeY.currentStep = 0;
+    g_FieldState->backgroundMovieEnabled = 0;
     g_FieldState->cameraScrollMode = 0;
-    D_80081DC4 = 0;
     g_FieldState->currentFieldScale = g_FieldScripts->scale;
 
     p = &D_80075F23;
@@ -1518,18 +1435,17 @@ void FieldInitDefaultValues(void) {
         g_FieldScriptDebugEntities[i] = 0;
     }
     for (i = 0; i < g_FieldScripts->numModels; i++) {
-        g_FieldModels[i].MoveDir = 0;
         g_FieldModels[i].charId = 0;
         g_FieldModels[i].PosX = 0;
         g_FieldModels[i].PosY = 0;
         g_FieldModels[i].PosZ = 0;
         g_FieldModels[i].PosI = 0;
         g_FieldModels[i].MoveEndI = 0;
+        g_FieldModels[i].MoveDir = 0;
         g_FieldModels[i].Dir = 0;
         g_FieldModels[i].TurnType = 0;
         g_FieldModels[i].TurnSteps = 0;
         g_FieldModels[i].TurnStep = 0;
-        g_FieldModels[i].OfsType = 0;
         g_FieldModels[i].TurnStart = 0;
         g_FieldModels[i].TurnEnd = 0;
         g_FieldModels[i].OffsetX = 0;
@@ -1543,19 +1459,20 @@ void FieldInitDefaultValues(void) {
         g_FieldModels[i].OffsetEndZ = 0;
         g_FieldModels[i].OffsetSteps = 0;
         g_FieldModels[i].OffsetStep = 0;
+        g_FieldModels[i].OfsType = 0;
         g_FieldModels[i].activeAnimId = 0;
         g_FieldModels[i].animSpeed = 0x10;
-        g_FieldModels[i].visible = 0;
         g_FieldModels[i].MoveEndX = 0;
         g_FieldModels[i].MoveEndY = 0;
         g_FieldModels[i].MoveEndZ = 0;
         g_FieldModels[i].animCurrentFrame = 0;
         g_FieldModels[i].animLastFrame = 0;
-        g_FieldModels[i].scriptedMoveMode = 0;
+        g_FieldModels[i].visible = 0;
         g_FieldModels[i].MoveSpeed = g_FieldState->currentFieldScale * 2;
-        g_FieldModels[i].requestTalkScript = 0;
+        g_FieldModels[i].scriptedMoveMode = 0;
         g_FieldModels[i].ActionArg = 0;
         g_FieldModels[i].ActionState = 0;
+        g_FieldModels[i].requestTalkScript = 0;
         g_FieldModels[i].requestPushScript = 0;
         g_FieldModels[i].SolidOff = 0;
         g_FieldModels[i].TalkOff = 0;
@@ -1568,10 +1485,10 @@ void FieldInitDefaultValues(void) {
         D_800756E8[i] = 0;
         D_8009D828[i] = 0x10;
         D_80082248[i] = 0x10;
-        g_FieldModels[i].BlinkOn = 0;
         g_FieldModels[i].KawaiOp1 = 0;
         g_FieldModels[i].KawaiOp0 = 0;
         g_FieldModels[i].KawaiDataOffset = 0;
+        g_FieldModels[i].BlinkOn = 0;
         g_FieldModels[i].KawaiA = 0;
     }
     i = 0;
@@ -1612,14 +1529,15 @@ void FieldInitDefaultValues(void) {
         *(s16*)((u8*)&D_8007E7AC + 6 + off) = 0;
         *(s16*)((u8*)&D_8007E7AC + 8 + off) = 0;
         *(s16*)((u8*)&D_8007E7AC + 0xA + off) = 0;
-        i++;
         off += 0x18;
+        i++;
     } while (i < 0x20);
     D_80095D84 = 0;
+    fill = 0xFF;
     i = 8;
     q = &D_8009AD38;
     do {
-        *q = 0xFF;
+        *q = fill;
         i--;
         q--;
     } while (i >= 0);
@@ -1627,7 +1545,6 @@ void FieldInitDefaultValues(void) {
     g_FieldMovieOpcodeActive = 0;
     Savemap.memory_bank_1[31] |= 3;
 }
-#endif
 
 /* Walks every entity's first script and runs its initialisation opcodes
  * (everything up to the terminating 0). The script-offset table sits past the

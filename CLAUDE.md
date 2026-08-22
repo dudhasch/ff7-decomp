@@ -812,6 +812,31 @@ a near-miss, in rough order of frequency:
   moved it from `0x18` to `0x20`, behind the `long` declared after it at
   function scope. Use it when a diff is nothing but `N(sp)` offsets in one
   branch.
+* **A store to a `u8` struct member kills the cached pointer that reached it;
+  a store to an `s16`/`s32` one does not — so a run of stores sharing one
+  loaded pointer is a *source* run that ends at its first byte store.**
+  `true_dependence`'s struct/non-struct disambiguation carries the guard
+  `GET_MODE (x) != QImode` on both arms, because a byte access may be part of
+  any object. So `g_FieldState->someU8 = 0;` conflicts with the plain
+  `extern FieldState* g_FieldState` load in cse's table and forces a reload at
+  the next statement, while `g_FieldState->someS16 = 0;` does not. What that
+  buys is a way to read a target's *source order* out of its asm without any
+  reasoning about registers: group the stores by which `lw` of the pointer
+  they use, and within each group the one `sb` is the last statement the
+  original wrote. **Its emitted position says nothing** — sched2 routinely
+  hoists it five or six slots up, into the load-delay slot of the very load
+  the *next* group needs, which is exactly what makes the run look like it
+  starts with a byte store. `FieldInitDefaultValues` in `src/field/field4.c`
+  is twenty such runs across two objects (`g_FieldState` and `g_FieldModels`);
+  reading them back moved ten statements one position each and took it from
+  87 rows to 23 at the exact length, after two sessions had recorded the same
+  residue as "cse's grouping, not reachable from statement order".
+
+  Two corollaries. A store to a *different* scalar global in the middle of a
+  run is free — `memrefs_conflict_p` proves two `symbol_ref`s distinct — so
+  `D_80081DC4 = 0;` sits inside the opening run and only its being *in* the
+  run matters, not where (nine placements measured 21 rows, the tenth, just
+  after it, 40). And an `sw` behaves like `sh`: only QImode is special.
 * **A scalar global does not alias a struct store; the same address reached
   through an array or a struct member does.** gcc 2.6.3's `true_dependence`
   disambiguates on `MEM_IN_STRUCT_P`, so a load of a plain `extern s16 x` is
