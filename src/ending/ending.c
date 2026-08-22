@@ -70,6 +70,7 @@ typedef struct EndingActor {
 
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
+extern u8 D_800A652E[];
 extern u8 D_800A6530[];
 extern u8 D_800A6532[];
 extern u8 D_800A6534[];
@@ -77,6 +78,12 @@ extern u8 D_800A6538[];
 extern u8 D_800A653C[];
 extern u8 D_800A653D[];
 extern u8 D_800A653E[];
+extern u8 D_800A6540[];
+extern u8 D_800A6541[];
+extern u8 D_800A6542[];
+extern u8 D_800A6544[];
+extern u8 D_800A6545[];
+extern u8 D_800A6546[];
 extern u8 D_800A6588[];
 extern u8 D_800A658A[];
 extern u8 D_800A658C[];
@@ -124,7 +131,21 @@ extern u8 D_800AC2D4[];
 extern u8 D_800AC2D5[];
 extern u8 D_800AC2D6[];
 extern u8 D_800A763C[];
+extern u8 D_800A7640[];
+extern u8 D_800A7641[];
+extern u8 D_800A7642[];
+extern u8 D_800A7644[];
+extern u8 D_800A7646[];
+extern u8 D_800A7648[];
+extern u8 D_800A764A[];
 extern u8 D_800A765C[];
+extern u8 D_800A7660[];
+extern u8 D_800A7661[];
+extern u8 D_800A7662[];
+extern u8 D_800A7664[];
+extern u8 D_800A7666[];
+extern u8 D_800A7668[];
+extern u8 D_800A766A[];
 extern EndingTask D_800AF3D8;
 extern u32 D_800AF3EC;
 extern u32 D_800AF3F0;
@@ -229,7 +250,27 @@ s32 func_800A0BA8(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0CAC);
+s32 func_800A0CAC(void) {
+    s32 slot = *D_800A6528++;
+    s32 steps = *D_800A6528++;
+    s32 target = *D_800A6528++;
+    s32 off = slot * 0x88;
+    s32 stepR = (target - *(u8*)(D_800A653C + off)) / steps;
+    s32 stepG = (target - *(u8*)(D_800A653D + off)) / steps;
+    s32 stepB = (target - *(u8*)(D_800A653E + off)) / steps;
+    s32 flags = *(u16*)(D_800A652C + off);
+
+    *(s16*)(D_800A652E + off) = steps;
+    *(u8*)(D_800A6544 + off) = target;
+    *(u8*)(D_800A6545 + off) = target;
+    *(u8*)(D_800A6546 + off) = target;
+    *(u16*)(D_800A652C + off) = flags | 8;
+    *(u8*)(D_800A6540 + off) = stepR;
+    *(u8*)(D_800A6541 + off) = stepG;
+    *(u8*)(D_800A6542 + off) = stepB;
+    D_800A6394 = 1;
+    return 1;
+}
 
 void func_800A0E68(void) {
     s32 i;
@@ -255,7 +296,75 @@ void func_800A0E68(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0F90);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/ending/nonmatchings/ending", func_800A0F90);
+#else
+/* 1 changed / 1 inserted at the exact 137 instructions. The whole residue is
+ * where `move s0,zero` -- the second loop's `tile = 0` -- sits relative to the
+ * two hoisted constants `li s2,0x140` and `li s1,0x28`. The target has it
+ * after them, we emit it before, and the three insns are mutually independent.
+ *
+ * The two levers that got it from 19 rows to 2 are both CLAUDE.md rules seen
+ * from the failure side: the second loop needs its *own* counter (sharing the
+ * first loop's `off` stretches its live range across func_800A3178 and gives
+ * it a callee-saved register where the target uses $v1 -- 17 rows), and the
+ * first loop's increments go `off += 0x88, i++` like func_800A0AB8's, not
+ * `i++, off += 0x88` like func_800A09DC's.
+ *
+ * Measured and rejected, all at the exact length:
+ *   `tile` declared first / between `i` and `off`            2 / 2
+ *   `tile = 0` hoisted above the func_800A3178 call          2
+ *   a `do { } while (0);` barrier in front of the loop       2  <- inert
+ *   0x140 and 0x28 as named locals assigned before the loop 18
+ *   `tile` as u32 / s16                                      3 / 31
+ *   `tile != 0x20` instead of `<`                            4
+ *   a separate 0..2 counter with `tile = t * 0x10`          27
+ *   the loop as `while` with the increment in the body      16
+ *
+ * The barrier being *exactly* inert is the finding: by CLAUDE.md's own probe
+ * this is not sched2's residue, so no amount of source position reaches it.
+ * That leaves the order in which local_alloc created the three quantities,
+ * which nothing here changes. perm_ins_block/perm_reorder_stmts is the pass
+ * to weight if this is ever handed to the permuter. */
+s32 func_800A0F90(void) {
+    s32 i;
+    s32 off;
+    s32 tile;
+
+    for (i = 0, off = 0; i < 0x20; off += 0x88, i++) {
+        *(s16*)(D_800A652C + off) = 0;
+        *(s16*)(D_800A6532 + off) = 0;
+        *(s16*)(D_800A6534 + off) = 0;
+        *(s32*)(D_800A6538 + off) = 0;
+        *(s16*)(D_800A6588 + off) = 0;
+        *(s16*)(D_800A658A + off) = 0;
+        *(s16*)(D_800A658C + off) = 0;
+        *(u8*)(D_800A653C + off) = 0;
+        *(u8*)(D_800A653D + off) = 0;
+        *(u8*)(D_800A653E + off) = 0;
+    }
+    func_800A3178(&D_800A762C, 4, 0x80, func_800A0E68);
+    for (tile = 0; tile < 0x20; tile += 0x10) {
+        SetTile((TILE*)(tile + (s32)D_800A763C));
+        SetTile((TILE*)(tile + (s32)D_800A765C));
+        *(s16*)(D_800A7644 + tile) = 0;
+        *(s16*)(D_800A7646 + tile) = 0;
+        *(s16*)(D_800A7648 + tile) = 0x140;
+        *(s16*)(D_800A764A + tile) = 0x28;
+        *(s16*)(D_800A7664 + tile) = 0;
+        *(s16*)(D_800A7666 + tile) = 0xC8;
+        *(s16*)(D_800A7668 + tile) = 0x140;
+        *(s16*)(D_800A766A + tile) = 0x28;
+        *(u8*)(D_800A7640 + tile) = 0;
+        *(u8*)(D_800A7641 + tile) = 0;
+        *(u8*)(D_800A7642 + tile) = 0;
+        *(u8*)(D_800A7660 + tile) = 0;
+        *(u8*)(D_800A7661 + tile) = 0;
+        *(u8*)(D_800A7662 + tile) = 0;
+    }
+    return 1;
+}
+#endif
 
 s32 func_800A11B4(void) {
     s32 file = *D_800A6528++;
