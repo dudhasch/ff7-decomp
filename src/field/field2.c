@@ -106,52 +106,69 @@ typedef struct {
  * The type byte is re-read for the second test because the stores through
  * `pos` in the first arm may alias it.
  *
- * 74 rows out, from an m2c seed that did not compile at all (`void*`
- * parameters dereferenced as `->unkNN`), so this is the first number the
- * function has ever had. What the rewrite established:
- *   - arg0 is the FieldScrollLimits at the head of the trigger block, arg1 the
- *     same `s16*` scroll position FieldBGClampPos takes; 0x14 is a type byte
- *     the rest of the record did not reach.
- *   - minX, minY and maxY have to be `s32`. As `s16` locals, combine narrows
- *     the closing `+ minX` back into a fresh `lhu` of the member rather than
- *     reusing the sign-extended load the target keeps live: 88 rows against 79.
- *   - `px = pos[0] - 0xA0` has to be its own local. Written inline, fold
- *     associates the constant onto minX and the subtraction comes out as
- *     `(minX + 0xA0) - pos[0]` where the target has `pos[0] - 0xA0` first.
- *   - the target reserves a 0x10 frame with no saved registers and no calls,
- *     so there is a local here nobody can see. Reserving it is worth 5 rows.
+ * 76 -> 60 rows, and the length is now exact (137). Two levers, both of
+ * which the earlier note had reasoned past rather than measured:
  *
- *   - the closing constant has to be added in its own statement. Written
- *     `pos[0] = ((num * dx / den) >> 8) + 0xA0 + minX;` fold's `associate`
- *     step lifts the literal onto the *other* variable and emits
- *     `addiu a0,minX,0xa0` / `addu`, where the target adds 0xA0 to the
- *     quotient and minX after it. Splitting it -- `fx = (...) + 0xA0;` then
- *     `pos[0] = fx + minX;` -- puts the literal back where the target has it,
- *     and is worth 74/7 -> 73/3. This is now the body.
+ *   - **One set of locals per arm.** The two `if`s share no variable in the
+ *     original. The tell is in the register assignment, not in the diff text:
+ *     the target puts minX in $t0 in arm 1 and $t1 in arm 2, dx in $a2 then
+ *     $t0, dy in $a0 then $a1, den in $a2 then $a0 -- *every* value on a
+ *     different register in the two arms, which is two pseudos each. Ours
+ *     reused one local per value and therefore one pseudo, on one register in
+ *     both arms. Splitting them alone is worth 3 insertions -> 2.
+ *   - **Name all four subexpression terms**, in both arms: `ax = minX - px`,
+ *     `bx = minX + 0x140`, `ay`, `by`. gcc 2.6.3 folds `A - (B + C)` to
+ *     `(A - C) - B` in `fold`'s associate step, and a VAR_DECL is what
+ *     `split_tree` will not descend into -- combine does not put it back,
+ *     because the pair cannot be merged into one insn. This is what the old
+ *     note called impossible ("a (s16)/(u16) cast is the only construct that
+ *     would defeat split_tree"); the cast costs a truncation pair and measures
+ *     +7 instructions, a named local costs nothing. Naming `bx`/`bx2` is what
+ *     fixes the *length*: with `dx` associated the arm-2 maxY load has slack
+ *     and maspsx emits no load-delay nop, where the target has one.
  *
- * 73 rows out. Everything left is one lever plus its fallout: gcc 2.6.3's
- * fold associates *every* `A - (B + C)` in this function, and the target has
- * none of them associated. `maxX - (minX + 0x140)` (twice) comes out as
- * `(maxX - 0x140) - minX` and `minY - (maxY - 0xF0)` as `(minY + 0xF0) - maxY`
- * -- same instruction count each time, different register lifetimes, and the
- * whole allocation cascades off them (the target copies a0 into t3 and keeps
- * the negated numerator in t2; we use t2 and a2). fold's `split_tree` strips
- * only conversions that keep the machine mode, so nothing spelled in SImode
- * blocks it. Measured, all worse or neutral against 73/3:
- *   - a named local per fold site, four sites: 75/3 (with the fx/fy split),
- *     78/7 (without). Two sites only: 75/3 for the dx pair, 73/3 for the dy
- *     pair -- i.e. exactly no effect.
- *   - one shared `off` local across all sites: 78/7, 76/7, 76/7.
- *   - flattening the sums instead (`maxX - minX - 0x140`, `minY - maxY +
- *     0xF0`): 85/5 alone, 80/1 with the fx/fy split. Note the 1: that
- *     spelling gets the *length* right and the registers wrong, so it is the
- *     better permuter seed of the two if the search is scored on insertions.
- *   - earlier rounds: px/py as `s16` (88), dx/dy inline in the dot product
- *     (91), no locals at all (85).
- * A `(s16)`/`(u16)` cast is the only construct that would defeat `split_tree`
- * and it costs a truncation pair per site, so it is not the answer either.
- * This remains a good permuter target: no calls, pure arithmetic, and the
- * instruction count is now within three. */
+ * Both are needed and neither is enough: split alone 79/2, terms alone 78/3,
+ * both 60/0. Note the trap on the way -- with the split and only ax/by named
+ * the count is 75, *better* than the 60-row body by rows, and it cannot ever
+ * match: arm 2 still emits `addiu +0xf0` off minY where the target has
+ * `addiu -0xf0` off maxY. A lower row count on a body with the wrong
+ * arithmetic is not progress.
+ *
+ * Settled inert, so do not re-measure:
+ *   - arm-2 statement order. Eight orderings of {px, minX, ax, bx, dx, py,
+ *     maxY, by, minY, ay, dy} are byte-identical, measured twice -- once
+ *     before the terms were named and once after.
+ *   - extra temporaries anywhere else: `sqx`/`sqy` for the two products,
+ *     `dot` for their sum, `mxy2` for `minY2 - maxY2`, in either arm or both.
+ *     Six variants, all exactly 60. cse re-shares a value that already
+ *     exists, so an extra reference to one is free and changes nothing.
+ *   - declaration order of the two local sets (grouped or interleaved).
+ *
+ * The residue is 60 rows of pure register naming with the instruction
+ * sequence already exact, and the .greg dump says precisely what is wrong.
+ * After the split only *two* pseudos are global -- `limits` (13 refs across
+ * 86 insns) and `pos` (9/89); everything else is block-local and goes to
+ * local_alloc. Those two land in $t2/$t3 and the target has them in
+ * $t3/$t4, so the original has **one more block-local quantity live at that
+ * point**, consuming a register below them. Adding one is exactly what does
+ * not work by hand -- see the inert list -- because every value that could
+ * be named already exists and cse folds the reference away. That is
+ * `perm_ins_block`'s job -- and that space is now enumerated rather than
+ * searched. A `do { } while (0); ` was placed after every one of the 33
+ * statements in the two arms, then a second on top of the best, then a
+ * third: 98 points, exhaustive to depth three. The landscape has a real
+ * gradient (58 to 80 at depth one, so this is *not* a conserved-pair
+ * plateau), it bottoms out at 55 rows, and the bottom is worse than doing
+ * nothing -- every barrier that reaches 55 buys the five rows by putting two
+ * instructions out of position, and no barrier at any depth reaches a
+ * 0-insertion body better than this one. Depth three cannot beat depth two.
+ * Under the permuter's own weights (100 an insertion, 5 a register) that is
+ * 465 against this body's 300, so 60/0 is also the better seed.
+ *
+ * What is left untried is the *types* of the eight term locals -- everything
+ * here is `s32` and the earlier note only ever swept px/py and the three
+ * member locals. That is 4^8, too wide to enumerate and exactly what
+ * `PERM_VAR` over a type list is for; see the run macro beside this file. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
@@ -167,16 +184,39 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
     s32 den;
     s32 fx;
     s32 fy;
+    s32 minX2;
+    s32 minY2;
+    s32 maxY2;
+    s32 px2;
+    s32 py2;
+    s32 dx2;
+    s32 dy2;
+    s32 num2;
+    s32 den2;
+    s32 fx2;
+    s32 fy2;
+    s32 bx;
+    s32 bx2;
+    s32 by;
+    s32 by2;
+    s32 ax;
+    s32 ax2;
+    s32 ay;
+    s32 ay2;
     u8 unusedLocals[0x10];
 
     if (limits->scrollType == 1) {
         px = pos[0] - 0xA0;
         minX = limits->minX;
-        dx = limits->maxX - (minX + 0x140);
+        ax = minX - px;
+        bx = minX + 0x140;
+        dx = limits->maxX - bx;
         py = pos[1] - 0x78;
         minY = limits->minY;
-        dy = limits->maxY - (minY + 0xF0);
-        num = -(((minX - px) * dx) + ((minY - py) * dy));
+        ay = minY - py;
+        by = minY + 0xF0;
+        dy = limits->maxY - by;
+        num = -((ax * dx) + (ay * dy));
         den = ((dx * dx) + (dy * dy)) >> 8;
         fx = ((num * dx / den) >> 8) + 0xA0;
         pos[0] = fx + minX;
@@ -184,19 +224,23 @@ void FieldCalcPointOnLine(FieldScrollLimits* limits, s16* pos) {
         pos[1] = fy + (u16)limits->minY;
     }
     if (limits->scrollType == 2) {
-        px = pos[0] - 0xA0;
-        minX = limits->minX;
-        dx = limits->maxX - (minX + 0x140);
-        py = pos[1] + 0x78;
-        maxY = limits->maxY;
-        minY = limits->minY;
-        dy = minY - (maxY - 0xF0);
-        num = -(((minX - px) * dx) + ((maxY - py) * dy));
-        den = ((dx * dx) + ((minY - maxY) * dy)) >> 8;
-        fx = ((num * dx / den) >> 8) + 0xA0;
-        pos[0] = fx + minX;
-        fy = ((num * dy / den) >> 8) - 0x78;
-        pos[1] = fy + (u16)limits->maxY;
+        px2 = pos[0] - 0xA0;
+        minX2 = limits->minX;
+        ax2 = minX2 - px2;
+        bx2 = minX2 + 0x140;
+        dx2 = limits->maxX - bx2;
+        py2 = pos[1] + 0x78;
+        maxY2 = limits->maxY;
+        by2 = maxY2 - 0xF0;
+        ay2 = maxY2 - py2;
+        minY2 = limits->minY;
+        dy2 = minY2 - by2;
+        num2 = -((ax2 * dx2) + (ay2 * dy2));
+        den2 = ((dx2 * dx2) + ((minY2 - maxY2) * dy2)) >> 8;
+        fx2 = ((num2 * dx2 / den2) >> 8) + 0xA0;
+        pos[0] = fx2 + minX2;
+        fy2 = ((num2 * dy2 / den2) >> 8) - 0x78;
+        pos[1] = fy2 + (u16)limits->maxY;
     }
 }
 #endif

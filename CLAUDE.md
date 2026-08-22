@@ -642,6 +642,40 @@ a near-miss, in rough order of frequency:
   came out with two base registers instead of one, 20 rows. This is the
   opposite of the counter-merging idiom above: merge *loop counters* that
   describe the same walk, split *pointers* that describe different ones.
+* **Which register a value gets in each arm tells you how many variables the
+  original had.** A pseudo gets exactly one hard register, so if a value lands
+  in a *different* register in two arms of an `if`, it cannot be one variable
+  -- and if it lands in the *same* register in both, it is. Read the two arms
+  side by side before touching anything: `FieldCalcPointOnLine` in
+  `src/field/field2.c` has minX in `$t0` then `$t1`, dx in `$a2` then `$t0`,
+  dy in `$a0` then `$a1`, den in `$a2` then `$a0` -- every value on a
+  different register -- where the C reused one local per value and got one
+  register for each in both arms. Declaring a separate set per arm is worth
+  3 insertions -> 2 on its own and, with the term-naming bullet below, 76
+  rows -> 60 and the exact length. This is the same lever as "one pointer
+  pair per loop", read off the register assignment rather than guessed: merge
+  what describes one walk, split what describes two.
+* **`A - (B + C)` is folded to `(A - C) - B`, and a named local is what stops
+  it.** gcc 2.6.3's `fold` associates every such sum: `maxX - (minX + 0x140)`
+  comes out as `addiu -0x140` off maxX and `minY - (maxY - 0xF0)` as
+  `addiu +0xf0` off minY, both the mirror image of what the target emits.
+  `split_tree` strips only conversions that keep the machine mode, so no cast
+  in SImode blocks it and an `(s16)` cast costs a truncation pair (+7
+  instructions, measured). What does block it is a VAR_DECL: `bx = minX +
+  0x140; dx = limits->maxX - bx;`. combine does not put it back, because the
+  two insns cannot merge into one. The cost is not just two swapped operands
+  -- the association changes the load's slack, so maspsx stops emitting a
+  load-delay `nop` the target has and the function comes out an instruction
+  *short*. When a diff shows the same opcodes with the constant carried on
+  the other operand, name the inner sum.
+
+  The trap in the middle of this is worth as much as the rule. With the arms
+  split and only *some* terms named, `FieldCalcPointOnLine` measures 75 rows
+  against the finished body's 60 -- and that 75-row body can never match,
+  because one arm still emits `addiu +0xf0` where the target has
+  `addiu -0xf0`. Two bodies of the same length are comparable by rows only
+  when both compute the target's arithmetic; a lower count reached by leaving
+  a fold in place is a local minimum with no path out of it.
 * **A chained assignment stores right to left.** `m[0][0] = m[1][1] =
   m[2][2] = 0x1000;` is `m[0][0] = (m[1][1] = (m[2][2] = 0x1000))`, so the
   stores come out `m[2][2]`, `m[1][1]`, `m[0][0]` — descending. A target that
@@ -2826,6 +2860,30 @@ external tool that brute-forces AST-level permutations of a function until the
 compiled output matches. It is a search tool, not a substitute for
 understanding: only reach for it once the C is *semantically* correct and the
 remaining diff looks like compiler-specific register/ordering noise.
+
+**Never start a run without writing a `PERM_*` macro set for that function
+first.** Left to itself the permuter *randomizes*: an unbounded walk with no
+memory of what it has tried and no termination. Given macros it *enumerates* a
+finite candidate set, tries each once, and stops. The yield difference on this
+project is not marginal:
+
+| function | candidates | outcome |
+| --- | --- | --- |
+| `FieldBattleCheck` | 3,150 | **match** |
+| `LoadLocalFieldModelAndInitAll` | 98,144 | 5 rows |
+| `OpcodeFuncMove` | ~120,000 | a candidate measuring **+43 instructions** |
+| `OpcodeFuncVwoft` | 101,000 | nothing |
+| `FieldModelStructInit` | 87,000 | nothing |
+
+Write the macro against the rows the diff actually shows.
+`tools/permuter_macros.py recipes` indexes the catalogue by penalty type
+(`temp-hop`, `cast-width`, `addr-form`, `decl-order`, `stmt-order`,
+`giv-hoist`, `cse-split`, ...) and `recipe <name>` prints one to paste; count
+the candidate space before starting, and expect the run to end on its own. A
+run you cannot bound is a run whose result you will not be able to interpret --
+every one of the three failures above was a function whose park note had
+already reduced the residue to `allocno_compare` arithmetic, which is not
+reachable from C and therefore not reachable by a search that edits C.
 
 **Feed it the parked queue, do not babysit it.** The permuter's input is the
 set of functions parked under `#else /* NON_MATCHINGS */` — each already has
