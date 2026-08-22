@@ -5883,6 +5883,32 @@ force a match** unless you have evidence the whole translation unit was built
 differently — it affects every function in the file and will break the ones that
 already match.
 
+**Which headerless units are still unvalidated, measured.** A default is only
+a coin flip while nothing has been compiled against it; once a unit has
+matching C bodies, the default is *proven* for that unit and there is nothing
+to find. Six units carry no `//!` line, and they split cleanly:
+
+| unit | matching C bodies | verdict |
+| --- | --- | --- |
+| `src/battle/battle.c` | 145 | default proven correct |
+| `src/battle/batini.c` | 20 | default proven correct |
+| `src/world/world2.c` | many | default proven correct |
+| `src/brom/brom.c` | all (100% C) | default proven correct |
+| `src/main/ovl.c` | 0, but also 0 functions | nothing to decide |
+| `src/dschange/dschange.c` | **0** | unvalidated — tested below |
+
+`dschange.c` was the only real candidate and the answer is **negative**: its
+one parked body (`func_800A0C58`, 586 instructions) measures **223 rows / 26
+insertions / exact length under both `CC1=2.6.3` and the default `2.7.2`**,
+and `insn_histogram` agrees to within one row (`addu +7 / addiu -3 / lui -3 /
+sll -2` either way). The flags do reach the measurement — that one differing
+row is the proof — the function simply is not compiler-sensitive. So its 223
+rows are ordinary work, not a wrong toolchain, and the header stays absent.
+
+Do the same check before spending anything on the hypothesis: **count the
+unit's matching C bodies first.** If it has any, the default is already
+validated by them and the compiler is not your problem.
+
 **A file with no `//!` line at all has not been *decided*, it has been
 defaulted — and on a fresh unit that is a coin flip you have to call before
 writing anything.** `src/ending/ending.c` carried the default for as long as it
