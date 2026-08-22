@@ -342,7 +342,7 @@ typedef struct {
 
 extern Unk800F39F0 D_800F39F0[];
 extern Unk800F39F0 D_800F3A04[];
-extern u8 D_8009D898[]; // source record, 0x440 stride
+extern u8 D_8009D898[];    // source record, 0x440 stride
 extern s32 D_800F3A1C;     // write index into D_800F3A20
 extern s16 D_800F3A20[16]; // ring buffer, see func_800A56B0
 extern s8 D_800F3A80[];
