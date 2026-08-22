@@ -165,10 +165,24 @@ typedef struct {
  * Under the permuter's own weights (100 an insertion, 5 a register) that is
  * 465 against this body's 300, so 60/0 is also the better seed.
  *
- * What is left untried is the *types* of the eight term locals -- everything
- * here is `s32` and the earlier note only ever swept px/py and the three
- * member locals. That is 4^8, too wide to enumerate and exactly what
- * `PERM_VAR` over a type list is for; see the run macro beside this file. */
+ * The types of the eight term locals are settled too: all 80 combinations of
+ * {s32, s16, u16} over the four families (ax/ax2, bx/bx2, ay/ay2, by/by2)
+ * were enumerated, and every one of them is worse -- 70 rows at best, and
+ * every single narrowing *adds* instructions (139 to 145 against 137) for
+ * the sign- or zero-extension. All-`s32` is right.
+ *
+ * So every enumerable axis is now closed, about 200 measured points in all:
+ * statement order, extra temporaries, declaration order, block barriers to
+ * depth three, and types. What remains is not a ranking that a reference
+ * count could move -- after the split only two pseudos reach global_alloc,
+ * and they are allocated in the right order -- but the *conflict set* they
+ * are allocated against, which CLAUDE.md flags as the one thing a target's
+ * `.s` cannot tell you. Do not hand this to the permuter: its three
+ * relevant passes are `perm_ins_block`, `perm_temp_for_expr` and
+ * `perm_randomize_internal_type`, and all three of those spaces are the ones
+ * enumerated above. A run here would re-cover proven-flat ground, which is
+ * the exact profile of the runs in this repo that returned nothing after
+ * 100,000 candidates. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldCalcPointOnLine);
 #else
