@@ -42,8 +42,8 @@ typedef struct {
     u8 length_2;
     u16 instr_id;
     u16 pitch_mul_sound_slide_steps;
-    s16 vol_slide_steps;
-    s16 vol_balance_slide_steps;
+    u16 vol_slide_steps;
+    u16 vol_balance_slide_steps;
     s16 vol_pan;
     s16 vol_pan_slide_steps;
     s16 pitch_slide_steps_cur;
@@ -111,13 +111,16 @@ typedef struct {
     u32 unk4;
     u8 pad8[0x10];
     u32 tempo;
-    u8 pad1C[0x8];
+    s32 tempo_slide_step;
+    u8 pad20[0x4];
     u32 unk24;
     u32 unk28;
     u32 noise_mask;
     u32 reverb_mask;
     u32 pitch_lfo_mask;
-    u8 pad38[0x10];
+    u8 pad38[0x8];
+    u32 reverb_depth;
+    s32 reverb_depth_slide_step;
     u16 tempo_slide_length;
     u16 song_id;
     u16 last_condition;
@@ -170,7 +173,8 @@ typedef struct {
 
 typedef struct {
     u8* unk0;
-    u8 pad04[0x52];
+    u8 pad04[0x50];
+    u16 unk54;
     u16 unk56;
     u8 pad58[0x88];
     s32 unkE0;
@@ -271,6 +275,9 @@ extern s32 D_80099FDC;
 extern s32 g_AkaoNoiseMask;
 extern s32 g_AkaoReverbMask;
 extern s32 g_AkaoPitchLfoMask;
+extern u16 D_80099E0C;
+extern s32 D_80099FD0;
+extern s32 D_80099FD4;
 extern u16 D_80099FFA;
 extern u16 D_8009A14E;
 extern u16 D_8009A152;
