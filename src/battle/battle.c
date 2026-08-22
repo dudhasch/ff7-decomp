@@ -1515,7 +1515,23 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB480);
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB674);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB788);
+void func_800AB788(void) {
+    s32 bit;
+    s32 flags;
+    u16 out;
+
+    bit = 1 << (g_CurrentAction->absoluteActionIndex - 0x48);
+    if (!(D_8016376A & 0x40)) {
+        flags = *(s32*)(g_CurrentAction->unk204 + 0x24);
+        if (!(flags & bit)) {
+            *(s32*)(g_CurrentAction->unk204 + 0x24) = flags | bit;
+            out = g_CurrentAction->absoluteActionIndex;
+            func_800B0FFC(g_CurrentAction->unk208, 0x73, 1, (s16*)&out);
+            func_800A7254(2, g_CurrentAction->unk208, 0x12, out);
+            g_CurrentAction->unk224 = 0xA;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AB830);
 
