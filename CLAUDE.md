@@ -2066,6 +2066,26 @@ a near-miss, in rough order of frequency:
   first; treat a row count that improves while the length grows as evidence
   against the change.
 
+* **But an exact length can be several errors cancelling, and only the opcode
+  histogram can tell you which kind you have.** The rule above is right about
+  *rows* and says nothing about the body underneath them: a length is one
+  number, so a body with `sw +3 / sh -3 / lw +3 / addu -2 / lh -2 / lhu -1 /
+  nop +2` sums to zero and reports "length exact" while seven separate things
+  are wrong. `FieldBackgroundInitPackets` sat at exactly 395 that way for
+  three sessions, and every attempt to improve it from there was fighting a
+  frame pad and a wrong declared width that were holding the cancellation in
+  place. The body that fixes them measures **+2 instructions and five rows
+  worse** — and its histogram is `nop +2` and nothing else, with every `%hi`
+  count per symbol identical. That is a strictly better position: one honest
+  error rather than seven that happen to sum to none.
+
+  So run `insn_histogram.py` before accepting *or* rejecting a length verdict.
+  An exact length with a clean histogram is finished work; an exact length
+  with opposing columns is a coincidence, and the way out of it necessarily
+  passes through a body that reads as a regression by both rows and length.
+  Say so in the park note, and say the function must not be unparked at the
+  wrong length — the build stays green because the body is still pinned.
+
 * **A `do { } while (0);` is a free test for which pass you are fighting.** It
   emits nothing, so it cannot change an allocno's reference count or live
   range; all it does is end a basic block, which is a scheduling boundary. So
