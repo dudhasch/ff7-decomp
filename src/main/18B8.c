@@ -196,7 +196,36 @@ void __main(void) {}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", __SN_ENTRY_POINT);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001117C);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001117C);
+#else
+/* PARKED at 14 rows / -2 instructions, and the whole residue is one address.
+ * The target materialises `&D_8009A000` once into $s1 and stores through
+ * `0($s1)` on both sides of the call -- a second callee-saved register and the
+ * save/restore pair are exactly the two instructions we are short. This build
+ * rematerialises `lui $at,%hi` / `sh %lo($at)` at each store, which is what
+ * gcc 2.6.3 does when a symbol has only two references: CONST_COSTS makes a
+ * two-instruction address cheaper than a register that has to be saved.
+ *
+ * Measured and rejected, all exactly 14 rows / -2:
+ *   the plain `D_8009A000[0] = ...` at both stores
+ *   `s16* cmd = D_8009A000;` (cse folds the local back to the symbol)
+ *   `volatile s16* cmd = ...;`  and  `*(volatile s16*)D_8009A000 = ...`
+ * The volatile route is the one CLAUDE.md gives for reaching the register form
+ * off a single reference, and it is inert here because these are stores, not
+ * loads. D_8009A004 and D_8009A008 sit at +4 and +8 but the target reaches
+ * them through their own $at expansions, so the "spell the neighbour as an
+ * offset" lever is not what the original did either. Something gives that
+ * address a third reference; it is not visible in this function. */
+void func_8001117C(u16 arg0) {
+    D_8009A000[0] = 0xF1;
+    SystemAkaoExecute();
+    D_8009A000[0] = 0x20;
+    D_8009A004[0] = 0x40;
+    D_8009A008[0] = arg0;
+    SystemAkaoExecute();
+}
+#endif
 
 void func_800111E4(void) {
     D_8009A000[0] = 0xF4;
