@@ -549,7 +549,16 @@ static void func_800A82DC(void) { D_80109D54 = 1; }
 
 s32 func_800A82F0(void) { return D_80109D58; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A8300);
+s32 func_800A8300(s16 x, s16 z) {
+    WorldChunkHeader* chunk;
+
+    for (chunk = D_80109D3C; chunk != NULL; chunk = chunk->next) {
+        if (chunk->x == x && chunk->z == z) {
+            break;
+        }
+    }
+    return chunk != NULL;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A835C);
 
