@@ -2348,9 +2348,49 @@ void func_800AE378(void) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE42C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE6C0);
+void func_800AE42C(s32, s32, s32, s32*, s32, s32);
+s32 func_800AE6C0(s32 arg0, s32 arg1, s32 arg2) {
+    s32 buf[16];
+    s32 i;
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE764);
+    func_800AE42C(arg1, arg2, arg0, buf, 0, 0);
+    for (i = 0; i < 8; i++) {
+        if (buf[i] & arg1) {
+            break;
+        }
+        if (buf[i + 8] & arg2) {
+            break;
+        }
+    }
+    if (i == 8) {
+        i = 3;
+    }
+    return i;
+}
+
+// Re-resolve every combatant named by the arg0 bitmask; unk11 is left at 3
+// (unresolved) for the ones func_800AE6C0 cannot place, and the returned mask
+// records which ones it could.
+void func_800AE764(s32 arg0, s32 arg1, s32 arg2) {
+    u8 unusedLocals[0x40]; /* identity not recoverable; the target frame is
+                              0x78 against the 0x38 this body needs */
+    s32 mask;
+    s32 i;
+    s32 slot;
+
+    mask = 0;
+    for (i = 0; i < 10; i++) {
+        g_BattleState.combatant[i].unkB = 3;
+        if ((arg0 >> i) & 1) {
+            slot = func_800AE6C0(i, arg1, arg2);
+            if (slot != 3) {
+                g_BattleState.combatant[i].unkB = slot;
+                mask |= 1 << i;
+            }
+        }
+    }
+    *(u16*)&g_BattleState.unk4[2] = mask;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AE82C);
 

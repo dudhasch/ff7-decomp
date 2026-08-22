@@ -76,7 +76,8 @@ typedef struct {
                          // 0x20 = defending)
     /* 0x08 */ s8 unk8;
     /* 0x09 */ s8 unk9;
-    /* 0x0A */ s16 unkA;
+    /* 0x0A */ s8 unkA;
+    /* 0x0B */ s8 unkB; // written `sb` per combatant in func_800AE764
     /* 0x0C */ s8 unkC;
     /* 0x0D */ u8 unkD;
     /* 0x0E */ s8 unkE;
