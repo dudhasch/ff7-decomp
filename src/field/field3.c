@@ -11,8 +11,9 @@ extern u8* D_800E0204;
 /* Copy one global (BCX) model into place. `pkts` is the streaming buffer the
  * file lands in; the record it holds is linked against 0x80000000, so every
  * pointer inside it is rebased by (pkts - 0x80000000) on the way through.
- * When the model is already resident (unk6 set) the copy is made from the
- * earlier entry that carries the same globalModelId instead of from disk. */
+ * When the model is already resident (globalLoaded set) the copy is made from
+ * the earlier entry that carries the same globalModelId instead of from disk.
+ */
 u8* FieldModelLoadBcx(
     FieldModelFileDesc* desc, FieldModelData* data, u8* pkts, s32 index) {
     FieldModelLoaderData* models;
@@ -40,7 +41,7 @@ u8* FieldModelLoadBcx(
     }
     id = models[index].globalModelId;
     if (id >= 1 && id <= 9) {
-        if (models[index].unk6 == 0) {
+        if (models[index].globalLoaded == 0) {
             switch (id) {
             case 1:
                 DS_read(fileInfo[0], fileInfo[1], (u_long*)pkts, NULL);
@@ -74,7 +75,7 @@ u8* FieldModelLoadBcx(
             }
             for (i = 0; i < desc->count; i++) {
                 if (models[i].globalModelId == id) {
-                    models[i].unk6 = 1;
+                    models[i].globalLoaded = 1;
                 }
             }
             dst = &data->modelEntries[models[index].modelEntryIndex];

@@ -880,7 +880,7 @@ s32 FieldMainLoop(void) {
         ClearOTagR(&buf->OtUi, 1);
         FieldCameraAssign();
         g_FieldPadRaw = FieldButtonsUpdate(&D_80071E38, &D_80071E3C);
-        g_FieldStateData.currentMovieFrame = g_MovieStream->unk8;
+        g_FieldStateData.currentMovieFrame = g_MovieStream->currentFrame;
         FieldEventUpdate((s32)&buf->OtUi);
         g_PlayerModelId = g_FieldStateData.pcModelId;
         FieldBGScrollInit();

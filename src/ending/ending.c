@@ -75,7 +75,7 @@ INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A2380);
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A23F8);
 
 s32 func_800A2420(void) {
-    if (g_MovieStream->unk8 >= *D_800A6528++) {
+    if (g_MovieStream->currentFrame >= *D_800A6528++) {
         return 1;
     }
     return 0;

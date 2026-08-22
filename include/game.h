@@ -563,7 +563,7 @@ typedef struct {
     /* 0x03 */ u8 animationCount;  // number of animations
     /* 0x04 */ u8 modelEntryIndex; // index into FieldModelData->modelEntries
     /* 0x05 */ u8 npcFlag;         // NPC/model type flag?
-    /* 0x06 */ u8 unk6;
+    /* 0x06 */ u8 globalLoaded;
     /* 0x07 */ s8 globalModelId; // BCX/global model lookup id
 } FieldModelLoaderData;          // size:0x8
 
@@ -746,8 +746,8 @@ typedef struct {
 typedef struct {
     s32 unk0;
     s32 unk4;
-    u32 unk8;
-} Unk80075D00;
+    u32 currentFrame;
+} MovieStream;
 
 typedef struct WindowData {
     u8* text;
@@ -819,7 +819,7 @@ extern u8 D_800730DD[][0x14];
 extern FieldEntity g_FieldEntity[];
 extern u8 D_800756E8[]; // per-model flags, indexed by field model id
 extern s32 D_800756F8[];
-extern Unk80075D00* g_MovieStream;
+extern MovieStream* g_MovieStream;
 extern volatile u16 D_80075DEC;  // buffer index, either 0 or 1
 extern u8 g_FieldMapVars[256];   // map-local memory bank for field scripts
 extern s8 D_80077F64[2][0x3400]; // polygon buffer

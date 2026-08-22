@@ -487,13 +487,13 @@ typedef struct {
 
 /* What D_80071E40 really points at: the view matrix the rest of the overlay
  * passes around as a MATRIX*, followed by the projection the GTE needs.
- * unk24 is the screen distance SetGeomScreen takes; unk20/unk22 shift the
+ * screenDist is what SetGeomScreen takes; centerOfsX/centerOfsY shift the
  * screen centre. */
 typedef struct {
     /* 0x00 */ MATRIX view;
-    /* 0x20 */ s16 unk20;
-    /* 0x22 */ s16 unk22;
-    /* 0x24 */ s16 unk24;
+    /* 0x20 */ s16 centerOfsX;
+    /* 0x22 */ s16 centerOfsY;
+    /* 0x24 */ s16 screenDist;
 } FieldCamera;
 
 /* 677 changed / 134 inserted at 1293 instructions against 1266, from an m2c
@@ -511,7 +511,7 @@ typedef struct {
  *    store to a plain extern, so gcc may hoist it.
  * 2. **`D_80071E40` is not a `MATRIX*`**, although the rest of the overlay
  *    passes it around as one. Offsets 0x20/0x22/0x24 sit past the matrix:
- *    `unk24` is the screen distance `SetGeomScreen` takes and `unk20`/`unk22`
+ *    `screenDist` is what `SetGeomScreen` takes and `centerOfsX`/`centerOfsY`
  *    shift the screen centre. `FieldCamera` here is a local cast so the
  *    matching callers in field.c keep their `MATRIX*`.
  * 3. **The entity reads are byte offsets against `s32`/`u16` externs**, so
@@ -630,7 +630,7 @@ void FieldBGUpdateDrawenv(s32 arg0) {
     ((FieldBgScroll*)g_FieldTriggers)->scrollY2 =
         (u16)((s16)((FieldBgScroll*)g_FieldTriggers)->scrollY2 %
               (s32)(((FieldBgScroll*)g_FieldTriggers)->wrapTilesY2 * 0x10));
-    SetGeomScreen((s32)((FieldCamera*)D_80071E40)->unk24);
+    SetGeomScreen((s32)((FieldCamera*)D_80071E40)->screenDist);
     if ((g_FieldMovieStreamActive == 0) || (D_8009AC2E != 0)) {
         if (D_8009A100 == 0) {
             switch (D_8009AC08) { // irregular
@@ -817,97 +817,101 @@ void FieldBGUpdateDrawenv(s32 arg0) {
         copyY2 = (u16)camLayer2Y;
         if (arg0 == g_FieldRenderData) {
             D_80113F34 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 D_80071E38);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  D_80071E38);
             D_80113F36 = (s8)D_8009AC8F +
                          (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + D_80071E3C);
+                          ((FieldCamera*)D_80071E40)->centerOfsY + D_80071E3C);
             SetDrawEnv(arg0 + 0x41D4, (DRAWENV*)(&D_80113F34 - 8));
             D_8011415C =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 (u16)D_80071E38);
-            D_8011415E = (s8)D_8009AC8F +
-                         (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  (u16)D_80071E38);
+            D_8011415E =
+                (s8)D_8009AC8F +
+                (g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->centerOfsY +
+                 (u16)D_80071E3C);
             SetDrawEnv(arg0 + 0x4294, (DRAWENV*)(&D_8011415C - 8));
             D_80114214 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 (u16)D_80071E38);
-            D_80114216 = (s8)D_8009AC8F +
-                         (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  (u16)D_80071E38);
+            D_80114216 =
+                (s8)D_8009AC8F +
+                (g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->centerOfsY +
+                 (u16)D_80071E3C);
             SetDrawEnv(arg0 + 0x42D4, (DRAWENV*)(&D_80114214 - 8));
             D_80113FEC =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
-                 camLayer1X);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) -
+                                  camLayer1X);
             D_80113FEE =
-                (s8)D_8009AC8F +
-                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
-                 camLayer1Y);
+                (s8)D_8009AC8F + ((g_FieldScreenCenterY +
+                                   ((FieldCamera*)D_80071E40)->centerOfsY) -
+                                  camLayer1Y);
             SetDrawEnv(arg0 + 0x4214, (DRAWENV*)(&D_80113FEC - 8));
             envScroll = arg0 + 0x4254;
             D_801140A4 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
-                 camLayer2X);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) -
+                                  camLayer2X);
             D_801140A6 =
-                (s8)D_8009AC8F +
-                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
-                 camLayer2Y);
+                (s8)D_8009AC8F + ((g_FieldScreenCenterY +
+                                   ((FieldCamera*)D_80071E40)->centerOfsY) -
+                                  camLayer2Y);
             drawScroll = &D_801140A4 - 8;
         } else {
             D_80113F90 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 D_80071E38);
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  D_80071E38);
             D_80113F92 = (s8)D_8009AC8F +
                          (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + D_80071E3C) +
+                          ((FieldCamera*)D_80071E40)->centerOfsY + D_80071E3C) +
                          0xE8;
             SetDrawEnv(&D_80100860, (DRAWENV*)(&D_80113F90 - 8));
             D_801141B8 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 (u16)D_80071E38);
-            D_801141BA = (s8)D_8009AC8F +
-                         (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C) +
-                         0xE8;
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  (u16)D_80071E38);
+            D_801141BA =
+                (s8)D_8009AC8F +
+                (g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->centerOfsY +
+                 (u16)D_80071E3C) +
+                0xE8;
             SetDrawEnv(&D_80100860 + 0xC0, (DRAWENV*)(&D_801141B8 - 8));
             D_80114270 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) +
-                 (u16)D_80071E38);
-            D_80114272 = (s8)D_8009AC8F +
-                         (g_FieldScreenCenterY +
-                          ((FieldCamera*)D_80071E40)->unk22 + (u16)D_80071E3C) +
-                         0xE8;
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) +
+                                  (u16)D_80071E38);
+            D_80114272 =
+                (s8)D_8009AC8F +
+                (g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->centerOfsY +
+                 (u16)D_80071E3C) +
+                0xE8;
             SetDrawEnv(&D_80100860 + 0x100, (DRAWENV*)(&D_80114270 - 8));
             D_80114048 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
-                 camLayer1X);
-            D_8011404A =
-                (s8)D_8009AC8F +
-                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
-                 camLayer1Y) +
-                0xE8;
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) -
+                                  camLayer1X);
+            D_8011404A = (s8)D_8009AC8F +
+                         ((g_FieldScreenCenterY +
+                           ((FieldCamera*)D_80071E40)->centerOfsY) -
+                          camLayer1Y) +
+                         0xE8;
             SetDrawEnv(&D_80100860 + 0x40, (DRAWENV*)(&D_80114048 - 8));
             envScroll = &D_80100860 + 0x80;
             drawScroll = &D_80114100 - 8;
             D_80114100 =
-                (s8)D_8009AC81 +
-                ((g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20) -
-                 camLayer2X);
-            D_80114102 =
-                (s8)D_8009AC8F +
-                ((g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22) -
-                 camLayer2Y) +
-                0xE8;
+                (s8)D_8009AC81 + ((g_FieldScreenCenterX -
+                                   ((FieldCamera*)D_80071E40)->centerOfsX) -
+                                  camLayer2X);
+            D_80114102 = (s8)D_8009AC8F +
+                         ((g_FieldScreenCenterY +
+                           ((FieldCamera*)D_80071E40)->centerOfsY) -
+                          camLayer2Y) +
+                         0xE8;
         }
         SetDrawEnv(envScroll, (DRAWENV*)drawScroll);
         D_80071A48 =
@@ -938,17 +942,17 @@ void FieldBGUpdateDrawenv(s32 arg0) {
         envPlain = arg0 + 0x41D4;
         if (arg0 == g_FieldRenderData) {
             D_80113F34 =
-                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20;
+                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->centerOfsX;
             D_80113F36 =
-                g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22;
+                g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->centerOfsY;
             drawPlain = &D_80113F34 - 8;
         } else {
             envPlain = &D_80100860;
             D_80113F90 =
-                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->unk20;
+                g_FieldScreenCenterX - ((FieldCamera*)D_80071E40)->centerOfsX;
             drawPlain = &D_80113F90 - 8;
-            plainY =
-                g_FieldScreenCenterY + ((FieldCamera*)D_80071E40)->unk22 + 0xE8;
+            plainY = g_FieldScreenCenterY +
+                     ((FieldCamera*)D_80071E40)->centerOfsY + 0xE8;
         block_29:
             D_80113F92 = plainY;
         }
@@ -2514,14 +2518,25 @@ s32 FieldEntityCalculateZ(s32* edgeA, s32* edgeB, s32* point, s16* vertex) {
            normal[2];
 }
 
-/* One entry of the map's background-trigger block. Even `type`s arm the
- * trigger, odd ones disarm it. */
+/* One entry of the map's background-trigger block: six s16 of line, then four
+ * bytes. Even `type`s arm the trigger, odd ones disarm it.
+ *
+ * The four bytes are the same record the PC-side field format documents as
+ * background parameter, background state, behavior and sound id, and the code
+ * agrees on three of them: `bgState` is shifted into a bit
+ * (`1 << trigger->bgState`) and `soundId` indexes a four-entry sound table.
+ *
+ * `entityId` is the fourth, and it is very likely the *background parameter*
+ * id rather than an entity -- it subscripts `g_FieldEntityBgTrigger`, an array
+ * of per-parameter bitmasks that `bgState` selects a bit within. It is left
+ * named as it is because the array would have to be renamed with it, and that
+ * symbol is pinned by a frozen .s. */
 typedef struct {
     /* 0x00 */ LinePos pos;
     /* 0x0C */ u8 entityId;
-    /* 0x0D */ u8 unk0D;
+    /* 0x0D */ u8 bgState;
     /* 0x0E */ u8 type;
-    /* 0x0F */ u8 unk0F;
+    /* 0x0F */ u8 soundId;
 } FieldBgTrigger;
 
 u8 FieldEntityLineCheck(FieldEntity*, FieldLine*, VECTOR*); // extern
@@ -3305,7 +3320,7 @@ s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     case 0:
     case 2:
     case 4:
-        bit = 1 << trigger->unk0D;
+        bit = 1 << trigger->bgState;
         if ((g_FieldEntityBgTrigger[trigger->entityId] & bit) == 0) {
             changed = 1;
         }
@@ -3315,7 +3330,7 @@ s16 FieldEntityBgTriggerActivate(FieldBgTrigger* trigger, u8 type) {
     case 1:
     case 3:
     case 5:
-        mask = ~(1 << trigger->unk0D);
+        mask = ~(1 << trigger->bgState);
         if ((u8)(g_FieldEntityBgTrigger[trigger->entityId] | mask) == 0xFF) {
             changed = 1;
         }
@@ -3396,7 +3411,7 @@ void FieldEntityTriggerCheck(
             sqrDist < (s32)(entity->SolidRange * entity->SolidRange)) {
             if (from[0] == nearest[0] && from[1] == nearest[1]) {
                 if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
-                    func_8001117C(seIds[trigger->unk0F]);
+                    func_8001117C(seIds[trigger->soundId]);
                 }
                 continue;
             }
@@ -3407,7 +3422,7 @@ void FieldEntityTriggerCheck(
                 continue;
             }
             if (FieldEntityBgTriggerActivate(trigger, trigger->type) == 1) {
-                func_8001117C(seIds[trigger->unk0F]);
+                func_8001117C(seIds[trigger->soundId]);
             }
             continue;
         }
@@ -3422,12 +3437,12 @@ void FieldEntityTriggerCheck(
         }
         if (trigger->type == 2 || trigger->type == 4) {
             if (FieldEntityBgTriggerActivate(trigger, 1) == 1) {
-                func_8001117C(seIds[trigger->unk0F]);
+                func_8001117C(seIds[trigger->soundId]);
             }
         }
         if (trigger->type == 3 || trigger->type == 5) {
             if (FieldEntityBgTriggerActivate(trigger, 0) == 1) {
-                func_8001117C(seIds[trigger->unk0F]);
+                func_8001117C(seIds[trigger->soundId]);
             }
         }
     }

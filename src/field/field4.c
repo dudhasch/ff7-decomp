@@ -12,12 +12,12 @@ typedef struct {
     /* 0x08 */ u32 polyCounts1; // two flat tris, then a gouraud tri and quad
     /* 0x0C */ u16 unkC;
     /* 0x0E */ u16 polyOffset;
-    /* 0x10 */ u16 unk10;
-    /* 0x12 */ u16 unk12;
-    /* 0x14 */ u16 unk14;
-    /* 0x16 */ u16 unk16;
+    /* 0x10 */ u16 texCoordOffset;
+    /* 0x12 */ u16 texInfoOffset;
+    /* 0x14 */ u16 texIndexOffset;
+    /* 0x16 */ u16 pktSize;
     /* 0x18 */ u8* data;
-    /* 0x1C */ u8* unk1C;
+    /* 0x1C */ u8* pkts;
 } FieldModelPart;
 
 extern SVECTOR D_800DF520[]; // light normals, indexed by a colour's code byte
@@ -47,7 +47,7 @@ extern u8 D_800DF114;
  * question could be asked. What the rewrite established:
  *
  *   - The parameter is a `FieldModelPart*`, and the typedef lives 350 lines
- *     below in this unit; the seed's `void* arg0` with `->unk1C` is why gcc
+ *     below in this unit; the seed's `void* arg0` with `->pkts` is why gcc
  *     rejected the whole file with the body unparked. Lifted the typedef.
  *   - The GTE sequence is the sibling's, verbatim:
  *     `gte_ldv0(normals + c[k * 4 + 7] * 8)`, `gte_ldrgb(&c[k * 4 + 4])`,
@@ -124,9 +124,9 @@ void KawaiSetVertexColorFromLighting(FieldModelPart* part) {
 
     poly = (u8*)(part->polyOffset + (u32)part->data);
     normals = (u8*)D_800DF520;
-    pkt = part->unk1C;
+    pkt = part->pkts;
     if (D_800DF114 != 0) {
-        pkt += part->unk16;
+        pkt += part->pktSize;
     }
     counts = part->polyCounts0;
 
