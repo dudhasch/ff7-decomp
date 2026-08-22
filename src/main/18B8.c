@@ -464,7 +464,29 @@ s32 func_80014A58(u32 arg0) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014A84);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014B08);
+/* Clamped add/subtract. The second `sltu $v0,$a2,$a0` is emitted twice --
+ * once in the first branch's delay slot and once after the overflow clamp --
+ * because `value` differs on the two paths, which is what says the two tests
+ * are separate `if`s rather than one `||`. */
+u32 func_80014B08(u32 value, u32 delta, u32 limit, s32 add) {
+    u32 orig = value;
+
+    if (add) {
+        value += delta;
+        if (value < orig) {
+            value = limit;
+        }
+        if (limit < value) {
+            value = limit;
+        }
+    } else {
+        value -= delta;
+        if (orig < value) {
+            value = 0;
+        }
+    }
+    return value;
+}
 
 void func_80014B54(void) { D_80062E18 = (D_80062E18 + 1) & 7; }
 
