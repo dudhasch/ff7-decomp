@@ -1161,6 +1161,32 @@ a near-miss, in rough order of frequency:
   run of `N(sp)` rows all off by the *same* constant means the pools are the
   right sizes and one value is in the wrong pool, where a diff that also moves
   the frame and the saved-register offsets means the pad itself is wrong.
+
+  **But read the slot *spacing* before deciding a value is in the declared
+  pool at all.** `expand_decl` packs a declared local at its own type's
+  alignment, so three address-taken scalars come out at 0x18 / 0x1C / 0x1E;
+  reload's `alter_reg` rounds every spill slot to `BIGGEST_ALIGNMENT`, so
+  three spilled pseudos come out at 0x18 / 0x20 / 0x28. Eight-byte spacing
+  between memory-resident scalars is therefore proof they are reload spills
+  and *cannot* be reached by taking addresses -- and since spills are
+  allocated after every declared local, there is no way to put a dead pad
+  above one. A pad and an address-take that between them fix the frame size
+  will do it by pushing the real values into the wrong slots, which is the
+  `FieldBackgroundInitPackets` trap in the bullet above seen from the frame
+  side.
+* **A spilled pseudo is spilled in its own mode, so a counter's declared
+  width decides `sh`/`lhu` against `sw`/`lw` at every one of its uses.** When
+  a value lives on the stack because reload put it there -- not because its
+  address was taken -- `alter_reg` builds the MEM from `PSEUDO_REGNO_MODE`,
+  so `s32 count` gives `sw`/`lw` and `u16 count` gives `sh`/`lhu` for the
+  identical program. A diff whose whole residue is `sw +N / sh -N / lw +N` on
+  one stack slot is a *declaration*, and it reads exactly like an allocation
+  problem: `FieldBackgroundInitPackets` carried that cluster for three
+  sessions, and `tools/width_sweep.py` had swept the dimension and reported
+  the wrong width as the winner -- correctly, because a frame pad was holding
+  the counter at an offset that was wrong at every width. Read the target's
+  opcode at the slot (`lhu` means `u16`, `lh` means `s16`) rather than
+  ranking widths by rows.
 * **A frame that is larger than your code needs, with the extra between the
   outgoing-argument area and the register saves, is a local you cannot see.**
   gcc's `expand_decl` gives every aggregate local a stack slot whether or not
