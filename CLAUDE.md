@@ -1106,6 +1106,25 @@ a near-miss, in rough order of frequency:
   `D_800E0748[page * 189] += x`, 0 in the form above. It also unblocked
   `AddStrNextDebugRow`, which CLAUDE.md previously recorded as having no known
   fix.
+
+  **It applies to packet arrays too, and that is where the load-delay `nop`s
+  live.** `((LINE_F3*)D_800E3B28)[rb * 24 + rrect]` makes gcc compute
+  `(rb * 24 + rrect) * 24` as one chain; the byte-offset form
+  `*(LINE_F3*)(D_800E3B28 + rb * 0x240 + rrect * 0x18)` computes the two
+  products separately, and gcc then reaches for the target's own shift
+  decompositions (`(x<<3 + x)<<6` and `(x<<1 + x)<<3`). Across 45 sites in
+  `FieldDebugRenderPage` that is **913 rows to 780**, and it took the excess
+  load-delay nops from `+14` to `+3` — the separate products give the
+  scheduler something to put in the slots. When a diff is mostly `nop` surplus
+  against an `addu`/`sll` deficit, this is the first thing to try.
+
+  **And count the target's expansions before choosing how often to assign the
+  index local.** How many times the original re-derived `page * 0x17A` is
+  countable, not guessable: `grep -A1 'sll .*, 6' <target.s> | grep subu`
+  gives the number and the addresses — six for `FieldDebugRenderPage` against
+  the one our source had. The five extra assignments are *exactly additive*
+  (+6/+7/+5/+5/+4 instructions), which is precisely why a subset of them that
+  happens to hit the length is not evidence of anything.
 * **A compound assignment computes the address once, by construction.**
   `a[i] += x` expands the lvalue a single time and reuses the result for the
   load and the store, so no spelling of the index can give you two `$at`
@@ -2102,6 +2121,15 @@ a near-miss, in rough order of frequency:
   wrong declaration looks like, and a balanced address table is what a wrong
   tool looks like.**
 
+  **And the two cancelling errors can be large.** `FieldDebugRenderPage` sat
+  at the exact 1341 carrying **15 instructions** of double-scaled pointer
+  arithmetic against **15 instructions** of missing re-expansion — an error
+  either side of the truth, netting to a length that read as settled for
+  several sessions. Decomposing them *cost* the exact length (1337, −4) and
+  bought **149 rows**. So on a body hundreds of rows out at exactly the target
+  length, the length is the least trustworthy number you have: look for the
+  pair before treating it as a constraint to preserve.
+
   One row class in that table is naming and will stay: a string literal or a
   jump table is a local `.rodata` label in our object and a named symbol in the
   `.s`, so any function with either reports `.rodata` against `D_800A0000` /
@@ -2306,6 +2334,19 @@ a near-miss, in rough order of frequency:
   them 0 bytes, with no error, which reads exactly like a pass that did not
   run. `cd` into the target directory and copy the results out afterwards.
 
+  **`-dL` does the same job for `move_movables`, and it prints the decisions
+  rather than the inputs.** The `.loop` dump gives `Loop from A to B: N real
+  insns` and then, per candidate, either
+  `Insn I: regno R (life L), savings S moved to M` or a `not desirable` line.
+  `move_movables` keeps a movable iff `threshold * savings * life >=
+  insn_count`, so **two** moved/not-moved pairs from the same loop bracket the
+  threshold: on `FieldDebugRenderString` they give `11.6 <= threshold < 15.5`.
+  That converts "66 rows of register noise" into a quantity — *this constant
+  needs three more instructions of lifetime* — and then into a yes/no question
+  about whether there is anything left to put there. Reach for it whenever a
+  residue turns on which of two invariants got hoisted; it is far better than
+  permuting the loop body and guessing from the outcome.
+
   What you get per function is
   `Register 73 used 47 times across 538 insns; ...; pointer.` -- `n_refs` and
   `live_length` -- and `;; N regs to allocate: ...` at the top of the `.greg`
@@ -2379,6 +2420,22 @@ a near-miss, in rough order of frequency:
   `FieldCalcPointOnLine`'s 150 variants over 30 locals come back flat in
   about a minute, which closes a whole dimension that
   `perm_randomize_internal_type` would otherwise spend a search on.
+
+  (The `ori +2 / addiu -2` in the histogram quoted above was taken before the
+  opcode fold was fixed and is the alias artifact described further down, not
+  a real column; the `lhu +1 / lh -1` that actually named the fix is real,
+  since loads are never aliased. The fix and its row counts stand.)
+
+  **The positive check on a width is the target's extension *opcode*, not the
+  row count.** `width_sweep` measures and does not reason, and a wrong width
+  can score beautifully: `y` as `u8` scores 792 rows at the exact 1341 in
+  `FieldDebugRenderPage`, and the target emits `sll 16 / sra 16` on that
+  value — a sign-extension from 16 bits, which no `u8` or `u16` local can
+  produce. So read what the target does to the value before taking the row:
+  `sll 16/sra 16` means `s16`, `sll 24/sra 24` means `s8`, `andi 0xff` means
+  `u8`, and a load folded to `lh`/`lbu` with no separate extension means the
+  width is already the declared one. A width that scores well and cannot emit
+  the extension the target has is a coincidence.
 
   Two things make it pay much more than one run suggests. **Re-run it after
   every change it finds** -- the sweep is stale the moment one width lands,
