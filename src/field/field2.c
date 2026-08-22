@@ -5679,6 +5679,45 @@ void FieldModelBsxTdbModify(u8* tdb) {
  * `i = 0` below the middle block in three places, and adding a `de = desc`
  * copy to mirror the target's $t1 in three placements. decomp-permuter has
  * 87,000 iterations on the 1-row body at base score 5 with no improvement.
+
+ *
+ * The one row is now an **exhaustive** result rather than an argument, and
+ * the arithmetic behind it is written out so nobody re-derives it.
+ *
+ * The row is `lbu v0,0(t0)` against our `lbu v0,0(a1)`: loop 1 touches
+ * `modelCount` three times (read for `modelEntryIndex`, read for the
+ * increment, store), the target puts all three on `d` in `$t0`, and this body
+ * puts one on the parameter in `$a1`. From cc1's `-dl` dump: `i` is 14 refs
+ * over 99 insns (`(3*14-99)/99 = -0.576`) and `d` 13 over 97 (`-0.598`), so
+ * `i` is allocated first and takes `$a3` -- which is the target. Writing the
+ * third access through `d` costs two loop-weighted refs, `d` becomes 15
+ * (`(3*15-97)/97 = -0.536`), and it overtakes `i`: that is the note's 17-row
+ * flip. For `i` to survive it needs **16** refs (`floor_log2` steps to 4, so
+ * `4*16 = 64` clears the bar at 45.9) or a live range under 90 insns.
+ *
+ * Every pointer choice was then enumerated: **512 variants** over which of
+ * `d`/`data` names each of the nine `modelCount`/`unk`/`modelEntries`/`next`
+ * sites, with the first loop-1 read pinned to `d`. The floor is **1 row**, and
+ * the three cheapest configurations put the stray access at three *different*
+ * sites -- `fms_PddddddPd` leaves the store on `$a1`, `fms_dPdddddPd` the
+ * second read, this body the first. So `d`'s priority window admits exactly
+ * two of the three accesses and there is no assignment of the other sites
+ * that widens it.
+ *
+ * Removing loop 2's `entry = &d->modelEntries[...]` reference, the one site
+ * outside that sweep, does not help either and shows why: it shortens `d`'s
+ * live range, which *raises* its priority, and `d` moves to `$a2` while the
+ * `0xFF` constant takes `$t0` -- 17 rows. `d` has to sit in a window bounded
+ * above by `i` and below by that constant.
+ *
+ * Adding the 16th reference to `i` is not free. Measured: `partsOff = i;` in
+ * the loop body and `i = i + 0;` are **exactly inert** at 17 rows, because
+ * flow deletes a dead store before `reg_scan` counts references -- which also
+ * settles, for this function, that no dead assignment can move either term.
+ * The dead-conditional form that worked on `AddBackgroundToRender` does add
+ * the reference, but here it survives to the object: `if (i < desc->count)
+ * { i += 1; } else { i += 1; }` is 15 rows and **+2 instructions**, and the
+ * `npcFlag` variant of it 9 rows and **+1**.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldModelStructInit);
