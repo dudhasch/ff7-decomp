@@ -217,7 +217,202 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C4FB4);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C5CD4);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800C6104);
+extern SVECTOR D_800C7938[];
+extern u8 D_800C752C;
+
+/* PARKED: 204 changed / 0 inserted, and **one instruction short** (292
+ * against 293).  The instruction stream is otherwise identical row for row --
+ * every one of the 204 is a register name, and `insn_histogram.py` reports a
+ * single opcode difference, `addu -1`.  That one insn is `move t8,a0`: the
+ * target copies the parameter out of its incoming register and reads every
+ * field through the copy, and gives `$a0` to the inner loop's `src` instead.
+ *
+ * The register lists line up exactly if you delete `part` from ours:
+ *   target  a0=src a1=off a2=dst a3=p t0=i t1=light t2=p+7 t3=count t4=base
+ *           t5=code t6=normals t7=w t8=part
+ *   ours    a0=part a1=src a2=off a3=dst t0=p t1=i t2=code t3=light t4=base
+ *           t5=p+7 t6=count t7=normals t8=w
+ * i.e. `part` won `$a0` from its copy preference and pushed the whole list
+ * down one.  `find_reg` honours that preference unless a higher-priority
+ * allocno has already taken `$a0`, so the lever would be to make `src` outrank
+ * `part` -- and `part` is already at the bottom of `allocno_compare`
+ * (6 refs over the whole 293-insn body).
+ *
+ * Measured and rejected, all at exactly 204 rows / -1 instruction:
+ *   - a local copy of the parameter, every field read through it (cse deletes
+ *     the copy)
+ *   - a `void*` parameter cast into a typed local (same)
+ *   - `src` declared first among the locals (allocno-number tie-break)
+ *   - `do { gte_ldv0(...); } while (0);` around the one `src` reference in
+ *     the inner loop, i.e. the free reference multiplier -- exactly inert
+ *   - `width_sweep.py`: 25 variants over 5 scalar locals, nothing below 204
+ *     and nothing at the exact length
+ * and at 206 / -2: both count words read up front so `part` dies early.
+ *
+ * What *did* get it here, and is worth keeping if this is re-derived:
+ *   - `u8* normals = (u8*)D_800C7938;` with `normals + idx * 8`.  As
+ *     `&D_800C7938[idx]` on an `SVECTOR[]` the symbol's `%hi`/`%lo` is
+ *     rematerialised in all eight loop preheaders: +19 instructions.
+ *   - `k`, `dst`, `off` and `src` initialised in the `for`'s init list, not as
+ *     statements above it -- the target emits `k = 0` between `code` and
+ *     `dst`, which no statement ordering reaches (4 rows).
+ *   - a `dst` local in the four flat lists; `gte_strgb(p + 4)` written inline
+ *     computes the address at the store and leaves the guard's delay slot
+ *     empty (4 insertions).
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world2", func_800C6104);
+#else
+void func_800C6104(WorldModelPart* part) {
+    u32 i;
+    u32 k;
+    s32 count;
+    s32 off;
+    u32 w;
+    u8 code;
+    u8* p;
+    u8* light;
+    u8* normals;
+    u8* base;
+    u8* src;
+    u8* dst;
+
+    normals = (u8*)D_800C7938;
+    light = (u8*)(part->unkE + (s32)part->unk18);
+    p = part->unk1C;
+    if (D_800C752C != 0) {
+        p += part->unk16;
+    }
+
+    w = *(u32*)&part->numPrims[0];
+
+    count = w & 0xFF;
+    for (i = 0; i < count; i++, p += 0x34, light += 0x18) {
+        if (*(u32*)p != 0) {
+            base = light;
+            code = p[7];
+            for (k = 0, dst = p + 4, off = 4, src = light; k < 4; k++,
+                src += 4) {
+                gte_ldv0(normals + src[7] * 8);
+                gte_ldrgb(base + off);
+                gte_nccs();
+                gte_strgb(dst);
+                dst += 0xC;
+                off += 4;
+            }
+            p[7] = code;
+        }
+    }
+
+    count = (w & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, p += 0x28, light += 0x14) {
+        if (*(u32*)p != 0) {
+            base = light;
+            code = p[7];
+            for (k = 0, dst = p + 4, off = 4, src = light; k < 3; k++,
+                src += 4) {
+                gte_ldv0(normals + src[7] * 8);
+                gte_ldrgb(base + off);
+                gte_nccs();
+                gte_strgb(dst);
+                dst += 0xC;
+                off += 4;
+            }
+            p[7] = code;
+        }
+    }
+
+    count = (w >> 16) & 0xFF;
+    for (i = 0; i < count; i++, p += 0x28, light += 0xC) {
+        if (*(u32*)p != 0) {
+            dst = p + 4;
+            code = p[7];
+            gte_ldv0(normals + light[7] * 8);
+            gte_ldrgb(light + 4);
+            gte_nccs();
+            gte_strgb(dst);
+            p[7] = code;
+        }
+    }
+
+    count = w >> 24;
+    for (i = 0; i < count; i++, p += 0x20, light += 0xC) {
+        if (*(u32*)p != 0) {
+            dst = p + 4;
+            code = p[7];
+            gte_ldv0(normals + light[7] * 8);
+            gte_ldrgb(light + 4);
+            gte_nccs();
+            gte_strgb(dst);
+            p[7] = code;
+        }
+    }
+
+    w = *(u32*)&part->numPrims[4];
+
+    count = w & 0xFF;
+    for (i = 0; i < count; i++, p += 0x14, light += 8) {
+        if (*(u32*)p != 0) {
+            dst = p + 4;
+            code = p[7];
+            gte_ldv0(normals + light[7] * 8);
+            gte_ldrgb(light + 4);
+            gte_nccs();
+            gte_strgb(dst);
+            p[7] = code;
+        }
+    }
+
+    count = (w & 0xFF00) >> 8;
+    for (i = 0; i < count; i++, p += 0x18, light += 8) {
+        if (*(u32*)p != 0) {
+            dst = p + 4;
+            code = p[7];
+            gte_ldv0(normals + light[7] * 8);
+            gte_ldrgb(light + 4);
+            gte_nccs();
+            gte_strgb(dst);
+            p[7] = code;
+        }
+    }
+
+    count = (w >> 16) & 0xFF;
+    for (i = 0; i < count; i++, p += 0x1C, light += 0x10) {
+        if (*(u32*)p != 0) {
+            base = light;
+            code = p[7];
+            for (k = 0, dst = p + 4, off = 4, src = light; k < 3; k++,
+                src += 4) {
+                gte_ldv0(normals + src[7] * 8);
+                gte_ldrgb(base + off);
+                gte_nccs();
+                gte_strgb(dst);
+                dst += 8;
+                off += 4;
+            }
+            p[7] = code;
+        }
+    }
+
+    count = w >> 24;
+    for (i = 0; i < count; i++, p += 0x24, light += 0x14) {
+        if (*(u32*)p != 0) {
+            base = light;
+            code = p[7];
+            for (k = 0, dst = p + 4, off = 4, src = light; k < 4; k++,
+                src += 4) {
+                gte_ldv0(normals + src[7] * 8);
+                gte_ldrgb(base + off);
+                gte_nccs();
+                gte_strgb(dst);
+                dst += 8;
+                off += 4;
+            }
+            p[7] = code;
+        }
+    }
+}
+#endif
 
 s32 func_800C6598(WorldModel* model) {
     u32 i;
