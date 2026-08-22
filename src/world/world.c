@@ -386,7 +386,16 @@ void func_800A5924(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5970);
+s16 func_800A5970(void) {
+    Unk800E5768* p;
+    s32 count;
+
+    count = 0;
+    for (p = D_800E5768; p != NULL; p = p->next) {
+        count++;
+    }
+    return count;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A59A0);
 
