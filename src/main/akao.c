@@ -1554,7 +1554,24 @@ void func_80031AB0(AKAO_TRACK* track, AKAO_CONFIG* config) {
     config->tempo_slide_length = 0;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031AFC);
+// Tempo slide: keep the top half of the accumulator and ramp toward a new
+// 16-bit value over the byte count that precedes it.
+void func_80031AFC(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    s32 steps;
+    s32 cur;
+    s32 target;
+
+    steps = *track->addr++;
+    config->tempo_slide_length = steps;
+    if (steps == 0) {
+        config->tempo_slide_length = 0x100;
+    }
+    target = *track->addr++ << 16;
+    target |= *track->addr++ << 24;
+    cur = config->tempo & 0xFFFF0000;
+    config->tempo = cur;
+    config->tempo_slide_step = (target - cur) / config->tempo_slide_length;
+}
 
 void func_80031BA0(u8** cursor, AKAO_TRACK* track) {
     u8* p = *cursor;
@@ -1576,7 +1593,24 @@ void func_80031BA0(u8** cursor, AKAO_TRACK* track) {
     track->pitch_mul_sound_slide_step = combined;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031BE4);
+// As func_80031AFC, for the reverb depth accumulator.
+void func_80031BE4(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    s32 steps;
+    s32 cur;
+    s32 target;
+
+    steps = *track->addr++;
+    config->reverb_depth_slide_length = steps;
+    if (steps == 0) {
+        config->reverb_depth_slide_length = 0x100;
+    }
+    target = *track->addr++ << 16;
+    target |= *track->addr++ << 24;
+    cur = config->reverb_depth & 0xFFFF0000;
+    config->reverb_depth = cur;
+    config->reverb_depth_slide_step =
+        (target - cur) / config->reverb_depth_slide_length;
+}
 
 void func_80031C88(AKAO_TRACK* track) {
     track->vol_master = *track->addr++;
