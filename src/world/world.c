@@ -2752,7 +2752,13 @@ void func_800B84D8(s32 arg0) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B851C);
+void func_800B851C(s32 arg0, s16 arg1, s16 arg2) {
+    if (D_800832A0 == 0) {
+        D_80116288 = arg1;
+        D_8011628C = arg2;
+        func_800B90C0(0, (u8)arg0, (u8)D_80116288, (u8)D_8011628C, &D_80116290);
+    }
+}
 
 static s32 func_800B857C(void) { return g_WindowData[0].state != WSTATE_INIT; }
 
