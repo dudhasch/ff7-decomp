@@ -905,6 +905,16 @@ extern u8 D_80166F78[6][0x10][6];
  *
  * The residue is `perm_ins_block` / `perm_temp_for_expr` shaped, not allocno
  * arithmetic, so it is a legitimate permuter target.
+ * A permuter run WAS made against this body: a bespoke macro set (a hop
+ * temporary and a cast width on the attackID compare, a copy of the match
+ * loop's counter, and one `do { } while (0);` over six landing sites) --
+ * 1,536 candidates, enumerated exhaustively in four minutes, terminated on
+ * its own without reaching zero. Its best candidate (score 2300 against a
+ * base of 3150) combines `s32 mi = j;`, `(u16)attackID`, and a barrier at
+ * the end of the second fill loop -- all three measured individually inert
+ * here, which is the standing warning that the permuter's score does not
+ * track checkfn's rows on this project. Do not re-run it on this body;
+ * re-import only after something else moves.
  *
  * Program facts already established -- read off the target, not up for
  * re-derivation:

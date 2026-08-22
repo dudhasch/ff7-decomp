@@ -88,12 +88,34 @@ extern DR_MODE D_800A170C[2];
  *
  * The inert result on the first line is the important one: the array-versus-
  * scalar spelling of the objects is not the lever, because fold gives both
- * the same tree.  What has to move is where gcc's pseudo for the base is
- * BORN, and nothing tried so far reaches it from C.  Next: read cc1's `.lreg`
- * dump for the two base pseudos' live ranges (CLAUDE.md's `-dl`/`-dg` recipe)
- * rather than guessing at spellings -- the question "why does the SetDef*
- * argument become a pseudo here and a hard register there" is answerable
- * directly and is the whole function. */
+ * the same tree.
+ *
+ * cc1's `-dr` dump answers where the pseudo comes from and rules out the
+ * obvious escapes.  `expand_call` precomputes EVERY argument of a call that
+ * has a stack argument, so `SetDefDrawEnv(&D_800A15E4, 0, 0, 0x280, 0x1E0)`
+ * emits `(set (reg 88) (symbol_ref "D_800A15E4"))` and `(set (reg 89)
+ * (const_int 480))` before the call in *both* builds -- that is also where
+ * the target's hoisted `li s1,0x1e0` comes from.  Whether the pseudo survives
+ * is decided afterwards: with one use it dies at the `move a0,reg88`, combine
+ * folds the two into `lui a0`/`addiu a0`, and nothing is left; with a second
+ * use it lives.  The second use is cse substituting reg 88 for the bare
+ * `symbol_ref` in the first flip's `&D_800A169C[D_800A15E0]`, which it can do
+ * because everything from `.L800A0CC8` (ResetGraph) down to the first flip is
+ * ONE basic block -- there is no label between them in the target either, so
+ * the target's source somehow denies cse that substitution inside a single
+ * extended basic block.  Four `do { } while (0);` boundaries were measured to
+ * test the block theory: after ClearImage exactly inert (223), the other three
+ * 233/233/251.  So it is not a block-structure fact.
+ *
+ * That leaves the possibility this note cannot test: that the original's flip
+ * does not name the array at all -- e.g. it walks a pointer that gcc cannot
+ * relate to the SetDef* argument.  The give-away to look for is whether the
+ * target ever recomputes `&D_800A169C` from scratch (it does not; it derives
+ * it as `addiu s1,s1,-0x10` off `&D_800A169C[0].isinter`, which is the byte
+ * store's own address kept in a register because that store is referenced
+ * twice).  Reproducing THAT derivation -- getting gcc to keep the isinter
+ * store's address rather than the array base -- is the next thing to try, and
+ * it is the same lever CLAUDE.md records for `FieldMain`'s `eventCmd`. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/dschange/nonmatchings/dschange", func_800A0C58);
 #else

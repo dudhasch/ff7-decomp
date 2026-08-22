@@ -89,6 +89,20 @@ Set-Location C:\ff7-daten-kopie\ff7-decomp; .\tools\docker-build.ps1 'make build
   It writes CRLF and cp1252 by default, which corrupts sources and makes files
   churn in git. Scripted edits either run inside the container, or use the Edit
   tool, or pass `encoding="utf-8", newline="\n"` explicitly.
+* **`file format not recognized` on an object during the link is a transient
+  volume flake, not a source problem.** On Windows the build volume can serve
+  the linker a partial view of an object ninja compiled moments earlier, and
+  `make build` dies with
+
+  ```
+  mipsel-linux-gnu-ld: build/us/src/main/psxsdk.c.o: file not recognized: file format not recognized
+  ```
+
+  naming a file you did not touch. Re-running `make build` fixes it with no
+  other change -- the object is a valid ELF on disk by then, so a sweep for
+  truncated objects finds nothing and reads as a contradiction. It happened
+  twice in one session, on `18B8.c.o` and `psxsdk.c.o`, while other work was
+  running against the same volume. Do not go looking for a cause in `src/`.
 * **One Docker build volume per worktree.** `build/`, `config/sym_export_*.txt`
   and `.ninja_*` are shared mutable state; two agents on one volume corrupt each
   other. Point each worktree at its own (`ff7_build_<name>`) — see
@@ -1522,6 +1536,30 @@ a near-miss, in rough order of frequency:
   Named through its own symbol the two are unrelated and gcc materialises a
   second base register. The three KAWAI colour/lighting handlers in
   `src/field/field4.c` all need this.
+* **A call with a stack argument precomputes *every* argument into a pseudo,
+  so a bare constant or a symbol address passed to it is competing for a
+  register.** `expand_call` takes the must-preallocate path as soon as one
+  argument goes on the stack, and cc1's `-dr` dump then shows
+  `(set (reg 88) (symbol_ref "D_800A15E4"))` and `(set (reg 89) (const_int
+  480))` emitted ahead of the call -- for a five-argument
+  `SetDefDrawEnv(&env, 0, 0, 0x280, 0x1E0)`, both. That is where an otherwise
+  inexplicable `li s1,0x1e0` in a target's prologue comes from, and it is not
+  a source-level hoist you have to reproduce.
+  What you *do* have to reproduce is whether the pseudo dies. With exactly one
+  use it dies at the `move a0,<pseudo>`, combine folds the pair into
+  `lui a0`/`addiu a0`, and the pseudo costs nothing; with a second use anywhere
+  in the same extended basic block it lives, takes a callee-saved register, and
+  every s-register after it renames. The second use is usually cse substituting
+  the pseudo for the same symbol later in the function -- so a global whose
+  address is both passed to such a call *and* indexed further down is one
+  callee-saved register more expensive than the target, and the whole diff
+  reads as allocation noise. `func_800A0C58` in `src/dschange/dschange.c` is
+  parked on exactly this. Neither the array-versus-scalar spelling of the
+  object, nor a `do { } while (0);` boundary between the call and the later
+  use, reaches it (both measured, both inert): what the original must be doing
+  is denying cse the match, which usually means the later use names a
+  *different* symbol -- in that target, the byte store `&env[0].isinter` kept
+  in a register and the base derived from it as `addiu s1,s1,-0x10`.
 * **A dead assignment before a call is how a value gets a callee-saved
   register.** `done = 0;` at the top of an arm, where nothing reads it until
   after the call, makes the variable live across the call, so global-alloc puts
