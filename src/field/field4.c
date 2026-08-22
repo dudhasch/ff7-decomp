@@ -1381,6 +1381,39 @@ extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
  *     is **-61** (211), and both together **-80** (238). Those numbers are
  *     the count of reloads the target has, so the repeated-expression form
  *     the body already uses is right and is not what the residue is about.
+
+ *
+ * **100 rows / +3 instructions -> 101 rows / the exact 484.** One row worse
+ * and three instructions better, which by this file's own rule is the step
+ * forward: a row count only compares within a length class.
+ *
+ * Two statements move, and both are what a person writing an init routine in
+ * 1997 would have typed rather than what the seed had:
+ *
+ *   - **`g_FieldState->modelCount = g_FieldScripts->numModels;` is the FIRST
+ *     statement of the function**, not buried thirty stores into the zeroing
+ *     run. You read the counts out of the map header, then you clear
+ *     everything. +3 -> +1 on its own.
+ *   - **`D_80081DC4 = 0;` sits with `currentFieldScale`**, not in the middle
+ *     of the `g_FieldState` run. It is the only store to a different symbol
+ *     in that whole block, so it needs its own `lui`/`addiu` -- which is
+ *     exactly the work sched2 puts in the load-delay slots. +1 -> exact.
+ *
+ * The three `nop`s the histogram used to show are gone with it. What is left
+ * is `addiu -2 / addu +1 / sll +1` and nothing else: the target computes two
+ * addresses by adding a constant where this body scales an index. The `%hi`
+ * table is clean apart from symbol *names* at the same addresses.
+ *
+ * The palette clear was re-swept at the new length, since the numbers in the
+ * list above (85 / 83 / 82) were taken at +3 and a row count does not carry
+ * across a length change. It is unchanged: the reversed inner loop with the
+ * row base at `+0x1E` is right. Two counted `for` loops are 110 rows and +1,
+ * a hoisted row base 100 and **-1**, a walked `*cell++` 102 and exact, one
+ * flat 0x400-iteration loop 154 and -7, and the outer loop as a `for` with
+ * the inner left reversed is 101 and exact -- i.e. identical to what is
+ * there. So `check_dbra_loop` reversing the outer counter is not costing
+ * anything measurable and the note's earlier reading of it was an artefact of
+ * comparing across lengths.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
@@ -1393,6 +1426,7 @@ void FieldInitDefaultValues(void) {
     s16* cell;
     s32 off;
 
+    g_FieldState->modelCount = g_FieldScripts->numModels;
     g_FieldState->eventCmd = 0;
     g_FieldState->eventCmdParam = 0;
     g_FieldState->movieCommandState = 0;
@@ -1401,8 +1435,6 @@ void FieldInitDefaultValues(void) {
     g_FieldState->pcModelId = 0;
     g_FieldState->idleAnimId = 0;
     g_FieldState->runAnimId = 2;
-    D_80081DC4 = 0;
-    g_FieldState->modelCount = g_FieldScripts->numModels;
     g_FieldState->suspendWalkAndAnim = 0;
     g_FieldState->menuDisabled = 0;
     g_FieldState->unk35 = 0;
@@ -1432,6 +1464,7 @@ void FieldInitDefaultValues(void) {
     g_FieldState->shakeX.currentStep = 0;
     g_FieldState->shakeY.currentStep = 0;
     g_FieldState->cameraScrollMode = 0;
+    D_80081DC4 = 0;
     g_FieldState->currentFieldScale = g_FieldScripts->scale;
 
     p = &D_80075F23;
