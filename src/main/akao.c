@@ -1710,7 +1710,38 @@ void func_8002FDA0(AKAO_TRACK* track, s32* out, s32 mask, s32 filter) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002FE48);
+// Key on every voice queued by a sound effect or by the music, clearing the
+// two request masks as it goes, and hand the union to the SPU in one call.
+void func_8002FE48(void) {
+    s32 voices;
+
+    voices = 0;
+    if (D_8009A168 != 0) {
+        if ((D_8009A174 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00)) !=
+            0) {
+            func_8002FDA0(
+                D_80097EC8, &voices,
+                D_8009A174 & D_80062F68 & ~(g_AkaoChannelMask[0] | D_80062F00),
+                ~(g_AkaoChannelMask[0] | D_80062F00));
+        }
+        D_8009A174 = 0;
+    }
+    if (g_AkaoPendingMask != 0) {
+        if ((~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00) & D_8009A114) !=
+            0) {
+            func_8002FDA0(
+                (AKAO_TRACK*)D_80096608, &voices,
+                ~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00) & D_8009A114,
+                ~(D_80062F68 | g_AkaoChannelMask[0] | D_80062F00));
+        }
+        D_8009A114 = 0;
+    }
+    voices |= D_80099FD8;
+    D_80099FD8 = 0;
+    if (voices != 0) {
+        SpuSetKey(0, voices);
+    }
+}
 
 // Rebuild the SPU noise-voice mask: collect the voices of every sound-effect
 // and music track that wants noise and is not already keyed on, then set the
