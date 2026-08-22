@@ -2241,12 +2241,13 @@ void FieldDebugRender(u_long* ot) {
 
 extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
 
-/* 971 changed / 154 inserted at 1300 instructions against 1341, from a raw
- * m2c seed that did not compile. Parked at the point where the *types* are
- * settled and the codegen work has not started; that is the durable half and
- * it is what the seed could not give.
+/* **806 changed / 95 inserted, length 1337 against 1341 (-4 instructions)**,
+ * down from 955 rows. Read the residue paragraph at the end before the
+ * history: the exact 1341 this note used to report was two errors of fifteen
+ * instructions each cancelling, and it hid both of them.
  *
- * Three primitive arrays, all read straight off the field offsets rather than
+ * The durable half is the types, which the m2c seed could not give. Three
+ * primitive arrays, all read straight off the field offsets rather than
  * guessed at:
  *
  *   D_800E3B28  LINE_F3[]  stride 0x18, two buffers of 24 -- the page frames.
@@ -2255,112 +2256,163 @@ extern void FieldDebugRenderString(s16 page, s16 row, u8* str, s32 x, s32 y);
  *               has no third point.
  *   D_800E3FA8  TILE[]     stride 0x10, two buffers of 12 -- the page fills.
  *               x0/y0 at 8/0xA, w/h at 0xC/0xE.
- *   D_800E41C8  the ordering table the two link into, reached as a `u32*` for
- *               the tag word. m2c writes the addPrim expansion out by hand
- *               (`*p = (*p & 0xFF000000) | (*ot & 0xFFFFFF)`), and it is left
- *               that way deliberately -- see AddBackgroundToRender's note on
- *               why the two uses of the ot slot are independent knobs.
+ *   D_800E41C8  the ordering table the two link into, `u_long[2][7]`, reached
+ *               as a `u32*` for the tag word. m2c writes the addPrim
+ *               expansion out by hand (`*p = (*p & 0xFF000000) | (*ot &
+ *               0xFFFFFF)`), and it is left that way deliberately -- see
+ *               AddBackgroundToRender's note on why the two uses of the ot
+ *               slot are independent knobs.
  *
  * They are declared `u8[]` in field_private.h because FieldDebugInitBuffers,
  * which matches, walks them as bytes; so the types go on at the use site as
- * casts rather than in the header.
+ * casts rather than in the header. The seed also needed
+ * FieldDebugRenderString's prototype hoisted -- m2c emits
+ * `? FieldDebugRenderString(...)` for a callee defined later in the unit,
+ * which is a parse error, and gcc 2.6.3 keeps generating code after it.
  *
- * The seed also needed FieldDebugRenderString's prototype hoisted -- m2c
- * emits `? FieldDebugRenderString(...)` for a callee defined later in the
- * unit, which is a parse error, and gcc 2.6.3 keeps generating code after it.
- *
- * 821 changed / 127 inserted at 1353 instructions against 1341, from 971/154
- * and 41 instructions *short*. Four corrections got it there and all four are
- * program, not codegen:
+ * Earlier corrections, all program rather than codegen, each still standing:
  *
  * 1. **m2c's offsets are in bytes and the page arrays are `s16[]`,** so every
  *    `*(g_FieldDebugPageY + off)` was double-scaled. The byte-offset form
  *    CLAUDE.md records for the sibling debug functions --
  *    `*(s16*)((u8*)SYM + off)` -- is what the target has, and its `$at` macro
  *    expansions are **389 of the function's 1341 instructions**. 53 sites.
- * 2. **The five index temporaries m2c emits are one variable, computed once.**
- *    Worth 28 instructions. Note the two forms either side of it are both
- *    worse and by a lot: recomputing `off` at each of the five blocks is +27,
- *    and writing `page * 0x17A` inline at all 93 uses is -77, because cse
- *    then folds it into far fewer than the target's six.
+ * 2. **The five index temporaries m2c emits are one variable.** Worth 28
+ *    instructions. Both extremes were worse: recomputing `off` at each of the
+ *    five blocks measured +27 *at the time*, and writing `page * 0x17A`
+ *    inline at all 93 uses is -77, because the inline form is a scaled
+ *    subscript and gcc then folds the symbol into the address register,
+ *    deleting the `$at` expansions that are a third of the function. See (D)
+ *    below -- the first of those two numbers has since reversed sign.
  * 3. `s32` for the row cursor rather than `s16`, worth 13.
- * 4. `u8 unusedLocals[0x30];`. The target's frame is 0x88 with s0-s5 and ra
- *    saved from 0x68, ours was 0x50 with s0-s3 -- so 0x30 of locals that no
- *    instruction names. Six rows and the frame.
+ * 4. Six m2c packet-pointer temporaries: `temp_a0_2`, `temp_a0_7`,
+ *    `temp_a0_9` are exactly inert and were deleted; `var_v1`, `var_v1_2`,
+ *    `var_v0_3` cost 10-11 instructions each and two of the three are kept,
+ *    which is what the length agrees with. Only the three m2c named `var_`
+ *    -- the ones it emitted because an `if`/`else` reaches the same packet
+ *    from two arms -- cost anything, which is the "same packet reached two
+ *    ways" idiom read as a *readout* of the arms.
  *
- * The per-symbol reference counts are now within one or two of the target at
- * every global (`g_FieldDebugRb` 33 against 35, `PageY` 19 against 18,
- * `D_800E0748` 18 against 17, and R/G/B, `D_800E074C`, `Row` and `H` exact),
- * so the addressing structure is right.
+ * `pageIdx` is deliberate. The target keeps the raw `s16` parameter in `$s5`
+ * and a separate sign-extended copy in `$s4`, passes the copy to the call
+ * (`addu $a0, $s4, $zero`) and recomputes the sign extension from `$s5` for
+ * each offset. Routing the call through an `s32` local reproduces the split.
  *
- * `pageIdx` is deliberate and is worth reading before touching it. The target
- * keeps the raw `s16` parameter in `$s5` and a *separate* sign-extended copy
- * in `$s4`, and passes the copy to the call (`addu $a0, $s4, $zero`) while
- * recomputing the sign extension from `$s5` for each offset. Routing the call
- * through an `s32` local reproduces that split: 821 rows against 831 without
- * it, at a cost of two instructions. Both numbers are here because the
- * length rule and the row count disagree, and the register evidence is what
- * breaks the tie -- the target demonstrably has both copies.
+ * ----------------------------------------------------------------------
+ * This session: 955 -> 806 rows on four changes. The first three are
+ * corrections, not codegen choices.
  *
- * 948 rows / +12 instructions -> **964 rows / +1**, and the thirty
- * instructions of waste the note used to call unexplained are now accounted
- * for: they were m2c's packet-pointer temporaries.
+ * A. **`u8 unusedLocals[0x30]` is `[0x28]`.** The target's frame is 0x88 with
+ *    s0-s5 and ra saved from 0x68; ours was 0x90 saving from 0x70, so every
+ *    prologue and epilogue offset read 8 high and nothing else did. 955 ->
+ *    **939**, length unchanged.
  *
- * Six of the `temp_*`/`var_*` locals hold `&((LINE_F3*)D_800E3B28)[...]` or
- * the TILE equivalent over an index that does not move while they are live,
- * so each can be replaced by the plain repeated subscript -- which is what
- * CLAUDE.md's `FieldInitDefaultValues` bullet says the original wrote.
- * Measured one at a time, they fall into two groups and the split is the
- * finding:
+ * B. **otSlot1/2/3/7/8 computed the wrong address.** `D_800E41C8` is
+ *    `u_long[2][7]`, so `(g_FieldDebugRb * 0x1C) + pageWord + D_800E41C8` is
+ *    pointer arithmetic on a `u_long(*)[7]` and scales the integer sum by 28
+ *    a *second* time -- `sll 3 / subu / sll 2` after the sum, three
+ *    instructions per site computing a byte the function never wants. The
+ *    target's own form is `rb*28 + page*4 + base`, so the fix is the integer
+ *    sum CLAUDE.md's `n + (s32)p` bullet prescribes:
+ *    `(s32*)((g_FieldDebugRb * 0x1C) + pageWord + (s32)D_800E41C8)`.
+ *    939 -> **913 rows and -15 instructions**. otSlot4/5/6 already used the
+ *    correct `&(*D_800E41C8)[page + rb * 7]` spelling and were left.
  *
- *   temp_a0_2, temp_a0_7, temp_a0_9   **exactly inert** -- 948 rows, +12,
- *       byte-identical. gcc already treats them as the subscript, so deleting
- *       them costs nothing and takes three locals out of the source.
- *   var_v1, var_v1_2, var_v0_3        **10 to 11 instructions each**. These
- *       three are the waste. Deleting all three overshoots to **-19**;
- *       deleting exactly one lands at +1 (var_v1), +2 (var_v1_2) or +2
- *       (var_v0_3).
+ * C. **The packets are addressed by byte offset, not by scaled subscript.**
+ *    `((LINE_F3*)D_800E3B28)[(g_FieldDebugRb * 24) + g_FieldDebugRRect]`
+ *    computes `(rb*24 + rrect) * 24`; the target computes `rb*576` and
+ *    `rrect*24` separately and adds. Written
+ *    `*(LINE_F3*)(D_800E3B28 + g_FieldDebugRb * 0x240 + g_FieldDebugRRect *
+ *    0x18)` -- 36 LINE_F3 sites, and 9 TILE sites at 0xC0/0x10 -- gcc even
+ *    picks the target's own decompositions, `(x<<3 + x)<<6` for 576 and
+ *    `(x<<1 + x)<<3` for 24. 913 -> **780 rows**, and it takes **eleven of
+ *    the fourteen excess load-delay `nop`s** with it, which is the largest
+ *    single effect measured on this function. This is CLAUDE.md's
+ *    scaled-subscript-versus-pre-scaled-byte-offset rule applied to a
+ *    *packet* rather than to a page header.
  *
- * So the original kept two of the three, and the body below keeps the two the
- * length agrees with. Note what the two groups have in common and do not:
- * all six are the same construct, and only the three that m2c named `var_`
- * -- the ones it emitted because an `if`/`else` reaches the same packet from
- * two arms -- cost anything. That is the "same packet reached two ways"
- * idiom, and it is a *readout* of the arms, not a source-level pointer.
+ * D. **`off = page * 0x17A;` is re-assigned at five more block heads.** The
+ *    target expands `page * 0x17A` **six** times and this body had one. They
+ *    are countable without reading a diff row: each expansion ends
+ *    `sll <r>,<r>,6 / subu`, and the target's .s has exactly six such pairs,
+ *    at 0x38754 (function top), 0x38850 (the `PageRow != 0` test), 0x38FC8
+ *    (the `else` arm, after the headRow division), 0x39234 (the frame-line
+ *    block after the if/else), 0x39534 (after the pkt5 addPrim) and 0x3983C
+ *    (the TILE block). Adding the five is +25 instructions and costs 26 rows:
+ *    780 at -29 -> **806 at -4**, with `subu` exact and `sll` within 3.
+ *    Priced individually on the finished body they are +6, +7, +5, +5 and +4
+ *    and they are exactly additive, so any subset is reachable -- three of
+ *    them hit the exact 1341 at 924 rows on the pre-C body, and that is
+ *    **not** the right answer, it is the same errors-cancelling trick this
+ *    note used to report. All six are in the target, so all six are here.
  *
- * The residue is now exact and small enough to state as a trade. Ours against
- * the target, by opcode: **nop +14, lui +8** against **addu -12, sll -7,
- * sra -3**. The target spends about twenty instructions re-expanding
- * `page * 0x17A` (six `sll`/`subu`/`sll` triples where this body expands it
- * once) and rebuilding addresses, and gets fourteen load-delay slots filled
- * for it; ours hoists and pays the nops. Net +1.
+ * ----------------------------------------------------------------------
+ * Measured and rejected this session. Each sweep varied one dimension and
+ * held the other three at the values above; re-run any of them after a change
+ * to A-D, because every number in the paragraph above moved at least once.
  *
- * The obvious way to buy that back does not work, and it is now measured
- * rather than assumed: re-assigning `off = page * 0x17A;` at the head of the
- * packet fills adds instructions without removing a single nop -- two extra
- * assignments +7, three +17, four +24, five and six +30 each, against +1. So
- * the target's six expansions are not reachable by re-assigning the variable,
- * and whatever produces them is in how the addresses are spelled.
+ *   - *`y`'s width*, the only local whose sweep still moves the length.
+ *     `u8` is **792 rows at the exact 1341** and `u16` is 793 at -1, against
+ *     806 at -4 for the `s32` that is here. **Both are wrong and neither was
+ *     taken.** The target's own code says so: it loads PageY with `lhu`, adds
+ *     2, copies to `$s2` and then emits `sll 16 / sra 16` at every use --
+ *     a *sixteen*-bit sign extension, which no `u8` or `u16` local produces
+ *     (`andi 0xff` / `andi 0xffff`). `s16`, which is what that pattern means,
+ *     measures 808 at **+9**. So there is a lever coupled to `y` that has not
+ *     been found, and taking the row count here would bury it. This is
+ *     CLAUDE.md's `FieldEntityMovementUpdate` warning in its exact form: the
+ *     sweep measures and does not check semantics, and `y` runs to the bottom
+ *     of a 240-line screen.
+ *   - *the PageY load spelling in the loop guard and in the `y` initialiser*,
+ *     `(s16) * (u16*)(...)` in one, in the other and in both: **exactly
+ *     inert** (806) in every combination, and inert on top of every `y`
+ *     width. The target's shared `lhu` is not reachable by respelling the
+ *     load.
+ *   - *the row loop's shape*: `while (y < ...)` and
+ *     `for (;;) { if (y >= ...) break; }` are **byte-identical**. The target
+ *     evaluates its guard once in the preheader and again on the back edge
+ *     (`beqz` out, fall through) where this body jumps into a single bottom
+ *     test (`j`), which is the whole of the `j +3 / beqz -2` in the histogram
+ *     -- and no spelling of the loop reaches it.
+ *   - *statement order* of `rowText = ...` and `y = ...`, which the target
+ *     emits the other way round: **exactly inert**, alone and crossed with
+ *     every `y` width.
+ *   - *the full width sweep*, 150 variants over 30 scalar locals, re-run
+ *     after C and D. Apart from `y` nothing is at the exact length: the next
+ *     best are `pageIdx u8` at +1 and `nextRect1 u8`/`s8` at -1, both worse
+ *     in rows.
  *
- * The page arrays it walks are now named (g_FieldDebugPageY/H/R/G/B/Row/
- * HeadRow/Hidden), so the byte-offset addressing the debug functions all
- * share is legible: `*(g_FieldDebugPageY + page * 0x17A)` is the y of one
- * page, and the `page * 189` / `page * 378` strides in the setters are the
- * same table seen as s16 and u8.
-
+ * The residue, by `insn_histogram.py` (which now resolves relocation addends,
+ * so its interior rows are trustworthy -- an earlier reading of this function
+ * was not):
  *
- * **964 rows / +1 instruction -> 955 changed, at the exact 1341.** Two local
- * widths from `tools/width_sweep.py`, and the first of them is the length:
- * `nextRect1` (`g_FieldDebugRRect + 1`, bounded by 24) is `u16` not `s16`,
- * worth 964/+1 -> 959 and exact; then `lastRowY` (`lastRow * 0xA`) is `s16`
- * not `s32`, 959 -> 955. `pktOff4` as `u16` is one row further and was left,
- * since single rows on a 955-row body are below the noise the note's real
- * residue sits in.
+ *     addu 297 306  -9      lui  214 206  +8
+ *     lhu   54  49  +5      sra   13  17  -4
+ *     j      9   6  +3      sll  205 208  -3
+ *     lh    87  84  +3      beqz   3   5  -2
+ *     lw    29  31  -2      and   30  32  -2
+ *     nop   33  31  +2      or    15  16  -1
  *
- * That residue is unchanged in kind and is the trade this note already
- * describes: `nop +14 / addu -12 / lui +8 / sll -7`, the target re-expanding
- * `page * 0x17A` and getting its load-delay slots filled for it.
- */
+ *     g_FieldDebugRb     0x800E1024  36 33 +3
+ *     g_FieldDebugRRect  0x800E41BC  30 28 +2
+ *     g_FieldDebugRLines 0x800E41C0  16 14 +2
+ *
+ * Three things to work from, in order of size. **One**: we materialise
+ * `g_FieldDebugRb`, `RRect` and `RLines` two or three times too often, and
+ * the shape of it is visible around the TILE block -- the target holds RRect
+ * in `$t1` across the packet stores and the `+= 1` that follows them, where
+ * this body reloads it after the stores. A store through
+ * `*(LINE_F3*)(SYM + reg)` is `(plus (symbol) (reg))`, which
+ * `memrefs_conflict_p` cannot disambiguate from a scalar global, so cse drops
+ * every global at that point; CLAUDE.md's fix (read the globals into locals
+ * *before* the store and use those after) is the thing to try, and it has not
+ * been tried here. **Two**: `and -2 / or -1 / lw -2` is one more
+ * read-modify-write of an ot slot than this body performs -- count the
+ * addPrim expansions against the target before assuming it is scheduling.
+ * **Three**: `j +3 / beqz -2` is the row loop's guard duplication above, for
+ * which no lever is known.
+ *
+ * Codegen pinned via MASPSX_OVERRIDE. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field5", FieldDebugRenderPage);
 #else
