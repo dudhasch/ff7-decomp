@@ -3090,6 +3090,23 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B141C);
  * sched2's -- see CLAUDE.md); a full `width_sweep.py` over all three locals.
  * Worse: case 0 split into a load then a shift-and-mask (12); `return` per
  * arm instead of `break` (14).
+ *
+ * CAVEAT, added during the merge: `tools/audit_parked.sh` flags this body
+ * READ-BEFORE-WRITE on `$s1` (`move v0,s1`), and it is a true hit rather than
+ * the tool's documented false positive.  The switch has no `default:`, so on
+ * any `size` outside 0..3 `result` is returned uninitialised; gcc gives it a
+ * register it never writes.  That matters here for a specific reason -- an
+ * allocno whose live range runs back to function entry perturbs the whole
+ * conflict graph, which is exactly the quantity ordering this note reasons
+ * about.  **So every number above, including the 10 and the qty_pri
+ * analysis, was measured on a body that is not a valid program, and the
+ * conclusion "not reachable from C" does not follow from them.**  See the
+ * `AddBackgroundToRender` entry in CLAUDE.md, where the invalid body scored
+ * 65 rows against the correct one's 72.
+ *
+ * Re-measure with the default path defined before spending anything here.
+ * The build is unaffected either way -- the function is pinned -- and the
+ * agent that wrote this note was stopped mid-park, so it never got the audit.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle", func_800B153C);
