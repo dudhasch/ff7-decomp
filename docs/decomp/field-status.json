@@ -2,7 +2,7 @@
  "units": [
   {
    "unit": "field.c",
-   "lines": 2274,
+   "lines": 2294,
    "bodies": 13,
    "matching": 10,
    "parked": 3,
@@ -11,7 +11,7 @@
   },
   {
    "unit": "field2.c",
-   "lines": 5733,
+   "lines": 5778,
    "bodies": 46,
    "matching": 37,
    "parked": 9,
@@ -29,7 +29,7 @@
   },
   {
    "unit": "field4.c",
-   "lines": 10562,
+   "lines": 10566,
    "bodies": 259,
    "matching": 251,
    "parked": 8,
@@ -38,7 +38,7 @@
   },
   {
    "unit": "field5.c",
-   "lines": 3081,
+   "lines": 3116,
    "bodies": 91,
    "matching": 89,
    "parked": 2,
@@ -47,7 +47,7 @@
   }
  ],
  "totals": {
-  "lines": 21835,
+  "lines": 21939,
   "bodies": 411,
   "matching": 389,
   "parked": 22,
@@ -136,7 +136,7 @@
   },
   {
    "name": "FieldBackgroundInitPackets",
-   "rows": 47,
+   "rows": 45,
    "ins": 4,
    "length_delta": 0
   },
@@ -159,16 +159,16 @@
    "length_delta": 0
   },
   {
+   "name": "FieldDebugRenderString",
+   "rows": 96,
+   "ins": 7,
+   "length_delta": 0
+  },
+  {
    "name": "FieldInitDefaultValues",
    "rows": 100,
    "ins": 18,
    "length_delta": 3
-  },
-  {
-   "name": "FieldDebugRenderString",
-   "rows": 100,
-   "ins": 6,
-   "length_delta": -1
   },
   {
    "name": "DebugUpdateActor",
@@ -190,9 +190,9 @@
   },
   {
    "name": "FieldEntityMove",
-   "rows": 357,
-   "ins": 36,
-   "length_delta": 6
+   "rows": 352,
+   "ins": 33,
+   "length_delta": 0
   },
   {
    "name": "FieldEntityMovementUpdate",
@@ -208,15 +208,15 @@
   },
   {
    "name": "FieldDebugRenderPage",
-   "rows": 964,
-   "ins": 124,
-   "length_delta": 1
+   "rows": 955,
+   "ins": 123,
+   "length_delta": 0
   }
  ],
  "queue_measured": true,
  "history": [
   {
-   "lines": 21835,
+   "lines": 21939,
    "bodies": 411,
    "matching": 389,
    "parked": 22,
