@@ -539,9 +539,18 @@ u8 func_800A4B3C(s32 index, s32 arg1) {
 
 void func_800A4B9C(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A4BA4);
+// Snapshot the first six bytes of actor arg0's record into D_800F39F0[arg0],
+// republish them through D_800F3A04, then overwrite the first three with the
+// freshly computed action id, target mask and formation byte.
+void func_800A4BA4(s32 arg0) {
+    D_800F39F0[arg0] = *(Unk800F39F0*)((u8*)D_8009D898 + arg0 * 0x440);
+    D_800F3A04[arg0] = D_800F39F0[arg0];
+    D_800F3A04[arg0].unk0 = 1;
+    D_800F3A04[arg0].unk1 = (g_CombatantTurnState[arg0].unk29 & 2) ? 0 : 7;
+    D_800F3A04[arg0].unk2 = D_800F5EFC[arg0 * 0x18];
+}
 
-s32 func_800A4CA8(s32 arg0) { return D_800F39F0[arg0][0]; }
+s32 func_800A4CA8(s32 arg0) { return D_800F39F0[arg0].unk0; }
 
 s32 func_800A4CC8(s32 arg0) {
     s32 temp_v1;

@@ -328,7 +328,21 @@ extern s32 D_800F39DC; // write index into D_800F3958
 extern s32 D_800F39E0;
 extern s32 D_800F39E4;
 extern s32 D_800F39EC;
-extern u8 D_800F39F0[][6];
+/* Six bytes of actor state, republished each time func_800A4BA4 runs.  The
+ * first three are recomputed there; bytes 3..5 are carried over from the
+ * source record at D_8009D898. */
+typedef struct {
+    /* 0x0 */ u8 unk0;
+    /* 0x1 */ u8 unk1;
+    /* 0x2 */ u8 unk2;
+    /* 0x3 */ u8 unk3;
+    /* 0x4 */ u8 unk4;
+    /* 0x5 */ u8 unk5;
+} Unk800F39F0; // size:0x6
+
+extern Unk800F39F0 D_800F39F0[];
+extern Unk800F39F0 D_800F3A04[];
+extern u8 D_8009D898[]; // source record, 0x440 stride
 extern s32 D_800F3A1C;     // write index into D_800F3A20
 extern s16 D_800F3A20[16]; // ring buffer, see func_800A56B0
 extern s8 D_800F3A80[];
