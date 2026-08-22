@@ -705,6 +705,31 @@ extern s16 D_80071E3C;
  *     `i`->`u16` (-8): every one is worse than both of its components
  *     (60, 63, 118, 124, 136, 140, 151, 151). The pattern is real and it does
  *     not fire here.
+ *
+ * Swept once more at the 27-row honest base, this time asking the
+ * pseudo-structure question rather than the spelling one (the residue is a
+ * permutation at the exact 786, so CLAUDE.md's 0-insertion rule applies and
+ * the answer, if there is one, is a count of variables). Nothing moved:
+ *
+ *   - cluster 1's hoist order read as a `scan_loop` fact rather than as an
+ *     `ev` placement. `move_movables` emits in the order `scan_loop` recorded
+ *     the movables, which is insn order in the loop body, and the target's
+ *     preheader is `1, 3, 0xd, fadeBase, ev` against this build's
+ *     `1, 3, fadeBase, 0xd` -- so in the original the constant 0xD is
+ *     referenced *before* the fade base, i.e. before `fadeType == 0` at the
+ *     top of the loop. Writing that guard as a nested `if` so the fade base's
+ *     reference sits inside a conditional arm (where `move_movables` will not
+ *     take it) is **exactly inert at 27**; putting the fadeType test first in
+ *     the `&&` instead is 43/9. The only source shape that would record 0xD
+ *     first is one where the `D_800965EC != 5 && != 0xD` block precedes the
+ *     fade block, and that is a different program.
+ *   - cluster 3 asked as "how many `i = 0xF` assignments does the original
+ *     have?", since reorg can only steal the join's `li v1,0xf` if there is a
+ *     join to steal it from. Duplicating `i = 0xF;` into both rain arms is
+ *     inert (27); duplicating both `i` and `fill` into both arms is inert
+ *     (27) -- cross-jumping merges the copies straight back and the join is
+ *     rebuilt. The if/else collapsed to `g_RainForce = (g_RainControl & 0x80)
+ *     == 0 ? 0 : 0xFF;` is 80 at -7 instructions, so the branch is real.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", FieldMain);
@@ -2054,6 +2079,53 @@ extern FieldBgOtSlot D_8009ACA2;
  *   - the wrap test is an `||` of two `<=`, not `!(a && b)`; gcc 2.6.3 does not
  *     apply De Morgan and the two spellings schedule differently.
  *
+ * ================= READ THIS BEFORE ANY NUMBER BELOW =================
+ *
+ * **The 65-row body this note used to describe read an undefined register,
+ * and every measurement taken against it is worth nothing.** Lever 6 was
+ * `layer3Slot = &D_8009ACA2.layer3;` written on the line above the `layer3:`
+ * label -- and the layer-2 walk is a `for (;;)` that is left only by
+ * `goto layer3`, so that line is *unreachable*. jump_optimize deleted the
+ * block, the pseudo kept its use and lost its def, and global_alloc gave the
+ * undefined value `$s3`: `lhu v1,0(s3)` at 0x292c with no write to `s3`
+ * anywhere above it in the function. The seven rows lever 6 was credited with
+ * were an allocation perturbation bought by undefined behaviour, and the
+ * bodies the sweeps below were measured against all carry it.
+ * The check that finds this class in one command, on any body whose diff has
+ * a callee-saved register in it that the target does not use for that value:
+ * disassemble the object and grep the function for writes to that register.
+ * A register read and never written is not a codegen residue, it is a bug.
+ *
+ * The honest baseline with the pointer deleted and the addPrim macro written
+ * plainly is **72 rows, 0 insertions, 0 deletions, at the exact 658**, and
+ * from there one lever takes it to **64**:
+ *
+ *   - **layer 2's mask test wants the same `otSlot` shape as layers 3 and 4.**
+ *     `if (entity == 0 || (g_FieldEntityBgTrigger[entity] &
+ *     (otSlot = buf->BgAnim[sprite].mask)))` -- the assignment-inside-the-test
+ *     that lever 2 already applies to the two scrolling layers -- is **72 ->
+ *     64** and closes the whole layer-2 entity block (the `v1`/`a0` and
+ *     `v0`/`v1` rows at 137-151 that this note never attributed to anything).
+ *     `otSlot` has to stay *one* variable across all three layers: a separate
+ *     `maskSlot` for the three mask reads is 67. That is the counter-merging
+ *     rule on a scalar -- the three layers describe the same quantity.
+ *
+ * Re-measured against the corrected 64-row body and all inert or worse:
+ * `entity` split into one local per layer (inert, 64), `otSlot = run[0]` in
+ * layer 1's kind test (inert), `(otSlot = buf->Bg1[sprite].x0)` in layer 1's
+ * or layer 2's x test (inert), `(otSlot = D_80071A48[0].y)` in layer 1's or
+ * layer 2's y test (71 / 70), `otSlot = run[1]` for layer 1's BgDm addPrim
+ * (149 at -5 instructions). `width_sweep.py` over all four scalar locals, 20
+ * variants: **flat** -- nothing ties 64 and the next alternatives are 70+.
+ *
+ * The five levers 1-5 below were all re-measured on the *corrected* body and
+ * all still pay: without the layer-2 dead conditional 141, without the
+ * layer-4 dead `else if` 85, without the layer-3 `do { } while (0);` 81,
+ * without the two mask-test assignments 116 at +1 instruction, with the
+ * layer-3 mask test's operands unswapped 73.
+ *
+ * =====================================================================
+ *
  * 204 rows: 1 instruction out and 203 rows of register naming. The four wrap
  * tests read `buf->Bg2[sprite].x0` / `.y0` directly at every use rather than
  * through an `s16 x` / `s16 y` temporary -- decomp-permuter found it (score
@@ -2143,23 +2215,15 @@ extern FieldBgOtSlot D_8009ACA2;
  *      72 for both). Nothing else of that kind pays -- `run[0] >
  *      D_80071A48[0].y - 0x100` for either wrap test or both, and the same
  *      rewrite of the layer-1 x tests, are all exactly inert.
- *   6. the layer-3 sprite addPrim written out as its two `setaddr`s, with the
- *      *second* one reaching the ordering-table slot through a pointer local:
- *
- *          layer3Slot = &D_8009ACA2.layer3;   -- immediately above layer3:
- *          ...
- *          setaddr(&buf->Bg2[sprite], getaddr(&buf->ot[D_8009ACA2.layer3]));
- *          setaddr(&buf->ot[*layer3Slot], &buf->Bg2[sprite]);
- *
- *      Seven rows. The macro uses its `ot` argument twice and only the second
- *      use goes through the pointer, which is why the expansion has to be
- *      written by hand; expanding it without the pointer is exactly inert, and
- *      where the pointer is assigned decides everything -- at the top of the
- *      function it is 124/3 against 65 for the assignment sitting immediately
- *      above the `layer3:` label.
- *      It does not generalise to the other addPrims: the same treatment of the
- *      layer-4 sprite addPrim, with its own pointer assigned above `layer4:`,
- *      is 138/2, and of the BgDrenv3S addPrim 70.
+ *   6. WITHDRAWN -- this was the undefined `layer3Slot` read described at the
+ *      top of this note, not a lever. For the record, on a *correct* program
+ *      the same idea costs rows rather than saving them: the assignment moved
+ *      down to just after the `layer3:` label, where it is reachable and
+ *      dominates its one use, is 70, and routing all eight layer-3 reads of
+ *      the slot through the pointer is 113 at -1 instruction. The target reads
+ *      all eight through **one** register (`0($t1)`, and it is
+ *      `&D_8009ACA2.layer3` = D_8009ACA4), which is what the plain `addPrim`
+ *      spelling gives; two source variables for it is the fault, not the fix.
  *
  * What is left is a three-cycle plus two swaps in the layer-1 preheader, and
  * it says the same thing the old analysis did, one place less far out:
@@ -2189,13 +2253,38 @@ extern FieldBgOtSlot D_8009ACA2;
  * it also turns every `mem` with a `symbol_ref` address into a based access
  * and the relocation set changes with it (2 symbol aliases against 14).
  *
- * Which leaves the other half of `find_reg`: an allocno takes the lowest
- * numbered hard register that does not *conflict*, and the conflict sets of
- * the two programs need not be the same. A target that gives `run` $t7 may
- * simply have something else live across $t5 and $t6 there -- the "value that
- * is not in the block" case from CLAUDE.md -- rather than a different ranking.
- * Nothing in the target's `.s` distinguishes the two explanations, which is
- * why this is a search problem and not a reading one.
+ * That "other half of `find_reg`" escape hatch the note used to offer -- maybe
+ * the conflict sets differ rather than the ranking -- is **closed, and the
+ * dump closes it**. `find_reg` really does hand out the lowest-numbered
+ * non-conflicting hard register, and this function's own `.greg` proves it
+ * against the obvious counter-example: pseudo 105 is allocated seven places
+ * *after* `run` and still gets `$t2`, which reads like a cost model until you
+ * check its conflict list -- it conflicts with 149/150 (holding $a2/$a1) and
+ * with 101 and 1219 (holding $t0/$t1) but with nothing in $t2, so $t2 *is* its
+ * lowest free register. Every disposition in the function is consistent with
+ * lowest-free. So the register each of these three quantities gets is decided
+ * by `allocno_compare`'s order and nothing else, and the numbers above are a
+ * proof rather than an estimate.
+ *
+ * Which makes the residue a genuinely sharp statement about the original, and
+ * the numbers are worth having exactly: with 0 insertions and 0 deletions the
+ * RTL is the same on both sides (CLAUDE.md's rule), so the *only* thing that
+ * can differ is how many pseudos the source cuts the function into. For the
+ * target's order to come out, `run` needs **<= 16 references** (floor_log2 x
+ * n_refs < 67 at length 538) where it has 47, or the layer-1 0x124DC constant
+ * needs **>= 12** (at length 80) where it has 5. Nothing in between helps and
+ * nothing about the spelling of an expression moves either number, because
+ * REG_N_REFS is counted on post-cse RTL.
+ *
+ * The one structure that would deliver it -- a per-loop cursor, `r = run;` at
+ * the top of each walk with the body reading `r[0]`/`r[1]`/`r[2]` and only
+ * `run = r + 1` / `run = r + 3` touching `run` -- **does not survive cse**:
+ * measured on layer 1 it takes `run` from 47 references to **55**, because cse
+ * propagates `r` straight back into every subscript and the two assignments
+ * are pure additions to `run`'s own count. 135 rows at -1 instruction. A
+ * `do { } while (0);` after `r = run;` to give cse a basic-block boundary is
+ * exactly inert -- 135 again, the same -1 -- so the barrier does not save it
+ * either. Whatever the original wrote, it is not a second pointer.
  *
  * Re-measured against *this* base, since a park note's negatives are only good
  * for the state they were taken in: a per-layer `sprite` is 151, a per-layer
@@ -2243,14 +2332,28 @@ extern FieldBgOtSlot D_8009ACA2;
  *
  * Both of `insn_histogram.py`'s tables are **clean** on this body -- 658
  * against 658 instructions, opcodes `(identical)`, `%hi` materialisations per
- * address `(identical)` -- and that is the evidence that closes the question
- * rather than one more negative. Two clean tables with 65 rows still differing
- * cannot be an addressing or an instruction-mix fault; there is nothing left
- * for the residue to be except which register each quantity got. So the
- * `allocno_compare` arithmetic below is not a guess that ran out of ideas, it
- * is the only remaining explanation, and CLAUDE.md's rule applies: a residue
- * that reduces to allocno arithmetic with no reachable term is a park, not a
- * search, and specifically not a permuter target.
+ * address `(identical)` -- so the residue cannot be an addressing or an
+ * instruction-mix fault; there is nothing left for it to be except which
+ * register each quantity got.
+ *
+ * That used to be written here as "so the `allocno_compare` arithmetic is the
+ * only remaining explanation, and a residue that reduces to allocno arithmetic
+ * is a park, not a search". **That inference is backwards and it is what kept
+ * this function parked for three sessions.** Two clean tables and a diff with
+ * 0 insertions and 0 deletions mean the two objects have the *same instruction
+ * stream*, which means the same RTL, which means the same `n_refs` and
+ * `live_length`, which means `allocno_compare` produces the *same order on
+ * both sides*. A ranking that is provably equal cannot be the thing that
+ * differs. What differs is how many pseudos the source cuts the block into --
+ * and that is reachable from C. The layer-2 `otSlot` lever at the top of this
+ * note is exactly such a change, found by asking "how many variables?" rather
+ * than "which register?", and it was worth 8 rows on a body this note had
+ * already declared finished.
+ *
+ * So the arithmetic below is still worth having -- it says precisely what a
+ * candidate structure has to deliver (`run` at <= 16 refs, or the layer-1
+ * constant at >= 12) -- but as a *specification for the search*, not as a
+ * verdict that no search is possible.
  *
  * (Read that with the tool's own history in mind. Before commits 2ac13ad /
  * 7e68f5f the same tables reported `D_80071A48 +6` against five interior
@@ -2263,12 +2366,17 @@ extern FieldBgOtSlot D_8009ACA2;
  * complementary.)
  *
  * This one belongs to decomp-permuter, and the scratch must be re-imported
- * against this body rather than an older one. The pass that matters is
- * `perm_refer_to_var` -- it adds a reference to a variable, which is exactly
- * the term in `allocno_compare` that has to move -- with `perm_var_cond_block`,
+ * against the **corrected 64-row body** -- every scratch built before this
+ * note was rewritten was importing a program with an undefined register read
+ * in it, which is the same class of mistake as the `align`-broke-a-declaration
+ * failure recorded for FieldMain. The pass that matters is `perm_refer_to_var`
+ * -- it adds a reference to a variable, which is exactly the term in
+ * `allocno_compare` that has to move -- with `perm_var_cond_block`,
  * `perm_dummy_comma_expr` and `perm_add_self_assignment` behind it; a 55,000
  * iteration run at the default weights, which spend most of their budget on
- * `perm_temp_for_expr`, found nothing at all.
+ * `perm_temp_for_expr`, found nothing at all. Note that `perm_temp_for_expr`
+ * is nevertheless the pass that found the layer-2 `otSlot` shape by hand, so
+ * weight it second rather than dropping it.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field", AddBackgroundToRender);
@@ -2280,7 +2388,6 @@ void AddBackgroundToRender(struct FieldRenderData* buf) {
     s16 sprite;
     s32 otSlot;
     u8 entity;
-    u16* layer3Slot;
 
     data = *D_8009D848;
     run = data->runs;
@@ -2327,8 +2434,9 @@ layer2:
                     if (D_80071A48[0].x - 0x150 < buf->Bg1[sprite].x0 &&
                         buf->Bg1[sprite].x0 < D_80071A48[0].x) {
                         entity = buf->BgAnim[sprite].entity & 0x3F;
-                        if (entity == 0 || (buf->BgAnim[sprite].mask &
-                                            g_FieldEntityBgTrigger[entity])) {
+                        if (entity == 0 ||
+                            (g_FieldEntityBgTrigger[entity] &
+                             (otSlot = buf->BgAnim[sprite].mask))) {
                             otSlot = buf->Bg1[sprite].r0 +
                                      (buf->Bg1[sprite].g0 << 8);
                             addPrim(&buf->ot[otSlot], &buf->Bg1[sprite]);
@@ -2343,7 +2451,6 @@ layer2:
         run += 3;
     }
 
-    layer3Slot = &D_8009ACA2.layer3;
 layer3:
     addPrim(&buf->ot[D_8009ACA2.layer3], &buf->BgDrenv3E);
     for (;;) {
@@ -2390,9 +2497,7 @@ layer3:
                     if (entity == 0 ||
                         (g_FieldEntityBgTrigger[entity] &
                          (otSlot = buf->BgAnim[sprite + D_801144C8].mask))) {
-                        setaddr(&buf->Bg2[sprite],
-                                getaddr(&buf->ot[D_8009ACA2.layer3]));
-                        setaddr(&buf->ot[*layer3Slot], &buf->Bg2[sprite]);
+                        addPrim(&buf->ot[D_8009ACA2.layer3], &buf->Bg2[sprite]);
                     }
                     sprite++;
                 } while (--count != 0);

@@ -229,7 +229,7 @@ the alias rows already filtered out — which is what you want on a near-miss,
 since separating the real rows from the aliases in `diff.py` output by eye is
 the slow half of reading a diff (`FieldEventRequest`: 3 real rows against 95
 aliases). Prefer it to
-reading `diff.py` by eye — see *Seven ways a clean-looking diff lies* below.
+reading `diff.py` by eye — see *Eight ways a clean-looking diff lies* below.
 
 To look at the actual instructions once it reports a mismatch:
 
@@ -683,7 +683,7 @@ a near-miss, in rough order of frequency:
   reports 34 rows with `const u32 D_800A0000[]` present and **27** with it
   deleted -- a constant 7 rows that vanish the moment the function is
   unparked, which is exactly when the object must be deleted anyway (see
-  *Seven ways a clean-looking diff lies*). So for any parked function with a
+  *Eight ways a clean-looking diff lies*). So for any parked function with a
   local aggregate initialiser, take the honest baseline by scoring one
   variant that deletes the object, and record both numbers in the note.
 
@@ -2277,6 +2277,82 @@ a near-miss, in rough order of frequency:
   arithmetic applies to a residue with insertions in it, not to a pure
   permutation.
 
+  **Applying it looks like asking "how many variables?" at every quantity the
+  diff names, and the answer can be a *merge* as easily as a split.**
+  `AddBackgroundToRender` in `src/field/field.c` is the purest case this repo
+  has — 0 insertions, 0 deletions, the exact 658 instructions, and both
+  `insn_histogram.py` tables identical — and its note had computed the allocno
+  scores and declared it a park. The lever was that layer 2's entity-mask test
+  was spelled `mask & trigger[entity]` while layers 3 and 4 spell it
+  `trigger[entity] & (otSlot = mask)`: the same quantity, written as an
+  assignment to the shared local in two of the three places it occurs. Making
+  the third match is **72 rows → 64** and closes the whole layer-2 entity
+  block. Splitting the mask reads off into their own `maskSlot` instead is 67,
+  so the direction is merge-into-one, not split. Sweep every repeated
+  construct in the function for the one that is spelled differently from its
+  siblings before concluding anything from the allocno numbers.
+
+* **`find_reg` really is lowest-free, and the counter-example that looks like a
+  cost model is a conflict list you have not read.** The escape hatch a park
+  note reaches for once the allocno arithmetic says "unreachable" is that
+  gcc's `find_reg` might be picking by cost rather than by number, so the two
+  programs could differ in conflicts rather than in ranking. It is not: in
+  `AddBackgroundToRender`'s own `.greg`, pseudo 105 is allocated *seven places
+  after* `run` and still gets the lower `$t2`, which reads as a cost model
+  until you check `;; 105 conflicts:` — it conflicts with the allocnos holding
+  `$a1`, `$a2`, `$t0` and `$t1` and with nothing in `$t2`, so `$t2` is its
+  lowest free register. Check the conflict line before inventing a mechanism;
+  the dump prints one per allocno, right under the allocation order.
+
+  With that closed, the arithmetic becomes a **specification for the search**
+  rather than a verdict against it. `allocno_compare` ranks by
+  `floor_log2(n_refs) * n_refs / live_length`, so a diff whose whole residue is
+  two quantities trading registers states exactly what a candidate structure
+  must deliver: `AddBackgroundToRender` needs `run` at **≤ 16** references (it
+  has 47 over 538 insns) *or* the layer-1 `0x124DC` constant at **≥ 12** (it
+  has 5 over 80). Write that number into the note — it is what tells the next
+  pass whether a proposed structure is even in range, and it is one `-dl` dump
+  away.
+
+* **A register the target never writes, read in your build, is a bug and not a
+  residue — and an unreachable assignment is how you get one.**
+  `AddBackgroundToRender` carried a `layer3Slot = &D_8009ACA2.layer3;` written
+  on the line above the `layer3:` label, and the walk above it is a `for (;;)`
+  left only by `goto layer3` — so the assignment was unreachable,
+  `jump_optimize` deleted the block, the pseudo kept its use and lost its def,
+  and `global_alloc` handed the undefined value `$s3`. It compiled, it scored
+  **seven rows better** than the correct program, and it had been recorded as a
+  lever and re-measured against for three sessions; every number taken on that
+  body is worth nothing. The check costs one command — disassemble the object
+  and grep the function for writes to the register the diff names:
+
+  ```shell
+  sh tools/variant_disasm.sh .variants/<spec>.json /tmp/f.dis
+  awk '/<AddBackgroundToRender>:/,0' /tmp/f.dis | grep -nE '\bs3\b'
+  ```
+
+  A read with no write above it is the answer. Reach for it whenever the diff
+  shows your build using a *callee-saved* register for a value the target keeps
+  in a temp: that is exactly what an allocno with no definition looks like,
+  because its live range runs back to the function entry. A label after an
+  infinite loop is the shape to distrust — everything between the loop's close
+  and the label is dead code that the front end accepts silently.
+
+* **You cannot move references off a walking pointer with a per-loop cursor —
+  cse propagates it straight back and the count goes *up*.** The obvious way to
+  drop a long-lived pointer's `REG_N_REFS` (the term `allocno_compare` ranks
+  on) is to read the loop body through a copy: `r = run;` at the top, `r[0]`,
+  `r[1]`, `r[2]` in the body, and only `run = r + 3` at the bottom. It does not
+  work. cse substitutes `run` back into every subscript, so `r` ends up with a
+  handful of references and the two assignments are pure *additions* to `run`'s
+  own count: measured on `AddBackgroundToRender`'s first walk, `run` went from
+  47 references to **55** and the body from 72 rows to 135. A
+  `do { } while (0);` after the copy to give cse a basic-block boundary — the
+  barrier that works for a named *address* local — is exactly inert here, 135
+  again. So `REG_N_REFS` on a pointer is a property of the walk, not of the
+  spelling, and a residue that needs it lowered needs a different program
+  rather than a different phrasing.
+
 * **Paired levers can both be *plateaus*, not regressions, and a note that
   measures one at a time rejects both.** The existing paired-levers rule is
   about two changes at +1 and −1 instruction that cancel. The commoner case
@@ -3041,7 +3117,7 @@ cost no instruction. When a diff shows a value in a callee- or long-lived
 register where the target uses `$v0`, count how many different things the
 source spells with that name.
 
-#### Seven ways a clean-looking diff lies
+#### Eight ways a clean-looking diff lies
 
 **A stale object.** `make report` rewrites `build.ninja` to build into
 `report/build/`. After it has run, `ninja build/us/...` finds no such target,
@@ -3133,6 +3209,31 @@ function with a local aggregate initialiser, grep the unit's file-scope
 `const` objects for the same bytes; `od -A d -t x4` on the initialiser is the
 check. The same applies in reverse: re-parking one means putting the object
 back.
+
+**A parked body that reads an undefined register.** gcc 2.6.3 accepts a
+statement that no path reaches, `jump_optimize` deletes the block, and a local
+whose only assignment was in it keeps its *use* and loses its *def* — so
+`global_alloc` gives the undefined value a hard register and the function
+compiles, links and scores. It can score *better* than the correct program,
+because an allocno whose live range runs back to the function entry perturbs
+the whole conflict graph: `AddBackgroundToRender` read `0($s3)` with no write
+to `$s3` anywhere above it and measured **65 rows against the correct body's
+72**, and that 65 was carried in the park note as a lever and re-measured
+against for three sessions. The shape to distrust is a statement between the
+close of an infinite loop and a label the loop only reaches by `goto`:
+
+```c
+    for (;;) { ... goto layer3; ... }      /* no break, never falls through */
+
+    layer3Slot = &D_8009ACA2.layer3;       /* unreachable — silently dropped */
+layer3:
+```
+
+The check is one command and belongs in the routine for any diff that shows
+*your* build using a callee-saved register where the target uses a temp:
+disassemble the variant's object and grep the function for writes to that
+register. A read with no write above it is the answer, and no amount of
+codegen reasoning will find it, because the residue is not codegen.
 
 #### Sweeping many variants at once
 
@@ -4385,6 +4486,7 @@ resolve to the same address, and the overlay SHA-1s are the proof.
 | `tools/permuter_macros.py` | Permuter scratch alignment, `PERM_*` recipes, search sizing |
 | `tools/permuter_scratch.sh` | Build a permuter scratch and prove it is scoreable before searching |
 | `tools/unpark.py` | Make one `MASPSX_OVERRIDE`'d body the live one, for import or measurement |
+| `tools/variant_disasm.sh` | Score a variant and disassemble its object — the undefined-register check |
 | `docs/decomp/worklist-*.md` | Generated by `worklist.py` — regenerate per batch, never hand-edit |
 | `disks/us/` | Extracted game files (generated, gitignored) |
 | `asm/`, `build/`, `expected/` | All generated — never edit |
