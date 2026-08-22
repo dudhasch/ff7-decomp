@@ -369,13 +369,13 @@ void func_80014658(s32 file_no, void (*cb)(void)) {
     cb();
 }
 
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_800146A4);
-#else
 void func_800146A4(void) {
     s32 var_s0 = -1;
     while (var_s0) {
-        switch (D_8009C560) {
+        /* The target loads this with `lhu` and sign-extends it by hand
+         * (`sll 16` / `sra 16`), which is what a volatile 16-bit read gives --
+         * the plain type folds the extension into an `lh`. See CLAUDE.md. */
+        switch (*(volatile s16*)&D_8009C560) {
         case 4:
             func_800145BC(0);
             func_80014658(BATTLE_BROM, D_800A00CC);
@@ -390,7 +390,6 @@ void func_800146A4(void) {
         }
     }
 }
-#endif
 
 void func_80014750(void) {
     s32 temp_a0;

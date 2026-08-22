@@ -466,6 +466,13 @@ a near-miss, in rough order of frequency:
     to** the thing, not the thing. `D_800E4274` in `src/field/field2.c` is a
     `s16*` holding the walk mesh address; declaring it `s16[]` cost 27
     instructions and a 64-byte frame overrun before the `lw` gave it away.
+    Run the other way it types a *callback*: `addiu a1,a1,%lo(D_800A00CC)`
+    where your build has `lw a1,%lo(D_800A00CC)(a1)` means the symbol **is**
+    the entry point, `extern void D_800A00CC(void);`, not an
+    `extern void (*D_800A00CC)(void);` the caller dereferences. Two sites in
+    `func_800146A4` in `src/main/18B8.c`, worth two rows and no length; the
+    give-away that the declaration is wrong rather than the expression is that
+    `config/sym_ovl_export.us.txt` names the same address `func_800A00CC`.
   * `lhu` against your `lh` on a struct field means the field is unsigned
     (`lbu`/`lb` likewise). `FieldEntity.PosI` was declared `s16` and every
     read in the target is `lhu`.

@@ -236,5 +236,7 @@ extern u16 D_8009ABF6;
 extern u16 D_8009AC32;
 extern u8 D_8009D5E9;
 extern u16 D_8009D78A;           // party-present bitmask
-extern void (*D_800A00CC)(void); // battle/brom entrypoint
-extern void (*D_800A1158)(void); // battle/battle entrypoint
+/* Overlay entry points, passed by address -- the target's `addiu a1,a1,%lo`
+ * is the function's own address, not a load through a pointer variable. */
+extern void D_800A00CC(void); // battle/brom entrypoint
+extern void D_800A1158(void); // battle/battle entrypoint
