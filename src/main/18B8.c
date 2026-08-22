@@ -1407,7 +1407,11 @@ void func_80021044(DRAWENV* draw_env, DISPENV* disp_env) {
 
 void func_800211B8(s32 arg0) { D_80062DEC = arg0; }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800211C4);
+void func_800211C4(s32 id) {
+    SystemLoadFileBySector(D_80048F60[id * 2], D_80048F60[id * 2 + 1],
+                           (u_long*)D_80062DEC, NULL);
+    SystemCdromReadChain();
+}
 
 void func_8002120C(s32 arg0) {
     s32 prev;

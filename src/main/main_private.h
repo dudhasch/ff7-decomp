@@ -181,6 +181,7 @@ extern s32 D_80048D10;
 extern s32 D_80048D14;
 extern s32 D_80048D18;
 extern s32 D_80048D1C;
+extern s32 D_80048F60[]; // {sector, size} pairs, indexed by file id
 extern s32 D_80048D20;
 extern Yamada D_80048D84[];
 extern s32 D_80048DD4[];
