@@ -3213,10 +3213,46 @@ extern u8 g_FieldLineCheckResult;
  * length is currently exact, a lever that takes it 8 short is masking a +8
  * this body has elsewhere -- find that first, then re-measure this.
  *
+ * **The +8 is the loop's own copy of the id and the offset, and with it the
+ * pair lands: 352 -> 340 at the exact 759.** The target re-derives both at
+ * the head of `loop_31`, out of a memory-resident `ent`:
+ *
+ *     lhu  $t3, 0x18($sp)        <- reload ent
+ *     sll  $v0, $t3, 0x10
+ *     sra  $s3, $v0, 0x10        <- id2 = (s16)ent
+ *     sll  $v0, $s3, 0x5
+ *     addu $v0, $v0, $s3
+ *     sll  $s0, $v0, 0x2         <- a *second* id * 0x84
+ *
+ * and then compares `$s3` against `g_PlayerModelId` and addresses the whole
+ * loop body off `$s0`, where this body carried one `off` in `$s4` throughout.
+ * The three `offAt*` locals were already declared and assigned here and none
+ * of their uses had ever been switched over; doing that alone is not the
+ * answer either (offAtLoop 380 rows at +15, offAtCross 360 at +11,
+ * offAtStore 344 at +1, all seven subsets measured and every one longer),
+ * because the split has to carry the sign-extended id with it. The shape
+ * that measures exactly **+8** is `id2 = (s16)ent; offAtLoop = id2 * 0x84;`
+ * ahead of `loop_31`, the loop's `g_PlayerModelId` test on `id2`, and every
+ * `+ off)` from there to the end of the function on `offAtLoop`. Crossed with
+ * the -8 above it is 340 at the exact length and the `g_FieldEntity` row
+ * leaves the per-address table.
+ *
+ * Which offset the `self` pointer names is load-bearing and not symmetric:
+ * `- 0x72 + offAtLoop` is the 340, `- 0x72 + off` is 373 at +2. And the
+ * variations on the id2 shape are all worse -- the compare left on `ent` is
+ * 351 at +6, `id2` used only for the compare 370 at +4, the second offset
+ * confined to the loop region 374 at +19.
+ *
  * The rest of the opcode table is control flow, not widths or addressing:
- * `beqz +2 / bnez -2` (two branch polarities), `j -1`, `nop +5 / addu +4`
- * and `sll -6 / sra -3`, the last being three sign-extension pairs the
- * target has and this body does not.
+ * `beqz +2 / bnez -2` (two branch polarities), `j -1`, `nop +4 / addu +4`
+ * and `sll -5 / sra -2`. The one `%hi` row left is `g_FieldModelLoaderData`,
+ * once here against the target's twice: both arms of the run/walk `if` end
+ * with an identical `loader = &g_FieldModelLoaderData[ent];` and gcc merges
+ * them. Ordering the two statements the other way round in both arms (so the
+ * shared suffix is the *differing* `animIdSlot` assignment) is exactly inert,
+ * a `loader2` copy in one arm is exactly inert, and hoisting the assignment
+ * above the `if` is -3 instructions -- so the merge is not reachable from
+ * statement order here.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMove);
@@ -3225,6 +3261,7 @@ s32 FieldEntityMove(s16 entityId) {
     VECTOR* spad = (VECTOR*)0x1F800040;
     s32 id = entityId;
     s32 off;
+    s32 id2;
     u16 triId;
     u16 ent;
     s32 blockPlus;
@@ -3356,10 +3393,11 @@ s32 FieldEntityMove(s16 entityId) {
         absSlopeY = -clampedY;
     }
     tries = 0;
-    offAtLoop = ent * 0x84;
+    id2 = (s16)ent;
+    offAtLoop = id2 * 0x84;
 loop_31:
     tries += 1;
-    if (ent == g_PlayerModelId) {
+    if (id2 == g_PlayerModelId) {
         underLimit = tries < 0x11U;
         if (g_FieldLineCheckResult == 1) {
             if (tries >= 3U) {
@@ -3375,38 +3413,44 @@ loop_31:
     block_36:
         if (underLimit != 0) {
         block_37:
-            stepX = FieldEntityGetDirVectorX(*(u8*)((u8*)&D_80074EDA + off)) *
-                    absSlopeX;
+            stepX =
+                FieldEntityGetDirVectorX(*(u8*)((u8*)&D_80074EDA + offAtLoop)) *
+                absSlopeX;
             if (stepX < 0) {
                 stepX += 0xFFF;
             }
             spad[3].vx = (s32)(stepX >> 0xC);
-            stepY = -(FieldEntityGetDirVectorY(*(u8*)((u8*)&D_80074EDA + off)) *
-                      absSlopeY);
+            stepY = -(
+                FieldEntityGetDirVectorY(*(u8*)((u8*)&D_80074EDA + offAtLoop)) *
+                absSlopeY);
             if (stepY < 0) {
                 stepY += 0xFFF;
             }
             spad[3].vy = (s32)(stepY >> 0xC);
-            scaledX = *(u16*)((u8*)&D_80074F14 + off) * spad[3].vx;
+            scaledX = *(u16*)((u8*)&D_80074F14 + offAtLoop) * spad[3].vx;
             if (scaledX < 0) {
                 scaledX += 0xFF;
             }
             spad[3].vx = (s32)(scaledX >> 8);
-            scaledY = *(u16*)((u8*)&D_80074F14 + off) * spad[3].vy;
+            scaledY = *(u16*)((u8*)&D_80074F14 + offAtLoop) * spad[3].vy;
             if (scaledY < 0) {
                 scaledY += 0xFF;
             }
             spad[3].vy = (s32)(scaledY >> 8);
-            spad[3].vx = (s32)(*(s32*)((u8*)&D_80074EB0 + off) + spad[3].vx);
-            spad[3].vy = (s32)(*(s32*)((u8*)&D_80074EB4 + off) + spad[3].vy);
-            spad[3].vz = (s32) * (s32*)((u8*)&D_80074EB8 + off);
+            spad[3].vx =
+                (s32)(*(s32*)((u8*)&D_80074EB0 + offAtLoop) + spad[3].vx);
+            spad[3].vy =
+                (s32)(*(s32*)((u8*)&D_80074EB4 + offAtLoop) + spad[3].vy);
+            spad[3].vz = (s32) * (s32*)((u8*)&D_80074EB8 + offAtLoop);
             spad[5].vx =
                 (s32)(FieldEntityGetDirVectorX(
-                          (*(u8*)((u8*)&D_80074EDA + off) + 0x20) & 0xFF) *
-                      *(u16*)((u8*)&D_80074F10 + off));
-            probePlusY = -FieldEntityGetDirVectorY(
-                             (*(u8*)((u8*)&D_80074EDA + off) + 0x20) & 0xFF) *
-                         *(u16*)((u8*)&D_80074F10 + off);
+                          (*(u8*)((u8*)&D_80074EDA + offAtLoop) + 0x20) &
+                          0xFF) *
+                      *(u16*)((u8*)&D_80074F10 + offAtLoop));
+            probePlusY =
+                -FieldEntityGetDirVectorY(
+                    (*(u8*)((u8*)&D_80074EDA + offAtLoop) + 0x20) & 0xFF) *
+                *(u16*)((u8*)&D_80074F10 + offAtLoop);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = probePlusY;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -3414,15 +3458,17 @@ loop_31:
             blockPlus =
                 FieldEntityWalkmechCross(&triId, &spad[4], &spad[5], &spad[1]);
             hitPlus = FieldEntityCollisionCheck(ent, &spad[4]);
-            triId = *(u16*)((u8*)&D_80074F16 + off);
+            triId = *(u16*)((u8*)&D_80074F16 + offAtLoop);
             pushPlus = hitPlus != 0;
             spad[5].vx =
                 (s32)(FieldEntityGetDirVectorX(
-                          (*(u8*)((u8*)&D_80074EDA + off) - 0x20) & 0xFF) *
-                      *(u16*)((u8*)&D_80074F10 + off));
-            probeMinusY = -FieldEntityGetDirVectorY(
-                              (*(u8*)((u8*)&D_80074EDA + off) - 0x20) & 0xFF) *
-                          *(u16*)((u8*)&D_80074F10 + off);
+                          (*(u8*)((u8*)&D_80074EDA + offAtLoop) - 0x20) &
+                          0xFF) *
+                      *(u16*)((u8*)&D_80074F10 + offAtLoop));
+            probeMinusY =
+                -FieldEntityGetDirVectorY(
+                    (*(u8*)((u8*)&D_80074EDA + offAtLoop) - 0x20) & 0xFF) *
+                *(u16*)((u8*)&D_80074F10 + offAtLoop);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = probeMinusY;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -3430,15 +3476,15 @@ loop_31:
             blockMinus =
                 FieldEntityWalkmechCross(&triId, &spad[4], &spad[5], &spad[2]);
             hitMinus = FieldEntityCollisionCheck(ent, &spad[4]);
-            triId = *(u16*)((u8*)&D_80074F16 + off);
+            triId = *(u16*)((u8*)&D_80074F16 + offAtLoop);
             pushMinus = hitMinus != 0;
-            spad[5].vx =
-                (s32)(FieldEntityGetDirVectorX(*(u8*)((u8*)&D_80074EDA + off)) *
-                      *(u16*)((u8*)&D_80074F10 + off));
+            spad[5].vx = (s32)(FieldEntityGetDirVectorX(
+                                   *(u8*)((u8*)&D_80074EDA + offAtLoop)) *
+                               *(u16*)((u8*)&D_80074F10 + offAtLoop));
             pushAhead = 0;
-            probeAheadY =
-                -FieldEntityGetDirVectorY(*(u8*)((u8*)&D_80074EDA + off)) *
-                *(u16*)((u8*)&D_80074F10 + off);
+            probeAheadY = -FieldEntityGetDirVectorY(
+                              *(u8*)((u8*)&D_80074EDA + offAtLoop)) *
+                          *(u16*)((u8*)&D_80074F10 + offAtLoop);
             spad[4].vz = (s32)spad[3].vz;
             spad[5].vy = probeAheadY;
             spad[4].vx = (s32)(spad[3].vx + spad[5].vx);
@@ -3458,14 +3504,16 @@ loop_31:
                 } else {
                     if ((blockAhead != 0) && (blockPlus == 0) &&
                         (blockMinus == 0)) {
-                        newDir = *(u8*)((u8*)&D_80074EDA + off) - blockAhead;
+                        newDir =
+                            *(u8*)((u8*)&D_80074EDA + offAtLoop) - blockAhead;
                         goto block_67;
                     }
                     if ((pushAhead != 0) && (pushPlus == 0) &&
                         (pushMinus == 0)) {
-                        newDir = *(u8*)((u8*)&D_80074EDA + off) - pushAhead;
+                        newDir =
+                            *(u8*)((u8*)&D_80074EDA + offAtLoop) - pushAhead;
                     block_67:
-                        *(u8*)((u8*)&D_80074EDA + off) = newDir;
+                        *(u8*)((u8*)&D_80074EDA + offAtLoop) = newDir;
                     }
                 block_68:
                     if (blockPlus != 0) {
@@ -3475,11 +3523,11 @@ loop_31:
                     } else {
                         if (pushPlus != 0) {
                         block_72:
-                            *(u8*)((u8*)&D_80074EDA + off) =
-                                *(u8*)((u8*)&D_80074EDA + off) + 0xF8;
+                            *(u8*)((u8*)&D_80074EDA + offAtLoop) =
+                                *(u8*)((u8*)&D_80074EDA + offAtLoop) + 0xF8;
                         } else if ((blockMinus != 0) || (pushMinus != 0)) {
-                            *(u8*)((u8*)&D_80074EDA + off) =
-                                *(u8*)((u8*)&D_80074EDA + off) + 8;
+                            *(u8*)((u8*)&D_80074EDA + offAtLoop) =
+                                *(u8*)((u8*)&D_80074EDA + offAtLoop) + 8;
                         }
                         goto loop_31;
                     }
@@ -3489,9 +3537,9 @@ loop_31:
     }
     offAtCross = ent * 0x84;
     blockMove = FieldEntityWalkmechCross(
-        &*(u16*)((u8*)&D_80074F16 + off), &spad[3], &spad[5], &spad[0]);
+        &*(u16*)((u8*)&D_80074F16 + offAtLoop), &spad[3], &spad[5], &spad[0]);
     if ((ent == g_PlayerModelId) && (g_FieldAnimLock == 0)) {
-        self = &g_FieldEntity[id];
+        self = (FieldEntity*)((u8*)&D_80074F16 - 0x72 + offAtLoop);
         g_FieldLineCheckResult =
             FieldEntityLineCheck(self, &D_8007E7AC, &spad[3]);
         if (g_FieldStateData.mapJumpDisabled == 0) {
@@ -3504,14 +3552,14 @@ loop_31:
         (pushAhead == 0) && (pushPlus == 0) && (pushMinus == 0) &&
         (blockMove == 0)) {
         offAtStore = ent * 0x84;
-        *(s32*)((u8*)&D_80074EB0 + off) = spad[3].vx;
-        *(s32*)((u8*)&D_80074EB4 + off) = spad[3].vy;
-        *(s32*)((u8*)&D_80074EB8 + off) = spad[3].vz << 0xC;
+        *(s32*)((u8*)&D_80074EB0 + offAtLoop) = spad[3].vx;
+        *(s32*)((u8*)&D_80074EB4 + offAtLoop) = spad[3].vy;
+        *(s32*)((u8*)&D_80074EB8 + offAtLoop) = spad[3].vz << 0xC;
         moved = 1;
-        if (*(u8*)((u8*)&D_80074F01 + off) == 0) {
+        if (*(u8*)((u8*)&D_80074F01 + offAtLoop) == 0) {
             moved = 1;
             if (ent == g_PlayerModelId) {
-                *(s16*)((u8*)&D_80074F04 + off) = 0x10;
+                *(s16*)((u8*)&D_80074F04 + offAtLoop) = 0x10;
                 if (g_FieldPadRaw & 0x40) {
                     animIdSlot = &g_FieldStateData.runAnimId;
                     loader = &g_FieldModelLoaderData[ent];
@@ -3525,7 +3573,7 @@ loop_31:
                         .animationCount) {
                     animId = (u8)*animIdSlot;
                 }
-                *(u8*)((u8*)&D_80074F02 + off) = animId;
+                *(u8*)((u8*)&D_80074F02 + offAtLoop) = animId;
                 moved = 1;
             }
         }

@@ -1006,6 +1006,23 @@ a near-miss, in rough order of frequency:
   clusters were another such pair, so decomposing an exact length tends to
   hand you a chain rather than a single answer.
 
+  **A note that says "this lever is -N, so something else here is +N" is
+  posing a *search* with a known answer size, and that size is the strongest
+  hint you will get.** `FieldEntityMove` in `src/field/field2.c` carried
+  exactly that sentence about its `self` pointer: the interior-label form
+  removes the `%hi` the target does not have and costs **8 instructions**, so
+  the body must have a +8 somewhere. Knowing the number is what makes the
+  search tractable -- the candidate found (the loop re-deriving its own copy
+  of the entity id *and* the byte offset, out of a memory-resident `ent`)
+  measures +8 on the nose, and only the shape that hits +8 exactly works:
+  the same split with the comparison left on the old variable is +6, with the
+  second offset confined to the loop region +19, and three variants that move
+  only the offsets are +15, +11 and +1. Crossed with the -8 it is 352 rows ->
+  **340 at the exact length**. So when a note prices a rejected lever in
+  instructions, treat that figure as the specification for what to look for
+  next, and reject candidates that do not match it even when they score
+  better on rows.
+
 * **A parked function whose `.rodata` blob is carried as a file-scope object
   measures worse than it will be when it lands, and the queue does not know
   it.** A local aggregate initialiser emits its constant into the unit's
