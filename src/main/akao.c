@@ -326,9 +326,78 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800294A4);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800294BC);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800297A4);
+/* Kick off a DMA of the header at arg0 into SPU RAM, then stage the payload
+ * into the instrument table while the transfer runs and wait for it.
+ *
+ * PARKED, 3 rows, 29 instructions (exact length). The whole residue is the
+ * loop counter: the target holds it in $a1 and this holds it in $a0, so the
+ * `li`, the `addiu -1` and the `bnez` all name the wrong register and
+ * nothing else in the function differs. $a1 is where func_80029424's second
+ * argument was, and it is free by the loop; $a0 is free too and is lower, so
+ * gcc takes it.
+ *
+ * 21 spellings measured, every one of them **exactly 3 rows**: both
+ * declaration orders, `s32`/`u32`/`u16` counters, `do`/`while` against
+ * `for`, `--i` in the test against `i--` at the top of the body, the copy
+ * split into four statements, a separate cursor for `data`, both orders of
+ * the `i = 0x800` / `dst = ...` setup, named locals for either or both of
+ * func_80029424's arguments (to give $a0 an occupant), `&src[3]`/`src[0]`
+ * subscripts, and the call's second argument shared with the counter as one
+ * variable (CLAUDE.md's "a value that a call clobbers and a result that
+ * replaces it are one variable") -- 4, 7 and 8 rows for the three sharing
+ * shapes, so sharing is a regression, not the answer.
+ *
+ * The pass is settled, not guessed: a `do { } while (0);` barrier before the
+ * loop, inside the body and after the loop measures **exactly 3 rows in all
+ * three positions**, which per CLAUDE.md means the residue is register
+ * allocation and not sched2 -- so every reordering and re-spelling above was
+ * inert by construction. What is left is `QTY_CMP_PRI`'s choice of hard
+ * register for a block-local quantity, which is not reachable from C without
+ * emitting an instruction; this is a park, not a permuter target.
+ *
+ * func_80029818 below is the same function with a different destination and
+ * count and carries the identical residue -- fix one and the other follows.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/akao", func_800297A4);
+#else
+void func_800297A4(s32* src, s32* data) {
+    s32* dst;
+    s32 i;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80029818);
+    SpuSetTransferStartAddr(*src++);
+    func_80029424((s32)(src + 3), *src);
+    i = 0x800;
+    dst = (s32*)D_80075F28;
+    do {
+        i--;
+        *dst++ = *data++;
+    } while (i != 0);
+    func_800294A4();
+}
+#endif
+
+/* PARKED, 3 rows, 30 instructions (exact length). Identical residue to
+ * func_800297A4 above -- see that note for the 21 measured spellings and the
+ * barrier probe that says it is register allocation. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/akao", func_80029818);
+#else
+void func_80029818(s32* src, s32* data) {
+    s32* dst;
+    s32 i;
+
+    SpuSetTransferStartAddr(*src++);
+    func_80029424((s32)(src + 3), *src);
+    i = 0x4B0;
+    dst = (s32*)D_80076C68;
+    do {
+        i--;
+        *dst++ = *data++;
+    } while (i != 0);
+    func_800294A4();
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002988C);
 
