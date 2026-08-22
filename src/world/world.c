@@ -1754,7 +1754,16 @@ void func_800AD788(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AD804);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AD928);
+s32 func_800AD928(void) {
+    WorldActor* actor;
+    s32 busy;
+
+    busy = D_80109DBA != 0;
+    for (actor = D_8010AD38; actor != NULL && busy == 0; actor = actor->next) {
+        busy |= actor->scriptIdx != 0;
+    }
+    return busy;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AD970);
 
