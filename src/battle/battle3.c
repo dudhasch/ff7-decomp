@@ -663,7 +663,54 @@ void func_800DF9F8(void) {
     func_800A4F60(D_800F38A0, 2);
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DFA94);
+/* 27 changed / 7 inserted / +4 instructions (109 against 105).  The target
+ * saves one more callee-saved register than this body (sw ra at 0x1c against
+ * 0x18) and reaches the selected row through a base it keeps live across
+ * func_800264A8; here the two pointer locals are recomputed after the call.
+ * The sel expression (unkA + unkB + unk2) and the row layout are confirmed by
+ * the 8-byte stride and the flags bit-1 test. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DFA94);
+#else
+void func_800DFA94(void) {
+    Unk80026448* menu;
+    BattleListRow* list;
+    BattleListRow* row;
+    s16 sel;
+
+    list = (BattleListRow*)&D_8009DB14[D_800F38A0 * 0x440];
+    menu = (Unk80026448*)&D_800F90EA[D_800F38A0];
+    func_800A4F60(D_800F38A0, 2);
+    if ((D_800F3896 == 7) && (D_800F99E4 == 0)) {
+        func_800264A8(menu);
+        if (menu->unk8 == 0) {
+            if (D_80062D7E & 0x20) {
+                D_800F99E4 = 1;
+                sel = menu->unkA + menu->unkB + menu->unk2;
+                row = &list[sel];
+                if (!(row->flags & 2) && (row->unk0 != 0xFF)) {
+                    func_800BB9B8(1);
+                    D_800FAFD4 = sel;
+                    D_800F389E = row->unk0;
+                    D_800F38A2 = row->unk5;
+                    func_800E6B94();
+                    D_800F3896 = 0;
+                    D_800F3894 = 7;
+                    return;
+                }
+                func_800BB9B8(3);
+                return;
+            }
+            if (D_80062D7E & 0x40) {
+                func_800BB9B8(4);
+                D_800F99E4 = 1;
+                D_800F3896 = 1;
+                func_800D9F5C(7);
+            }
+        }
+    }
+}
+#endif
 
 void func_800DFC38(void) {}
 
