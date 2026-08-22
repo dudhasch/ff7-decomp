@@ -6,6 +6,7 @@ u8* func_80014C80(s32 arg0);
 s32 func_80015B50(void);
 s32 func_80015B88(void);
 extern u8 D_80083084[];
+extern u8 D_80063048[];
 /* main's .bss, addressed %gp_rel under -G8 -- declare, never define. */
 extern s8 D_80062FFC;
 extern u8 D_80063020;
@@ -416,7 +417,29 @@ void func_80014750(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014804);
+void func_80014804(void) {
+    s32 temp_s0;
+
+    func_80015B44(0x801B0000);
+    while (1) {
+        temp_s0 = func_80015B50() & 0xFFFF;
+        if (temp_s0 == 0xFFFF) {
+            break;
+        }
+        /* A switch, not an if/else-if chain: the target emits both compares
+         * ahead of both arms, which is expand_end_case's shape. */
+        switch (temp_s0) {
+        case 0:
+            func_80015BC0((u8*)0x801C0000);
+            func_800149E0();
+            func_80014980((u8*)0x801C0000);
+            break;
+        case 1:
+            func_80015BC0(D_80063048);
+            break;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800148A0);
 
