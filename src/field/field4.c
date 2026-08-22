@@ -10158,6 +10158,13 @@ s32 OpcodeFuncNfade(void) {
  * spelling the bound `<= 0xFE`, and the polarity flip combined with the
  * dropped case. fold normalises every one of them.
  *
+ * Case order was re-tested too, for the one move the list above does not
+ * cover -- putting the *no-wait* arm between the two waiting ones, rather
+ * than the default arm. It is byte-identical, as is putting it last, because
+ * `case FFT_INSTANT: case FFT_INSTANT_BLACK: break;` emits nothing at all and
+ * so cannot separate two blocks. Only the default arm has a body to get in
+ * the way, and moving *that* between them is the 20 rows already recorded.
+ *
  * And the 2x2 of which arm owns the `adjust` local was re-run, because the
  * list above is ambiguous about it: arm 2 with its own local and the default
  * arm keeping `adjust`, arm 2 inline, and the default arm with its own local
