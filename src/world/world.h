@@ -94,12 +94,27 @@ typedef struct {
 
 typedef struct {
     /* 0x00 */ VECTOR unk0;
-    /* 0x10 */ s32 unk10;
-    /* 0x14 */ s32 unk14;
-    /* 0x18 */ s32 unk18;
+    /* 0x10 */ u8 unk10;
+    /* 0x11 */ u8 unk11;
+    /* 0x12 */ u8 unk12;
+    /* 0x13 */ u8 unk13;
+    /* 0x14 */ u8 unk14;
+    /* 0x15 */ u8 unk15;
+    /* 0x16 */ u8 unk16;
+    /* 0x17 */ u8 unk17;
+    /* 0x18 */ u8 unk18;
+    /* 0x19 */ u8 unk19;
+    /* 0x1A */ u8 unk1A;
+    /* 0x1B */ u8 unk1B;
     /* 0x1C */ s32 unk1C;
     /* 0x20 */ s32 unk20;
 } Unk8010B3B8; // size:???
+
+// singly linked list hung off D_800E5768
+typedef struct WorldUnk800E5768 {
+    /* 0x00 */ struct WorldUnk800E5768* next;
+    /* 0x04 */ s16 unk4;
+} Unk800E5768; // size: unknown
 
 // entry of binary search table to find world map scripts
 typedef struct {
@@ -339,5 +354,16 @@ extern s32 D_801163EC;
 extern s32 D_801164F8;
 extern s32 D_801164FC;
 extern s32 D_8011650C;
+
+extern s16 D_800BE5F0[];
+extern WorldChunkHeader* D_80109D3C;
+extern s32 D_80109D64;
+extern s32 D_80109D68;
+extern s16 D_80109DBA;
+extern s32 D_8010B488;
+extern s32 D_8010B494;
+extern u8 D_8010D9B8[];
+extern s32 D_80116274;
+extern Unk800E5768* D_800E5768;
 
 #endif
