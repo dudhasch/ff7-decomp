@@ -2118,6 +2118,20 @@ a near-miss, in rough order of frequency:
   clamp — reproduces the target's polarity. When one instance of a repeated
   pattern refuses to follow the others, spell its control flow explicitly
   rather than looking for a reason.
+* **A one-bit test against a *variable* shift wants the mask in a named
+  local, or combine turns the mask round.** `if ((w & (1 << (15 - sh))) == 0)`
+  written inline compiles to `srav <t>,w,<n>` / `andi <t>,<t>,1` -- combine's
+  `simplify_comparison` rewrites `(x & (1 << n)) != 0` into `(x >> n) & 1`,
+  which is one instruction shorter and inverts the branch with it. Hoisting
+  the mask to `s32 mask = 1 << (0xF - sh);` gives the target's
+  `li 1` / `sllv` / `and` / `beqz`, because the shift then has its own insn
+  and there is no `and` for the comparison to fold into. `func_800D3548` in
+  `src/battle/battle2.c` measured 19 rows inline, 13 with the mask named but
+  the arms the other way round, 7 with the arms right and the mask inline,
+  and **matches** with both. Two knobs that are each partial and jointly
+  decisive, which is the paired-lever shape again -- and neither is visible
+  as anything but register noise, since the wrong form is a *shorter*
+  instruction sequence that computes the same flag.
 * **`x * 16` and `x << 4` are not the same expression to cse.** Both expand to
   an `ashift`, but MULT_EXPR and LSHIFT_EXPR reach RTL as distinct rtx and cse
   unifies only identical ones — so a value written the same way twice is

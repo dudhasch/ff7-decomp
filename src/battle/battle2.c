@@ -1025,7 +1025,27 @@ s32 func_800D3520(s32* arg0, s32 arg1) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3548);
+// Read one run-length token out of the bitstream at *pos: a flag bit, then
+// either 16 bits (17 consumed) or 7 bits (8 consumed), sign-extended.
+//
+// `mask` has to be a named local. Written inline, combine rewrites
+// `(w & (1 << n)) != 0` into `(w >> n) & 1` -- a `srav`/`andi` pair where the
+// target has `li 1`/`sllv`/`and` -- and inverts the branch with it.
+s32 func_800D3548(u8* buf, s32* pos) {
+    s32 bitpos = *pos;
+    u8* p = buf + bitpos / 8;
+    s32 sh = bitpos & 7;
+    s32 w = (p[0] << 8) | p[1];
+    s32 mask = 1 << (0xF - sh);
+
+    if ((w & mask) == 0) {
+        *pos = bitpos + 8;
+        return ((w << (sh + 1)) << 16) >> 25;
+    }
+    w = (w << 8) | p[2];
+    *pos = bitpos + 0x11;
+    return ((w << (sh + 1)) << 8) >> 16;
+}
 
 s32 func_800D35D8(u8* arg0, s32* arg1, s32 arg2) {
     s32 bits;
