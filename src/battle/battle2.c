@@ -1434,9 +1434,16 @@ static void func_800D7340(void) { func_800BBEAC(func_800D72B4); }
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7368);
 
+void func_800D751C();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D751C);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D76B8);
+// Claim a free effect slot running func_800D751C and seed it with a position.
+void func_800D76B8(SVECTOR* arg0) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D751C)];
+
+    *(SVECTOR*)&p->unk8 = *arg0;
+    p->D_801621F0 = 1;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7724);
 
