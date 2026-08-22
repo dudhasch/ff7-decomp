@@ -519,30 +519,48 @@ static s32 func_801D1BE0(u8* arg0, u8* arg1) {
 // firstfile is retried up to 100 times because the card takes a moment to come
 // up after an insert; a card that never answers reports no saves at all.
 //
-// 58 of the 62 instructions match; four rows of residue, all of them the
-// function's tail. The original ends in two un-merged copies of the return:
+// 5 rows, 58 instructions against 60 -- and the two missing instructions are
+// deleted by a pass that runs *after* register allocation, which is as far as
+// C reaches. cc1's own dumps say so exactly (variant_eval.py --rtl=a): at
+// `.greg` this body already has the target's tail, insn for insn,
 //
-//     18e0  j     18ec           <- normal path, jumping over the copy below
-//     18e4  andi  v0,s3,0xffff   <- ...its return value, sunk into the slot
-//     18e8  andi  v0,s3,0xffff   <- the `end:` copy, reached by `j` from 1888
-//     18ec  lw    ra,0x50(sp)
+//     (insn 162  (set (reg/i:SI 2 v0) (zero_extend:SI (reg/v:HI 19 s3))))
+//     (jump_insn 164 (set (pc) (label_ref 192)))     <- the `j` past `end:`
+//     (code_label 166 "end")
+//     (insn 170  (set (reg/i:SI 2 v0) (zero_extend:SI (reg/v:HI 19 s3))))
+//     (code_label 192)                               <- the epilogue
 //
-// gcc 2.7.2 cross-jumps the two identical `andi; return` tails below into one,
-// so the candidate falls straight through with a single copy and leaves the
-// outer loop's delay slot as `nop` where the original fills it with the
-// `move s0,zero` stolen from the loop top. Everything else -- register
-// allocation, both loops, the retry counter, the string selection -- is exact.
+// and at `.jump2` insns 162 and 164 are gone: the post-reload jump_optimize
+// merges the two identical `andi; return` tails, so the success path falls
+// straight into the `end:` copy. The target keeps both, with reorg then
+// duplicating the `andi` into the `j`'s delay slot:
 //
-// Tried and rejected: two explicit `return var_s3;` statements (merged the
-// same way), an explicit `goto end;` before the label (deleted, since `end:`
-// then has two references), returning through a second variable (coalesced
-// during CSE, before cross-jumping runs), and nesting the scan loop inside the
-// retry loop's `if` (31 rows -- rewrites the whole allocation). Moving the
-// `var_s3 = 0` down to `end:` does fill the delay slot correctly and gets the
-// residue to two rows, but gcc then constant-folds the failure path's return
-// to `move v0,zero` where the original keeps `move s3,zero` + the shared
-// `andi`. decomp-permuter reaches score 5 on this only via an uninitialised
-// read, which is not a source we can commit.
+//     1ce8  j     1cf4           <- success path, jumping over the copy below
+//     1cec  andi  v0,s3,0xffff   <- ...duplicated into the slot by reorg
+//     1cf0  andi  v0,s3,0xffff   <- the `end:` copy, reached by `j` from 1c90
+//     1cf4  lw    ra,0x50(sp)
+//
+// The two insns are byte-identical after reload in the target too, so nothing
+// about *this* function's spelling can be what stops the merge there.
+//
+// The one lever that has moved it, 9 rows -> 5: a redundant `var_s3 = 0;` at
+// `end:`, on top of the one the failure path already does. gcc deletes the
+// earlier store, but the extra reference is enough to change reorg's mind
+// about the scan loop's back edge, which then takes the loop-top `i = 0` into
+// its delay slot the way the target does. Moving the zero down to `end:`
+// *instead* of leaving it in the loop is 6 rows, because cse then folds the
+// return to `move v0,zero` where the original keeps `move s3,zero` plus the
+// shared `andi`.
+//
+// Measured and exactly inert, all at 9 rows on the body without that store and
+// 5 with it: the scan loop as `while` / `do`-`while` / `for (; entry; entry =
+// nextfile(entry))`; `i = 0` as a `for` init or as its own statement; an empty
+// `do { } while (0);` before either return or at `end:`; `goto end;` for the
+// success exit; `return (u16)var_s3` / `return var_s3 & 0xFFFF` at either
+// exit; a second `u16 result` local for one or both exits, with and without a
+// cse barrier between its store and its return; `var_s3` as `s32` or `u32`.
+// Twenty-two spellings, three distinct row counts -- jump_optimize normalises
+// the whole tail dimension before anything interesting happens to it.
 #ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1C2C);
 #else
@@ -583,6 +601,9 @@ u16 func_801D1C2C(s32 arg0) {
     }
     return var_s3;
 end:
+    // Redundant -- gcc deletes the store the failure path already made. It is
+    // here for its *reference*: see the note above, it is worth 4 rows.
+    var_s3 = 0;
     return var_s3;
 }
 #endif
@@ -639,23 +660,32 @@ ok:
 // back into the global palette. Same open/read/retry shape as func_801D1D40,
 // but 0x2000 bytes and the destination is the save work area itself.
 //
-// 5 rows short, all of them register naming: the target puts the trailing
-// colour loop's counter in v1 and this puts it in s0. The two are coupled --
-// `i = fd` is what gets the descriptor into s0 to begin with (declaration
-// order alone does not), and reusing `i` for the loop is what keeps it there,
-// so giving the loop its own counter, or reusing `n`, both regress to 8 rows.
-// decomp-permuter went 300 -> 60 finding the `i = fd` alias and then 25 more
-// minutes of randomisation found nothing further.
-#ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1F40);
-#else
+// The two `do { close(fd); } while (0);` are a reference multiplier, not a
+// control-flow statement: `flow.c` counts REG_N_REFS += loop_depth, so a
+// reference inside an empty loop counts twice while emitting nothing. It is
+// needed because `global_alloc` ranks by floor_log2(n_refs) * n_refs /
+// live_length and the two callee-saved values here land either side of the
+// step. Read off cc1's -dl dump (variant_eval.py --rtl): `retries` is 7 refs
+// over 14 insns, so 2*7/14 = 1.00, and `fd` is 6 over 19, so 2*6/19 = 0.63 --
+// `retries` wins $s0 and the target has `fd` there. Eight references put `fd`
+// at 3*8/19 = 1.26 and the whole function falls into place, and eight is what
+// the two barriers buy. Seven (one barrier, either one) is still 2*7/19 =
+// 0.74 and measures 8 rows, which is the same wrong assignment.
+//
+// What the original wrote there is not recoverable, in the same sense as a
+// `u8 unusedLocals[N]` frame reservation. Everything natural was measured:
+// `n` as the colour loop's counter is required (a separate counter, or
+// reusing `retries` or `fd`, is 8/13/19 rows), and writing the success path
+// inside the retry loop -- which reaches 7 references honestly -- is +2
+// instructions and 40 rows. Declaration order is flat across all eight
+// permutations, which is `allocno_compare`'s tie-break saying the priorities
+// were never tied; a width sweep over all four locals is flat at 5 or worse.
 s32 func_801D1F40(s32 arg0) {
     struct DIRENTRY dir; // see func_801D1D40: reserved, never read
     char path[0x20];
     s32 retries;
     s32 fd;
     s32 n;
-    s32 i;
 
     n = arg0;
     D_801E8F40 = 0x2000;
@@ -665,13 +695,12 @@ s32 func_801D1F40(s32 arg0) {
         sprintf(path, D_801D0194, D_801E2C78[arg0 & 0xF]);
     }
     fd = open(path, 1);
-    i = fd;
-    if (i == -1) {
+    if (fd == -1) {
         return 1;
     }
     retries = 30;
     do {
-        n = read(i, D_801E6F38, D_801E8F40);
+        n = read(fd, D_801E6F38, D_801E8F40);
         if (n == D_801E8F40) {
             goto ok;
         }
@@ -682,17 +711,20 @@ s32 func_801D1F40(s32 arg0) {
             D_801E8F40 -= n;
         }
     } while (retries != 0);
-    close(i);
+    do {
+        close(fd);
+    } while (0);
     return 2;
 ok:
-    close(i);
+    do {
+        close(fd);
+    } while (0);
     memcpy(&Savemap, D_801E7138, sizeof(SaveWork));
-    for (i = 0; i < 12; i++) {
-        g_FieldWindowColors[i] = ((u8*)Savemap.header.menu_color)[i];
+    for (n = 0; n < 12; n++) {
+        g_FieldWindowColors[n] = ((u8*)Savemap.header.menu_color)[n];
     }
     return 0;
 }
-#endif
 
 static s32 func_801D2150(s8 arg0) {
     if (arg0 > -0x68 && arg0 < -0x60 || arg0 > -32 && arg0 < -3) {

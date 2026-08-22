@@ -18,6 +18,8 @@ undefined_syms_auto.*.txt
 build.ninja
 objdiff.json
 /permute*
+# variant_eval.py's pinned bases, its per-variant specs and its --rtl dumps.
+/.variants/
 # decomp-permuter names its scratch after the target .s's parent directory, so
 # for this project's asm/us/<ovl>/nonmatchings/... layout it lands here.
 /nonmatchings/

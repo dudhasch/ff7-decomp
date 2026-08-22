@@ -160,6 +160,20 @@ Functions already carrying a parked near-miss body are marked `P` and sort to
 the top: a written hypothesis is a head start, and finishing them is the
 cheapest work available.
 
+**Check the pick is a function at all before budgeting for it.** splat takes
+`type:func` in a `config/symbols.*.txt` line as fact, so one hand-written line
+can put a block of data on the work list forever, dressed as an `INCLUDE_ASM`
+of plausible size. `func_801D3260` was the last "function" in
+`src/menu/itemmenu.c` and is 1492 bytes of FF7-encoded dialogue plus a
+per-item sort table -- every line of its `.s` is a `.word` marked
+`/* invalid instruction */`, and `func_801D0E80` loads its address with
+`lui`/`addiu` rather than calling it. `grep -c '\.word' <target.s>` against the
+file's line count answers it in one command. The fix is a config change, not
+a decompilation: move the `data` subsegment boundary in `config/us.yaml` down
+to the region's start and rename the symbol out of `func_` -- `make build`
+stays green because the bytes and their order do not move, and splat rewrites
+the callers' `.s` with the new name for free.
+
 **`P` says a note exists, not how close it is -- run `parked_queue.py` for
 that.** The row count written into a park note is true of the moment it was
 written and of nothing after: anything that changes the function's own body,
@@ -174,7 +188,7 @@ indistinguishable from a fresh one in the text.
 #   ...
 ```
 
-It hands `variant_eval.py` a no-op edit per `MASPSX_OVERRIDE` body, so each
+It hands `variant_eval.py` a no-op edit per parked body, so each
 score is that body's own, measured with every guard `variant_eval` already
 has -- the target unparked alone, diagnostics fatal, aliases discounted. This
 matters more than it sounds: a queue ordered by remembered numbers sent a full
@@ -2897,11 +2911,25 @@ a near-miss, in rough order of frequency:
   changes that each moved the length the wrong way cancelled, here two changes
   that each fix half are the same change and cannot be added.
 
-* **Do not guess at `n_refs` and `live_length` -- cc1 prints them.** The
+* **Do not guess at `n_refs` and `live_length` -- cc1 prints them, and
+  `variant_eval.py --rtl` prints them for the body you just scored.** The
   `.lreg` dump names every pseudo with exactly the two numbers
   `allocno_compare` ranks on, and `.greg`'s post-reload RTL shows which hard
   register each one ended up in, so a residue that reads as register naming can
   be turned into arithmetic instead of a guess:
+
+  ```shell
+  .venv/bin/python3 tools/variant_eval.py .variants/base.json --rtl
+  #        rtl dumps -> .variants/rtl-base  (rtl.c.lreg)
+  #   --rtl=L for the loop dump, --rtl=a for every pass
+  ```
+
+  It re-runs cc1 on the same preprocessed text with `-d<letters>` and copies
+  the dumps out, which is the whole of the manual recipe below plus the two
+  things that recipe gets wrong in practice -- the flags come from
+  `build.ninja` rather than from memory, and the parked function is unparked
+  the same way the score was taken, so the dump describes the body whose rows
+  you are reading rather than the pinned `.s` beside it.
 
   ```shell
   mipsel-linux-gnu-cpp <the flags from `ninja -t commands`> src/field/field.c \
@@ -2914,6 +2942,21 @@ a near-miss, in rough order of frequency:
   `-dumpbase` under the bind-mounted repository creates the files and leaves
   them 0 bytes, with no error, which reads exactly like a pass that did not
   run. `cd` into the target directory and copy the results out afterwards.
+  (`--rtl` does this for you.)
+
+  **Worked forwards, the arithmetic is a specification with one number in it,
+  and the reference multiplier is how you pay it.** `func_801D1F40` in
+  `src/menu/savemenu.c` sat 5 rows out with a colour loop counter in the wrong
+  register; the `.lreg` dump named the two competing quantities and both
+  terms -- `retries` at 7 refs over 14 insns (`2*7/14 = 1.00`) against `fd` at
+  6 over 19 (`2*6/19 = 0.63`) -- so `retries` took `$s0` where the target has
+  `fd`. Solving `floor_log2(n)*n/19 > 1.00` gives **n = 8** and nothing
+  smaller, because 7 is still on the `floor_log2` step below. Two
+  `do { close(fd); } while (0);` deliver exactly +2 references and the
+  function matches; one barrier, either one, is 7 references and measures the
+  same 8 rows as none. Predicting the *count* before editing is what makes
+  this a lookup rather than a search -- and it is why "one more barrier"
+  is a hypothesis rather than a retry.
 
   **`-dL` does the same job for `move_movables`, and it prints the decisions
   rather than the inputs.** The `.loop` dump gives `Loop from A to B: N real
@@ -3713,6 +3756,20 @@ a near-miss, in rough order of frequency:
   extra pseudo, which conflicts with the base across the loop and usually costs
   a callee-saved register. `FieldEntityWalkmechCross` in `src/field/field2.c`
   is parked on exactly these two rows.
+* **`jump2` merging two identical return tails is the same kind of verdict one
+  pass earlier, and it is equally out of reach.** `func_801D1C2C` in
+  `src/menu/savemenu.c` is 2 instructions short because the post-reload
+  `jump_optimize` deletes the success path's own copy of the return value and
+  the `j` that skipped over the `end:` copy -- `--rtl=a` shows insn 162
+  (`(set (reg/i:SI 2 v0) (zero_extend:SI (reg/v:HI 19 s3)))`) and jump_insn
+  164 present at `.greg` and gone at `.jump2`, with `.greg` otherwise
+  instruction-for-instruction the target. The two insns are byte-identical
+  after reload in the target as well, so no spelling of *this* function can be
+  what stops the merge there: twenty-two were measured (three loop shapes,
+  five tail shapes, a second local at either exit with and without a cse
+  barrier, three widths for the returned variable) and they produce exactly
+  three distinct row counts. When a dump shows the target's shape reached and
+  then destroyed, stop -- the remaining question is about a pass, not about C.
 * **A branch polarity that survives every spelling of its condition belongs to
   reorg, and one `-da` run tells you so instead of a sweep.** Track the
   `jump_insn` across the dumps: `FieldEntityWalkmechCross`'s fast path is
@@ -4042,6 +4099,17 @@ edge for that object rather than duplicated in the tool -- the `//!` header's
 meaning lives in `tools/ninja/gen.py`, and a second parser would drift the
 first time someone adds a PSYQ version, with a wrong verdict rather than an
 error as the failure.
+
+**A park is the `#ifndef NON_MATCHINGS` guard, not the `MASPSX_OVERRIDE`.**
+Both pin macros put the target's `.s` in the object and compile the C beside
+them out, and `src/menu/*.c` parks every near-miss with a bare `INCLUDE_ASM`
+inside that guard rather than with `MASPSX_OVERRIDE`. `unpark.py`,
+`variant_eval.py` and `parked_queue.py` used to recognise only the second, so
+`parked_queue` reported "no bodies found" on a file holding two of them and
+`variant_eval` scored the *pinned* `.s` against itself -- a silent MATCH for
+any edit. All three now anchor on the guard, which is also what keeps an
+ordinary file-scope `INCLUDE_ASM` (a function with no C body, i.e. work still
+to do rather than a near-miss) from being read as a park.
 
 **It unparks only the function under test, and that is load-bearing.**
 Compiling the unit with `-DNON_MATCHINGS`, which is the obvious way to select

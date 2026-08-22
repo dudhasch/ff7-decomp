@@ -188,7 +188,11 @@ overlays:
     segments:
       - [0x0, .rodata, itemmenu]
       - [0x1E8, c, itemmenu]
-      - [0x3834, data, itemmenu]
+      # 0x3260 is where itemmenu's .data really starts: the region splat used
+      # to hand the `c` subsegment as `func_801D3260` holds no instructions at
+      # all -- 1492 bytes of FF7-encoded dialogue plus the per-item sort table
+      # at D_801D35B4 -- and func_801D0E80 loads its address with lui/addiu.
+      - [0x3260, data, itemmenu]
       - [0x4020, bss]
   - name: world
     disk_path: disks/us/WORLD/WORLD.BIN.dec

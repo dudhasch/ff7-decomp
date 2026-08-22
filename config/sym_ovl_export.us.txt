@@ -1893,7 +1893,6 @@ ReturnStolenMateria = 0x801d2e84;
 UnequipCharacterMateria = 0x801d2f00;
 BackupCharacterMateria = 0x801d3018;
 RestoreCharacterMateria = 0x801d3138;
-func_801D3260 = 0x801d3260;
 g_MateriaPriority = 0x801d3834;
 g_MateriaStealLoot = 0x801d3f60;
 func_800A0B48 = 0x800a0b48;

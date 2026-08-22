@@ -858,4 +858,6 @@ void func_801D3228(void) {
     func_80025D14((u_long*)D_801D3890, 0x3F0, 0x120, 0x110, 0x1E0);
 }
 
-INCLUDE_ASM("asm/us/menu/nonmatchings/itemmenu", func_801D3260);
+// 0x801D3260 onwards is data, not code -- see config/us.yaml. It used to be
+// carried here as INCLUDE_ASM("...", func_801D3260) because a `type:func`
+// line in config/symbols.itemmenu.us.txt told splat it was a function.

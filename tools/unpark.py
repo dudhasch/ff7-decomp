@@ -1,48 +1,57 @@
-"""Make one MASPSX_OVERRIDE-parked body the live one, so import.py sees it.
+"""Make one parked body the live one, so import.py sees it.
 
     .venv/bin/python3 tools/unpark.py <file.c> <FuncName>
 
-Removes the `#ifndef NON_MATCHINGS` / MASPSX_OVERRIDE(...) / `#else` header of
-that one function and the `#endif` that closes it. Restore with git checkout.
+Removes the `#ifndef NON_MATCHINGS` / pin-macro / `#else` header of that one
+function and the `#endif` that closes it. Restore with git checkout.
+
+Both pin macros are recognised: `MASPSX_OVERRIDE`, and a bare `INCLUDE_ASM`
+inside the same guard, which is how src/menu/*.c parks its near-misses. The
+search anchors on the guard rather than on the macro, so an ordinary file-scope
+`INCLUDE_ASM` (a function with no C body at all) is not mistaken for a park.
 """
 import io, re, sys
 
-path, name = sys.argv[1], sys.argv[2]
-s = io.open(path, encoding="utf-8", newline="").read()
-lines = s.split("\n")
+PIN = re.compile(r"\b(?:MASPSX_OVERRIDE|INCLUDE_ASM)\s*\(")
 
-# find the MASPSX_OVERRIDE whose argument list names this function
-ov = None
-for i, ln in enumerate(lines):
-    if re.match(r"\s*MASPSX_OVERRIDE\s*\(", ln):
-        blob = "\n".join(lines[i:i + 3])
-        if re.search(r"\b%s\s*\)" % re.escape(name), blob):
-            ov = i
-            break
-if ov is None:
-    sys.exit("no MASPSX_OVERRIDE for %s in %s" % (name, path))
 
-# header: the #ifndef above it, and the #else below it
-start = ov
-while not lines[start].startswith("#ifndef NON_MATCHINGS"):
-    start -= 1
-els = ov
-while not lines[els].startswith("#else"):
-    els += 1
+def find_park(lines, name):
+    """(#ifndef line, #else line, #endif line) of the block pinning `name`."""
+    for i, ln in enumerate(lines):
+        if not ln.startswith("#ifndef NON_MATCHINGS"):
+            continue
+        els = i + 1
+        while els < len(lines) and not lines[els].startswith("#else"):
+            els += 1
+        if els >= len(lines):
+            continue
+        blob = "\n".join(lines[i + 1:els])
+        if not PIN.search(blob):
+            continue
+        if not re.search(r"\b%s\s*\)" % re.escape(name), blob):
+            continue
+        end, depth = els + 1, 0
+        while True:
+            l2 = lines[end]
+            if l2.startswith("#if"):
+                depth += 1
+            elif l2.startswith("#endif"):
+                if depth == 0:
+                    break
+                depth -= 1
+            end += 1
+        return i, els, end
+    return None
 
-# the #endif that closes the block: first line == "#endif" after the body
-end = els + 1
-depth = 0
-while True:
-    ln = lines[end]
-    if ln.startswith("#if"):
-        depth += 1
-    elif ln.startswith("#endif"):
-        if depth == 0:
-            break
-        depth -= 1
-    end += 1
 
-out = lines[:start] + lines[els + 1:end] + lines[end + 1:]
-io.open(path, "w", encoding="utf-8", newline="").write("\n".join(out))
-print("unparked %s (%d..%d, endif %d)" % (name, start, els, end))
+if __name__ == "__main__":
+    path, name = sys.argv[1], sys.argv[2]
+    s = io.open(path, encoding="utf-8", newline="").read()
+    lines = s.split("\n")
+    found = find_park(lines, name)
+    if found is None:
+        sys.exit("no parked body for %s in %s" % (name, path))
+    start, els, end = found
+    out = lines[:start] + lines[els + 1:end] + lines[end + 1:]
+    io.open(path, "w", encoding="utf-8", newline="\n").write("\n".join(out))
+    print("unparked %s (%d..%d, endif %d)" % (name, start, els, end))

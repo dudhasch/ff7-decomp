@@ -48,6 +48,15 @@ Pass several specs to run them concurrently:
 Pin a base per source before sweeping (once, and re-pin after landing a change):
 
     .venv/bin/python3 tools/variant_eval.py --pin src/field/field4.c
+
+`--rtl` re-runs cc1 on the same text with `-dl` and copies the dumps to
+`.variants/rtl-<tag>/`, so the two numbers `allocno_compare` and `QTY_CMP_PRI`
+rank on -- and the hard register each pseudo got, from `;; Register N in M.` --
+are readable for exactly the body that was just scored. `--rtl=L` is the loop
+dump (which invariants `move_movables` hoisted and why), `--rtl=lL` both. Reach
+for it the moment a residue reads as register naming: it turns "which of these
+two should I try" into an equation with a solution, and cc1 writing its dumps
+to a bind-mounted path silently produces 0-byte files, which this avoids.
 """
 import hashlib
 import json
@@ -137,9 +146,51 @@ def pin(source):
     sys.stderr.write("pinned %s -> %s\n" % (source, os.path.relpath(base_c, REPO)))
 
 
+PIN = re.compile(r"\b(?:MASPSX_OVERRIDE|INCLUDE_ASM)\s*\(")
+
+
+def find_park(lines, name):
+    """(#ifndef line, #else line, #endif line) of the block that pins `name`.
+
+    Two macros pin a function and both matter: `MASPSX_OVERRIDE` assembles the
+    .s beside a compiled-out C body, and a bare `INCLUDE_ASM` inside the same
+    `#ifndef NON_MATCHINGS` guard does the same job in the older units
+    (src/menu/*.c parks every near-miss that way).  Anchoring on the *guard*
+    rather than on the macro is what makes both forms work, and it is also what
+    keeps an ordinary file-scope `INCLUDE_ASM` -- a function with no C body at
+    all -- from being mistaken for a park and walking the search off the top of
+    the file.
+    """
+    for i, ln in enumerate(lines):
+        if not ln.startswith("#ifndef NON_MATCHINGS"):
+            continue
+        els = i + 1
+        while els < len(lines) and not lines[els].startswith("#else"):
+            els += 1
+        if els >= len(lines):
+            continue
+        blob = chr(10).join(lines[i + 1:els])
+        if not PIN.search(blob):
+            continue
+        if not re.search(r"\b%s\s*\)" % re.escape(name), blob):
+            continue
+        end, depth = els + 1, 0
+        while True:
+            l2 = lines[end]
+            if l2.startswith("#if"):
+                depth += 1
+            elif l2.startswith("#endif"):
+                if depth == 0:
+                    break
+                depth -= 1
+            end += 1
+        return i, els, end
+    return None
+
+
 def unpark(text, name):
-    """Make one MASPSX_OVERRIDE-parked body the live one, exactly as
-    tools/unpark.py does to the real file.
+    """Make one parked body the live one, exactly as tools/unpark.py does to
+    the real file.
 
     Compiling the whole unit with -DNON_MATCHINGS instead -- which is what this
     tool used to do -- replaces *every* parked function's pinned .s with its C
@@ -151,31 +202,10 @@ def unpark(text, name):
     one instruction longer as C than as asm.
     """
     lines = text.split(chr(10))
-    ov = None
-    for i, ln in enumerate(lines):
-        if re.match(r"\s*MASPSX_OVERRIDE\s*\(", ln):
-            blob = chr(10).join(lines[i:i + 3])
-            if re.search(r"\b%s\s*\)" % re.escape(name), blob):
-                ov = i
-                break
-    if ov is None:
+    found = find_park(lines, name)
+    if found is None:
         return text          # already live; nothing to do
-    start = ov
-    while not lines[start].startswith("#ifndef NON_MATCHINGS"):
-        start -= 1
-    els = ov
-    while not lines[els].startswith("#else"):
-        els += 1
-    end, depth = els + 1, 0
-    while True:
-        ln = lines[end]
-        if ln.startswith("#if"):
-            depth += 1
-        elif ln.startswith("#endif"):
-            if depth == 0:
-                break
-            depth -= 1
-        end += 1
+    start, els, end = found
     return chr(10).join(lines[:start] + lines[els + 1:end] + lines[end + 1:])
 
 
@@ -205,6 +235,41 @@ def apply_edits(text, edits):
 # keeps generating code, and nothing downstream fails. Same trap checkfn.py
 # guards against -- see CLAUDE.md.
 DIAG_RE = re.compile(r"^\S.*:\d+: (?!warning:)")
+
+
+def dump_rtl(work, cfg, cpp_out, letters, tag):
+    """Re-run cc1 on the same preprocessed text with `-d<letters>` and copy the
+    dumps out to .variants/rtl-<tag>/.
+
+    This is the "do not guess at n_refs and live_length" step from CLAUDE.md
+    made cheap: `-dl` gives, per pseudo, the two numbers `allocno_compare` and
+    `QTY_CMP_PRI` rank on *and* the hard register it ended up in
+    (`;; Register N in M.`), so a residue that reads as register naming becomes
+    arithmetic. `-dL` is loop (movable hoist decisions), `-dg` post-global-alloc.
+
+    cc1 must write the dumps to a **container path**: under the bind-mounted
+    repository it creates them and leaves them 0 bytes with no error, which
+    reads exactly like a pass that did not run. `work` is a real temp dir, so
+    the dumps are written there and copied afterwards.
+    """
+    base = os.path.join(work, "rtl.c")
+    script = ("set -o pipefail; bin/str "
+              "| iconv --from-code=UTF-8 --to-code=Shift-JIS "
+              "| bin/%s -quiet -mcpu=3000 -mgas %s -dumpbase %s -d%s -o /dev/null"
+              % (cfg["cc1"], " ".join(cfg["cc_flags"]), base, letters))
+    subprocess.run(["bash", "-c", script], cwd=REPO, input=cpp_out,
+                   capture_output=True)
+    dest = os.path.join(REPO, ".variants", "rtl-" + re.sub(r"\W", "_", tag))
+    if os.path.isdir(dest):
+        shutil.rmtree(dest, ignore_errors=True)
+    os.makedirs(dest)
+    got = []
+    for name in sorted(os.listdir(work)):
+        if name.startswith("rtl.c.") and os.path.getsize(
+                os.path.join(work, name)) > 0:
+            shutil.copy(os.path.join(work, name), os.path.join(dest, name))
+            got.append(name)
+    return dest, got
 
 
 def compile_variant(src, obj, work, cfg, orig):
@@ -245,6 +310,7 @@ def compile_variant(src, obj, work, cfg, orig):
         die("compile pipeline failed:\n%s" % out)
     if not os.path.exists(obj):
         die("no object produced")
+    return cpp.stdout
 
 
 def score(obj, want, text_want, rows_wanted, context, cfg, func, out):
@@ -352,7 +418,7 @@ def compiled_insn_count(obj, func):
     return None
 
 
-def run_one(spec_path, rows_wanted, keep, context):
+def run_one(spec_path, rows_wanted, keep, context, rtl=None):
     """Score one spec. Everything it touches is private to this call: its own
     temp directory, its own object, and read-only repo inputs -- so N of these
     run concurrently without a shared build directory to corrupt."""
@@ -376,9 +442,14 @@ def run_one(spec_path, rows_wanted, keep, context):
         with open(src, "w", encoding="utf-8", newline="") as fh:
             fh.write(text)
         obj = os.path.join(work, "variant.o")
-        compile_variant(src, obj, work, cfg, source)
+        cpp_out = compile_variant(src, obj, work, cfg, source)
         out.append("VARIANT %s  [%s %s]" % (tag, source, func))
         total = score(obj, want, text_want, rows_wanted, context, cfg, func, out)
+        if rtl:
+            dest, got = dump_rtl(work, cfg, cpp_out, rtl, tag)
+            out.append("       rtl dumps -> %s  (%s)"
+                       % (os.path.relpath(dest, REPO),
+                          ", ".join(got) or "none written"))
     finally:
         if keep:
             out.append("kept %s" % work)
@@ -402,6 +473,7 @@ def main(argv):
 
     rows_wanted = "--rows" in args
     keep = "--keep" in args
+    rtl = None
     context = 3
     jobs = 1
     specs = []
@@ -424,6 +496,10 @@ def main(argv):
             context = int(a.split("=", 1)[1])
         elif a.startswith("--jobs="):
             jobs = int(a.split("=", 1)[1])
+        elif a == "--rtl":
+            rtl = "l"
+        elif a.startswith("--rtl="):
+            rtl = a.split("=", 1)[1]
         elif a in ("--rows", "--keep"):
             continue
         elif a.startswith("-"):
@@ -445,12 +521,13 @@ def main(argv):
     if jobs > 1 and len(specs) > 1:
         import multiprocessing.pool
         with multiprocessing.pool.ThreadPool(min(jobs, len(specs))) as pool:
-            futs = [(s, pool.apply_async(_guarded, (s, rows_wanted, keep, context)))
+            futs = [(s, pool.apply_async(_guarded,
+                                         (s, rows_wanted, keep, context, rtl)))
                     for s in specs]
             for s, f in futs:
                 results.append(f.get())
     else:
-        results = [_guarded(s, rows_wanted, keep, context) for s in specs]
+        results = [_guarded(s, rows_wanted, keep, context, rtl) for s in specs]
 
     worst = 0
     for tag, total, out in results:
@@ -466,14 +543,14 @@ def main(argv):
     return worst
 
 
-def _guarded(spec_path, rows_wanted, keep, context):
+def _guarded(spec_path, rows_wanted, keep, context, rtl=None):
     import io as _io
     import contextlib
     tag = os.path.basename(spec_path).rsplit(".", 1)[0]
     err = _io.StringIO()
     try:
         with contextlib.redirect_stderr(err):
-            return run_one(spec_path, rows_wanted, keep, context)
+            return run_one(spec_path, rows_wanted, keep, context, rtl)
     except SystemExit:
         return tag, None, ["VARIANT %s" % tag] +             ["  " + l for l in err.getvalue().rstrip().splitlines()]
     except Exception as exc:  # noqa: BLE001 - one bad spec must not kill the batch

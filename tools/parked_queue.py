@@ -46,7 +46,14 @@ import subprocess
 import sys
 import tempfile
 
-PARKED = re.compile(r'MASPSX_OVERRIDE\(\s*"[^"]*"\s*,\s*(\w+)\s*\)\s*;', re.S)
+# A park is the *guard*, not the macro: MASPSX_OVERRIDE and a bare INCLUDE_ASM
+# inside `#ifndef NON_MATCHINGS` pin a function the same way, and src/menu/*.c
+# uses the second form throughout. Anchoring on the guard also keeps an
+# ordinary file-scope INCLUDE_ASM -- a function with no C body at all, which is
+# work still to do rather than a near-miss -- out of the queue.
+PARKED = re.compile(
+    r'#ifndef NON_MATCHINGS\s*\n\s*(?:MASPSX_OVERRIDE|INCLUDE_ASM)\('
+    r'\s*"[^"]*"\s*,\s*(\w+)\s*\)\s*;', re.S)
 
 
 def specs_for(source, outdir):
@@ -110,7 +117,7 @@ def main(argv):
     for s in sources:
         made.extend(specs_for(s, tmp))
     if not made:
-        print("no MASPSX_OVERRIDE bodies found", file=sys.stderr)
+        print("no parked bodies found", file=sys.stderr)
         return 1
     print("%d parked bodies in %d sources" % (len(made), len(sources)),
           file=sys.stderr)
