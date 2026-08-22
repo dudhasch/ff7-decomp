@@ -2610,7 +2610,26 @@ static void func_800B22E4(void) { func_800B190C(); }
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B2304);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B2638);
+void func_800B2638(WorldChunkTri* arg0, VECTOR* out) {
+    WorldTriangle* tri;
+    WorldChunkHeader* chunk;
+    SVECTOR* verts;
+
+    if (out != NULL) {
+        tri = arg0->tri;
+        chunk = arg0->chunk;
+        verts = chunk->verts;
+        out->vx = (verts[tri->vert[0]].vx + verts[tri->vert[1]].vx +
+                   verts[tri->vert[2]].vx) /
+                      3 +
+                  (chunk->x << 13);
+        out->vy = 0;
+        out->vz = (verts[tri->vert[0]].vz + verts[tri->vert[1]].vz +
+                   verts[tri->vert[2]].vz) /
+                      3 +
+                  (arg0->chunk->z << 13);
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B271C);
 
