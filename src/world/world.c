@@ -2438,7 +2438,17 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B59F4);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5C7C);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5DD8);
+void func_800B5DD8(WorldModel* model) {
+    WorldModelPart* part;
+    s32 i;
+
+    part = (WorldModelPart*)(model->unk18 + (s32)model->unk1C);
+    if (part != NULL) {
+        for (i = 0; i < model->unk3; i++) {
+            part[i].unk0 = 1;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B5E28);
 
