@@ -1453,7 +1453,44 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002F738);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002F848);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002FDA0);
+// Fold the SPU voice bits owned by the tracks named in `mask` into `*out`,
+// but only those that also appear in `filter`. A track is either playing on
+// its overlay voice (0x100) or on the alternate voice it claimed (0x200);
+// overlay voices past 24 wrap into the second bank.
+void func_8002FDA0(AKAO_TRACK* track, s32* out, s32 mask, s32 filter) {
+    u32 bit;
+    u32 voicebit;
+    u16 voice;
+    s32 flags;
+
+    bit = 1;
+    *out |= mask;
+    if (mask != 0) {
+        do {
+            if (mask & bit) {
+                flags = track->update_flags;
+                if (flags & 0x100) {
+                    voice = track->overlay_voice;
+                    if (track->overlay_voice >= 0x18) {
+                        voice -= 0x18;
+                    }
+                    voicebit = 1 << voice;
+                    if (filter & voicebit) {
+                        *out |= voicebit;
+                    }
+                } else if (flags & 0x200) {
+                    voicebit = 1 << track->alt_voice_id;
+                    if (filter & voicebit) {
+                        *out |= voicebit;
+                    }
+                }
+                mask ^= bit;
+            }
+            bit <<= 1;
+            track++;
+        } while (mask != 0);
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002FE48);
 
