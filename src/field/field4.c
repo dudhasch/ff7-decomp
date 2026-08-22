@@ -10167,129 +10167,73 @@ s32 OpcodeFuncNfade(void) {
  *     where a signed compare needs them, so the `!= 0` arm keeps its bare
  *     `beqz`.
  *
- * 4 rows -> 2, and the correction is that the two waiting arms are not
- * spelled alike. The `>= 0xFF` arm reads the member straight into its
- * comparison with no local at all, which is what puts its `lhu` in $v0; the
- * `!= 0` arm keeps `adjust`, the same local the NFADE arm uses for its first
- * read. Sharing one local across those two arms is what pins it to $v1, and
- * the NFADE arm needs $v1 there because its base register is still live for
- * the `fadeSpeed` load two insns later -- so the shared local is right for
- * one arm and wrong for the other, and only the arm that does not use it can
- * be fixed.
+ * 4 rows -> 2 -> 0. The last two corrections are both about keeping the two
+ * waiting arms apart, and neither is a spelling of the tests themselves.
  *
- * The two rows left are that: the `!= 0` arm loads fadeAdjust into $v1 where
- * the target uses $v0. The register is not reachable, because it is what
- * stops gcc cross-jumping. Both waiting arms end `beqz <reg>,<PC_INC> /
- * li v0,1 / j <epilogue>`; the moment the compare register agrees, those three
- * insns are identical hard-register patterns and the post-reload jump_optimize
- * merges the `!= 0` arm into the other, deleting them and leaving a bare `j`
- * into the middle of it. The target has both copies, so the original was held
- * apart by something that is not visible in the arms themselves.
+ *   - Neither waiting arm may share a local with the NFADE arm. The `!= 0`
+ *     arm reads the member straight into its comparison, which is what puts
+ *     its `lhu` in $v0; sharing `adjust` with the NFADE arm pins it to $v1
+ *     instead, because that arm's base register is still live for the
+ *     `fadeSpeed` load two insns later. A separate local of its own measures
+ *     the same, so inline is chosen only because it is what the original
+ *     would more plausibly have written.
  *
- * Measured and rejected, all 9 rows: both arms read inline with no local;
- * arms 1-2 inline with arm 3 keeping locals; a second local for arm 3 with
- * arms 1-2 sharing `adjust`; three distinct locals; block-scoped locals inside
- * arm 3; all three arms inline; and the `!= 0` arm reusing `type`, the switch
- * selector, which is the one pseudo already in $v0 at that point. Retyping the
- * shared local is 9 in every width -- s32, u32, u16 -- because arm 3's
- * `!= speed` compare loses or gains a widening pair. Distinct `goto` labels
- * for the two arms' exits do not help either (one, the other, or both, with
- * the labels placed immediately before the PC_INC) -- jump_optimize collapses
- * labels that resolve to the same address before cross-jumping ever looks at
- * the blocks.
+ *   - Once both waiting arms load into $v0 their tails become the *identical*
+ *     three insns `beqz v0,<PC_INC> / li v0,1 / j <epilogue>`, and
+ *     post-reload cross-jumping merges them: the `!= 0` arm loses its
+ *     `beqz`/`li`/`j` and becomes a bare `j` into the other arm's `beqz`,
+ *     three instructions short at 70 against 73. The fix is to duplicate the
+ *     exit tail in the `>= 0xFF` arm -- `if (fadeAdjust >= 0xFF) { PC_INC(1);
+ *     return 0; } return 1;` -- so that arm's conditional jump targets its
+ *     *own* copy of the PC_INC block rather than the shared one. The two
+ *     arms' conditional jumps then carry different labels when cross-jumping
+ *     compares them, the merge never fires, and the duplicated tail is itself
+ *     merged back into the shared one, which is where the target's block
+ *     layout comes from.
  *
- * Case order is not a lever either, and it is expensive to get wrong: the
- * blocks are laid out in the order the `case` labels are written, so moving
- * the NFADE/default arm between the two waiting arms costs 20 rows and an
- * insertion, doing that with the `!= 0` arm inline costs 24, and simply
- * swapping the two waiting arms costs 15. Also rejected earlier, at 22 rows:
- * switching on a plain (s16) cast of the member, on an s32 temp, and on an s16
- * temp, all three of which fold the lhu/sll/sra into a single lh. And one that
- * does not touch the arms at all: declaring `adjust` ahead of `type` is
- * byte-identical, the two not competing, so declaration order is inert here as
- * usual.
+ *     The polarity is load-bearing, and it only becomes so once the tail is
+ *     duplicated: written the other way round as `if (fadeAdjust < 0xFF)
+ *     { return 1; } PC_INC(1); return 0;` -- the same program -- it is 2 rows
+ *     again. On the shared-tail body every polarity flip is exactly inert,
+ *     which is what made this read as a closed dimension.
  *
- * A basic-block barrier does not do it either, and that is worth knowing
- * because it is the one lever CLAUDE.md recommends for exactly this shape:
- * `do { } while (0);` inside the `if` before the `return`, after the `if`
- * before the `break`, with the arm inline and with the arm keeping its own
- * local, all four measure 9 rows and -3 instructions -- byte-identical to
- * the plain inline form. The merge is decided by whether the tails match as
- * hard-register patterns, and ending a block between them changes neither
- * the patterns nor the fact that both `j` the same label.
+ * Rejected on the way, all at 9 rows and 70 instructions, i.e. all merged:
+ * both arms inline; a distinct local per arm; the `!= 0` arm's local as s32;
+ * the `!= 0` arm reading the member non-volatile; arms 1-2 sharing a local
+ * with the NFADE arm keeping its own; and the *other* arm duplicating the
+ * tail (the `!= 0` arm rather than the `>= 0xFF` arm). A `do { } while (0);`
+ * barrier is inert in all four placements, as CLAUDE.md predicts for a
+ * residue that is not sched2's -- the merge is decided by whether the tails
+ * match as hard-register patterns, and ending a block between them changes
+ * neither the patterns nor the fact that both `j` the same label.
  *
- * Reading the target settles what the arms look like and deepens the
- * puzzle rather than solving it: both waiting arms end with the *identical*
- * four insns -- `beqz v0,<PC_INC> / ori v0,zero,0x1 / j <epilogue> / nop` --
- * on the same register, and gcc still emitted both copies. So the original
- * is not holding them apart by register or by block structure, and no
- * spelling of these two tests reaches it.
+ * Case order is not a lever and is expensive to get wrong: moving the
+ * NFADE/default arm between the two waiting arms costs 20 rows and an
+ * insertion, and swapping the two waiting arms costs 15. Moving the *no-wait*
+ * arm anywhere is byte-identical, because `case A: case B: break;` emits
+ * nothing and so cannot separate two blocks. Switching on a plain (s16) cast,
+ * on an s32 temp or on an s16 temp is 22 rows -- all three fold the
+ * lhu/sll/sra into a single lh. Declaring `adjust` ahead of `type` is
+ * byte-identical; declaration order is inert here as usual.
  *
- * Permuter food: what is needed is a shape that keeps the two arms apart for
- * some reason other than the register, not another spelling of the same two
- * tests.
+ * The semantics are closed against the opcode wiki (ff7-mods.github.io/
+ * ff7-flat-wiki, Opcodes/6B_FADE and 6C_FADEW): FADEW is one byte, so
+ * PC_INC(1); and "if the type id is odd the adjust is 0xFF, if even it is
+ * 0x00", so the `!= 0` arm is the odd types counting down and the `>= 0xFF`
+ * arm the even ones counting up.
  *
- * And the permuter has now had a go, with the result recorded rather than
- * repeated: base score **10** -- exactly the two register rows at
- * `allocno_compare`'s 5 points each, so the scratch is measuring the right
- * thing -- and **no improvement in 191,751 candidates** with
- * `perm_ins_block=20` and `perm_temp_for_expr=200`, run to a wall-clock limit
- * rather than to exhaustion. Not one candidate ever scored below 10, so the
- * run left no `output-` directory at all. That is a strong negative
- * and it fits the diagnosis: 10 is a local optimum with a cliff on both sides,
- * because the one edit that fixes the register also makes the two tails
- * identical hard-register patterns and cross-jumping then deletes three
- * insns, which the scorer charges 300 for. Nothing the randomizer can reach in
- * one step crosses that.
- *
- * The *semantics* are now closed, against the opcode wiki
- * (ff7-mods.github.io/ff7-flat-wiki, Opcodes/6B_FADE and 6C_FADEW). FADEW is
- * one byte with no parameters, so `PC_INC(1)` is right, and FADE's page
- * enumerates the type ids -- every one of them matches this repo's
- * `FieldFadeType` name for the same value, 0..12 inclusive, including the two
- * that only NFADE can set (11 and 12). It also explains why there are exactly
- * two waiting arms and why they test opposite ends: "If the type id is odd,
- * the adjust is 0xFF, if even, it is 0x00." The `!= 0` arm is types 1, 5, 7,
- * 9 -- all odd, so the adjust counts *down* from 0xFF -- and the `< 0xFF` arm
- * is 2, 6, 8, 10, all even, counting *up* from 0. The eleven-entry jump table
- * the target's `sltiu v0,v1,0xb` implies is cases 0..10 with 3 falling to the
- * default. So the "this arm is a different program" failure that CLAUDE.md
- * warns about for jump-table functions is ruled out here; what is left is
- * purely the cross-jump.
- *
- * Six more spellings measured after that and all *exactly* inert at 2 rows:
- * inverting the `!= 0` guard to `if (adjust == 0) break; return 1;`, the same
- * for the `< 0xFF` arm, both together, dropping the explicit
- * `case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE` so only `default:` remains,
- * spelling the bound `<= 0xFE`, and the polarity flip combined with the
- * dropped case. fold normalises every one of them.
- *
- * Case order was re-tested too, for the one move the list above does not
- * cover -- putting the *no-wait* arm between the two waiting ones, rather
- * than the default arm. It is byte-identical, as is putting it last, because
- * `case FFT_INSTANT: case FFT_INSTANT_BLACK: break;` emits nothing at all and
- * so cannot separate two blocks. Only the default arm has a body to get in
- * the way, and moving *that* between them is the 20 rows already recorded.
- *
- * And the 2x2 of which arm owns the `adjust` local was re-run, because the
- * list above is ambiguous about it: arm 2 with its own local and the default
- * arm keeping `adjust`, arm 2 inline, and the default arm with its own local
- * all measure 9 rows -- **and 70 instructions against 73**. That length is
- * the sharper number and it was not recorded before: every spelling that
- * fixes the register is three instructions *short*, which is the cross-jump
- * firing and deleting `beqz`/`ori`/`j`. It corroborates the diagnosis exactly
- * and it is why this body, at 2 rows and the exact length, is the one to
- * keep.
- *
- * Note the scratch only became scoreable at all with
- * `tools/permuter_latedefines.py` and `tools/permuter_rodata_local.py` (see
- * CLAUDE.md step 4): before those, `PC_INC` was compiled as a call and the
- * "fadew" literal and jump table scored as permanent differences, and the base
- * read as 372 bytes against 396 with six mismatched relocation symbols. Do not
- * re-derive that. */
-#ifndef NON_MATCHINGS
-MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", OpcodeFuncFadew);
-#else
+ * For the record, since it is a strong negative worth not repeating: a
+ * decomp-permuter run from the 2-row body scored a base of exactly 10 -- the
+ * two register rows at 5 points each -- and found nothing in 191,751
+ * candidates with perm_ins_block=20 and perm_temp_for_expr=200. It could not:
+ * the single edit that fixes the register also triggers the merge, which the
+ * scorer charges 300 for, so 10 was a local optimum with a cliff on both
+ * sides. The lever that works changes a *different* arm, which is two edits
+ * away and outside anything the randomizer reaches in one step. (That scratch
+ * only became scoreable at all with `tools/permuter_latedefines.py` and
+ * `tools/permuter_rodata_local.py`; before those, `PC_INC` compiled as a call
+ * and the "fadew" literal and jump table scored as permanent differences. Do
+ * not re-derive that.) */
 s32 OpcodeFuncFadew(void) {
     s16 type;
     s16 adjust;
@@ -10307,8 +10251,7 @@ s32 OpcodeFuncFadew(void) {
     case FFT_STANDARD_TO_FIELD_ADD:
     case FFT_INSTANT_INV1_SUB_HOLD_FIELD:
     case FFT_INSTANT_STANDARD_ADD_HOLD_FIELD:
-        adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
-        if (adjust != 0) {
+        if (((volatile FieldState*)g_FieldState)->fadeAdjust != 0) {
             return 1;
         }
         break;
@@ -10316,10 +10259,11 @@ s32 OpcodeFuncFadew(void) {
     case FFT_FIELD_TO_STANDARD_ADD:
     case FFT_INSTANT_INV1_SUB_HOLD_COLOR:
     case FFT_INSTANT_STANDARD_ADD_HOLD_COLOR:
-        if (((volatile FieldState*)g_FieldState)->fadeAdjust < 0xFF) {
-            return 1;
+        if (((volatile FieldState*)g_FieldState)->fadeAdjust >= 0xFF) {
+            PC_INC(1);
+            return 0;
         }
-        break;
+        return 1;
     case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE:
     default:
         adjust = ((volatile FieldState*)g_FieldState)->fadeAdjust;
@@ -10332,7 +10276,6 @@ s32 OpcodeFuncFadew(void) {
     PC_INC(1);
     return 0;
 }
-#endif
 
 /////////////////////////////////////////////////
 // Begin of field_opcode_intersect.c
