@@ -2269,7 +2269,11 @@ void func_800B64D8(s32 arg0) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B650C);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6570);
+void func_800B6570(s32 arg0) {
+    *D_8009A000 = 0xC0;
+    *D_8009A004 = arg0;
+    SystemAkaoExecute();
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B65A4);
 
