@@ -642,6 +642,44 @@ a near-miss, in rough order of frequency:
   came out with two base registers instead of one, 20 rows. This is the
   opposite of the counter-merging idiom above: merge *loop counters* that
   describe the same walk, split *pointers* that describe different ones.
+* **Read variable *identity* off the destination registers, and read it in
+  both directions.** The bullet below says a value in *different* registers in
+  two arms cannot be one variable, and that is half the rule; this project
+  applied only that half for a long time and it cost 35 rows on one function.
+  The other half: a value in the **same** register in both arms *is* one
+  variable, and there is a sharper form of the test that names which pseudos
+  are global. `local_alloc` hands out `$v0,$v1,$a0..$a3,$t0,$t1,...` in that
+  order, so a block-local quantity takes the lowest register free in its
+  block. If the target writes a *high* register that a block-local could never
+  have reached -- `negu $t2,$a1` in one arm and `negu $t2,$a3` in the other,
+  with `$t1` untouched anywhere in the first arm -- then `local_alloc`
+  *refused* that pseudo, which means it spans two basic blocks and
+  `global_alloc` placed it. That is a global allocno, i.e. one source
+  variable across both arms. `FieldCalcPointOnLine` went **60 rows to 25** on
+  merging three per-arm pairs back into single variables, and the third global
+  is also what forces the two long-lived pointers up to `$t3`/`$t4` where a
+  two-global body leaves them at `$t2`/`$t3`.
+
+  The caveat is worth as much as the rule, and it is the difference between a
+  reconstruction and a lever. Two of those three merges are what the target
+  states: each value holds *one* register across both arms. The third does
+  not -- the target has it in `$v0` in one arm and `$a1` in the other -- so
+  merging it manufactures a fourth global that displaces the others and buys
+  14 rows while leaving another value in the wrong register. Keep it if you
+  are hill-climbing, but record in the note that it is a codegen lever and not
+  what the original wrote, or the next pass will reason from a false premise.
+
+* **A sweep is exhaustive only over the dimension it varies, and "every axis is
+  closed" is a claim about the axes you thought of.** `FieldCalcPointOnLine`'s
+  note recorded roughly 200 measured points -- 98 barrier placements, a
+  150-point width sweep, statement orders, declaration orders, operand orders
+  -- and concluded the function was finished. Every one of those ranged over
+  *spelling with the variable set held fixed*, and the variable set was the
+  answer. Both enumerations are genuinely flat over a two-global body and say
+  nothing whatever about a five-global one. So when a note says a dimension is
+  closed, ask what it held constant; and after any change that alters how many
+  variables exist, treat every earlier sweep as stale.
+
 * **Which register a value gets in each arm tells you how many variables the
   original had.** A pseudo gets exactly one hard register, so if a value lands
   in a *different* register in two arms of an `if`, it cannot be one variable
