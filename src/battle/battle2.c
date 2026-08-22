@@ -1429,13 +1429,25 @@ void func_800D6394(s32* arg0, s16 arg1) {
     D_800F14D0.unk4 &= ~2;
 }
 
+void func_800D650C();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D650C);
 
 extern u8 D_800F10EC[];
 extern u8 D_800F11E8[];
 extern u8 D_800F1304[];
-u8* const D_800A0DC8[] = {D_800F10EC, D_800F11E8, D_800F1304};
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D6734);
+
+// `tbl` is a local aggregate initialiser, so its constant is the .rodata blob
+// the target copies in with three lw/sw pairs before the call -- it is the
+// object that used to be carried here as `u8* const D_800A0DC8[]` while this
+// function was still INCLUDE_ASM, and that object had to go with it or the
+// unit would emit the same three words twice.
+void func_800D6734(s32 arg0, s32 arg1) {
+    u8* tbl[] = {D_800F10EC, D_800F11E8, D_800F1304};
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D650C)];
+
+    p->unk8 = arg0;
+    *(u8**)&p->D_801621F4 = tbl[arg1];
+}
 
 void func_800D6734(s32, s32);
 extern s32 D_800F14D4;
