@@ -60,6 +60,16 @@ def read(p):
     return io.open(p, encoding="utf-8", errors="replace").read()
 
 
+def code(p):
+    """A source file with its comments removed.
+
+    Park notes name the symbols they discuss, and counting those as references
+    overstates the naming debt -- D_800E4900 appeared as "renameable" on the
+    strength of one mention inside a comment and no use at all."""
+    s = re.sub(r"/\*.*?\*/", " ", read(p), flags=re.S)
+    return re.sub(r"//[^\n]*", " ", s)
+
+
 def asm_for(unit, name):
     p = os.path.join(HERE, "asm/us/field/nonmatchings/%s/%s.s" % (unit, name))
     return p if os.path.exists(p) else None
@@ -100,7 +110,7 @@ def census(src_glob="src/field/field*.c"):
     m2c, unnamed_fn = collections.Counter(), set()
     for f in (sorted(glob.glob(os.path.join(HERE, "src/field/*.c")))
               + sorted(glob.glob(os.path.join(HERE, "src/field/*.h")))):
-        s = read(f)
+        s = code(f)
         for x in DSYM.findall(s):
             used.add(x)
             refs[x] += 1
@@ -110,8 +120,12 @@ def census(src_glob="src/field/field*.c"):
     free = sorted(used - P - H)
     # field's own .rodata holds string literals, which are not globals to name
     strings = [x for x in free if 0x800A0000 <= int(x[2:], 16) < 0x800A1400]
-    unk = sum(len(UNK.findall(read(os.path.join(HERE, p))))
-              for p in ("include/game.h", "src/field/field_private.h"))
+    # unkNN members also live in structs declared inside a .c -- FieldBgScroll
+    # was twelve of them and invisible to a headers-only scan.
+    unk = sum(len(UNK.findall(code(f)))
+              for f in ([os.path.join(HERE, "include/game.h")]
+                        + sorted(glob.glob(os.path.join(HERE, "src/field/*.h")))
+                        + sorted(glob.glob(os.path.join(HERE, "src/field/*.c")))))
 
     tot = {k: sum(u[k] for u in units) for k in
            ("lines", "bodies", "matching", "parked", "include_asm",
