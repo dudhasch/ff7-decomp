@@ -2230,7 +2230,12 @@ void func_800B579C(s32 arg0, u8 arg1, u8 arg2, u8 arg3) {
     p[3] = 0;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B57C0);
+void func_800B57C0(s32 arg0) {
+    s32 off;
+
+    off = arg0 * 4;
+    *(u8*)(D_8010D9B8 + off + 2) = 0;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B57DC);
 
