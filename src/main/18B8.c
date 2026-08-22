@@ -898,16 +898,17 @@ void func_8001A384(u8 arg0, s32 arg1);
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A384);
 #else
 /* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
- * 5 rows, +2 instructions (2 insertions). The body is instruction-for-instruction right; every differing row is
- * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn each.
- * cc1 emits a bare `op $r,SYM` and leaves the gp decision to the assembler,
- * which gets -G0 -- so only a symbol this object *defines* in .sdata is
- * gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live in
- * main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
- * object. Measured and rejected, all exactly 5 rows: `extern u8 SYM[1];` indexed
- * [0], a tentative definition `u8 SYM;` in this unit, and a volatile cast at
- * each access. The fix is a .bss import plus -G8 on the assembler, not a
- * spelling; 30 of this unit's remaining functions are behind it. */
+ * 5 rows, +2 instructions (2 insertions). The body is
+ * instruction-for-instruction right; every differing row is
+ * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn
+ * each. cc1 emits a bare `op $r,SYM` and leaves the gp decision to the
+ * assembler, which gets -G0 -- so only a symbol this object *defines* in .sdata
+ * is gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live
+ * in main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
+ * object. Measured and rejected, all exactly 5 rows: `extern u8 SYM[1];`
+ * indexed [0], a tentative definition `u8 SYM;` in this unit, and a volatile
+ * cast at each access. The fix is a .bss import plus -G8 on the assembler, not
+ * a spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A384(u8 arg0, s32 arg1) {
     func_8001AC9C(arg0, arg1);
     if (D_80063020) {
@@ -921,16 +922,17 @@ void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2);
 MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001A3B8);
 #else
 /* PARKED, and the residue is not codegen -- see CLAUDE.md on -G8 and %gp_rel.
- * 8 rows, +2 instructions (2 insertions). The body is instruction-for-instruction right; every differing row is
- * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn each.
- * cc1 emits a bare `op $r,SYM` and leaves the gp decision to the assembler,
- * which gets -G0 -- so only a symbol this object *defines* in .sdata is
- * gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live in
- * main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
- * object. Measured and rejected, all exactly 8 rows: `extern u8 SYM[1];` indexed
- * [0], a tentative definition `u8 SYM;` in this unit, and a volatile cast at
- * each access. The fix is a .bss import plus -G8 on the assembler, not a
- * spelling; 30 of this unit's remaining functions are behind it. */
+ * 8 rows, +2 instructions (2 insertions). The body is
+ * instruction-for-instruction right; every differing row is
+ * `%gp_rel(SYM)($gp)` in the target against `lui/%lo` here, one extra insn
+ * each. cc1 emits a bare `op $r,SYM` and leaves the gp decision to the
+ * assembler, which gets -G0 -- so only a symbol this object *defines* in .sdata
+ * is gp-addressed. D_80062FFC/D_80063020/D_80062F7C/D_80062F10/D_80062FBC live
+ * in main's .bss, assembled from asm/us/main/data/536C4.bss.s, i.e. another
+ * object. Measured and rejected, all exactly 8 rows: `extern u8 SYM[1];`
+ * indexed [0], a tentative definition `u8 SYM;` in this unit, and a volatile
+ * cast at each access. The fix is a .bss import plus -G8 on the assembler, not
+ * a spelling; 30 of this unit's remaining functions are behind it. */
 void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2) {
     u8 param;
     s32 i;
@@ -1348,11 +1350,14 @@ MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001DEF0);
  * assembler's $at macro for the indexed store, they just expand it differently.
  * maspsx turns on `nop_at_expansion` and `addiu_at` for aspsx < 2.30, which is
  * exactly the target's extra `nop` after the `lbu` and its
- * `addiu at,at,%lo(...)` before the `addu` -- the two instructions we are short.
- * This unit is built at 2.34 (//! G=8 -> the default) and 72 of its functions
- * match there, so the version cannot simply be changed; 18B8.c is a splat merge
- * of several original translation units (see the `file cut` comments) and this
- * one came from a differently-assembled module. The body below is correct. */
+ * `addiu at,at,%lo(...)` before the `addu` -- the two instructions we are
+ * short. This unit is built at 2.34 (//! G=8 -> the default). Switching it is
+ * not the wrong answer -- 77 of the 151 remaining functions here carry the
+ * < 2.30 expansion and none of the 72 already-matching ones do, and the object
+ * is byte-identical either way -- but `//! G=8 ASPSX=2.21` currently turns the
+ * build red in the menu overlays through a splat/sym_export feedback loop that
+ * has nothing to do with this unit. See CLAUDE.md; unpark this the day that is
+ * fixed. The body below is correct. */
 // sets the menu color with a quadruplet of RGB values
 void func_8001DEF0(u8* menu_colors) {
     s32 i;
@@ -1536,8 +1541,8 @@ void func_80021044(DRAWENV* draw_env, DISPENV* disp_env) {
 void func_800211B8(s32 arg0) { D_80062DEC = arg0; }
 
 void func_800211C4(s32 id) {
-    SystemLoadFileBySector(D_80048F60[id * 2], D_80048F60[id * 2 + 1],
-                           (u_long*)D_80062DEC, NULL);
+    SystemLoadFileBySector(
+        D_80048F60[id * 2], D_80048F60[id * 2 + 1], (u_long*)D_80062DEC, NULL);
     SystemCdromReadChain();
 }
 
