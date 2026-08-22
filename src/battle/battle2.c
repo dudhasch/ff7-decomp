@@ -1141,7 +1141,17 @@ void func_800D3F8C(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D415C);
+// Claim a slot running func_800D3F8C. arg4 arrives on the caller's stack and
+// is loaded with `lhu`, which types it u16.
+void func_800D415C(s32 arg0, SVECTOR* arg1, s32 arg2, s32 arg3, u16 arg4) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D3F8C)];
+
+    p->unk10.unk.unk2 = arg0;
+    *(SVECTOR*)&p->D_801621F4 = *arg1;
+    p->unkC = arg2;
+    p->unkE = arg3;
+    p->unk10.unk.unk0 = arg4;
+}
 
 static void func_800D41FC(MATRIX* arg0, MATRIX* arg1, MATRIX* arg2) {
     arg2->t[0] = arg1->t[0] - arg0->t[0];
@@ -1228,7 +1238,13 @@ void func_800D5138(s32 arg0) {
 }
 
 void func_800D51D4(s32 arg0);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D51D4);
+// Re-aim the ramp at a new duration: the step is what is left to travel
+// divided by the ticks remaining.
+void func_800D51D4(s32 arg0) {
+    if (D_800F10E0 != NULL) {
+        *(s32*)&D_800F10E0->unk8 = -*(s32*)&D_800F10E0->D_8016297C / arg0;
+    }
+}
 
 extern s32 D_800F10E4;
 extern s16 D_800F5B74;
