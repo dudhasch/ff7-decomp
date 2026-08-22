@@ -2301,7 +2301,7 @@ s32 func_800B7B3C(void) { return (g_BattleMode >> 3) & 1; }
 s32 func_800B7B54(void) {
     u32 var_v1;
 
-    var_v1 = D_80062F19;
+    var_v1 = g_EncounterRateModifier;
     if (var_v1 > 0x10)
         var_v1 *= 2;
     return var_v1;

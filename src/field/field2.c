@@ -4042,10 +4042,17 @@ u8 FieldGetNextRandomU8(void) {
 
 extern s8 D_800716D0;
 extern u16 D_8007173C;
-extern s16 D_8007E774;
+extern s16 g_FieldLastBattleFormationId;
 extern s8 D_8007EBC8;
-extern s16 D_8009ABF6;
-extern u8 D_8009AC30;
+/* These three are members of `g_FieldStateData` (0x8009ABF4) reached through
+ * their own symbols, not globals of their own: +0x02 is `eventCmdParam`,
+ * +0x3B `battlesDisabled` and +0x3C `encounterTableId`. The standalone
+ * spelling is load-bearing -- a scalar `extern` and a struct member are
+ * different to `true_dependence`, and this function matches with these --
+ * so do not tidy them into member accesses, and do not give them names of
+ * their own either. */
+extern s16 D_8009ABF6; /* g_FieldStateData.eventCmdParam */
+extern u8 D_8009AC30;  /* g_FieldStateData.encounterTableId */
 extern u8 D_8009C6D8;
 
 /* Check for a random or scripted battle this frame: roll the encounter, pick
@@ -4067,9 +4074,9 @@ extern u8 D_8009C6D8;
  *    explicit-mask is one.
  *
  *  - The third callee-saved register.  The target holds `&D_8009ABF6` in `s2`
- *    from the `D_8009ABF6 != D_8007E774` test onward (`lui s2 / addiu s2 /
- *    lh v1,0(s2)`, then `sh v0,0(s2)` in the second loop); we emit the
- *    two-instruction `%hi`/`%lo` form at the load and a fresh `$at` expansion
+ *    from the `D_8009ABF6 != g_FieldLastBattleFormationId` test onward (`lui s2
+ * / addiu s2 / lh v1,0(s2)`, then `sh v0,0(s2)` in the second loop); we emit
+ * the two-instruction `%hi`/`%lo` form at the load and a fresh `$at` expansion
  *    at the store, so the frame is 0x20 rather than 0x28 and `s2` is never
  *    saved.  cse follows the `beq` into the reroll loop in both builds and the
  *    label structure is identical, so the reason it relates the two references
@@ -4084,8 +4091,8 @@ extern u8 D_8009C6D8;
  *    init after it (I) - identical.
  *
  * What did move it, and is in the body above:
- *  - `((u32)D_8007173C * D_80062F19) >> 12` rather than a signed product:
- *    gives the target's `srl`/`sltu` instead of `sra`/`slt`.
+ *  - `((u32)D_8007173C * g_EncounterRateModifier) >> 12` rather than a signed
+ * product: gives the target's `srl`/`sltu` instead of `sra`/`slt`.
  *  - Splitting the special-encounter running total into `sum` / `total` /
  *    `rate` so the target's `s0` (running sum) and `v1` (the special[2]
  *    total, which special[3] adds to) are two variables rather than one.
@@ -4116,15 +4123,15 @@ extern u8 D_8009C6D8;
  * rows plus 3 of the 4 insertions.
  *
  * What is left is one register: the target keeps `&D_8009ABF6` in $s2 from the
- * `D_8009ABF6 != D_8007E774` test through the second walk -- `addiu s2,...` and
- * then `lh v1,0(s2)` / `sh v0,0(s2)` -- where this build fuses the `%lo` into
- * each access and rebuilds the address through the `$at` macro for the store.
- * That is the one insertion, and the frame is 4 bytes smaller for it, so every
- * saved-register offset and every branch displacement in the function reads
- * wrong: 62 rows from one allocation. The address is referenced on both sides
- * of a `FieldGetNextRandomU8` call, which is exactly the shape that should
- * give it a callee-saved register, so what is missing is whatever makes cse
- * relate the two references rather than fusing each one.
+ * `D_8009ABF6 != g_FieldLastBattleFormationId` test through the second walk --
+ * `addiu s2,...` and then `lh v1,0(s2)` / `sh v0,0(s2)` -- where this build
+ * fuses the `%lo` into each access and rebuilds the address through the `$at`
+ * macro for the store. That is the one insertion, and the frame is 4 bytes
+ * smaller for it, so every saved-register offset and every branch displacement
+ * in the function reads wrong: 62 rows from one allocation. The address is
+ * referenced on both sides of a `FieldGetNextRandomU8` call, which is exactly
+ * the shape that should give it a callee-saved register, so what is missing is
+ * whatever makes cse relate the two references rather than fusing each one.
  *
  * Measured and inert, all 62/1: `roll` as s32, u32, u16 or s16 (the `(u8)`
  * casts at the comparisons carry the masking either way). `u8 sum` is 61/1 --
@@ -4132,13 +4139,14 @@ extern u8 D_8009C6D8;
  * structural gain, so it is not taken.
  *
  * 62 rows / 1 insertion / -4 -> 40 / 0 / -2 on a named pointer local: `s16*
- * cur = &D_8009ABF6;` assigned immediately above the `!= D_8007E774` test,
- * with that test, its store and the *second* walk's fallback store reaching
- * the symbol through `*cur`. That is what makes cse relate the two references
- * instead of fusing each `%lo` into its own access, which puts the address in
- * a callee-saved register across the FieldGetNextRandomU8 call as the target
- * has it. Scope matters: routing the second walk's `slot` store through `cur`
- * as well is 42, and the first walk's stores must stay on the bare symbol.
+ * cur = &D_8009ABF6;` assigned immediately above the `!=
+ * g_FieldLastBattleFormationId` test, with that test, its store and the
+ * *second* walk's fallback store reaching the symbol through `*cur`. That is
+ * what makes cse relate the two references instead of fusing each `%lo` into
+ * its own access, which puts the address in a callee-saved register across the
+ * FieldGetNextRandomU8 call as the target has it. Scope matters: routing the
+ * second walk's `slot` store through `cur` as well is 42, and the first walk's
+ * stores must stay on the bare symbol.
  *
  * The two instructions it was still short were the `andi <r>,<r>,0xff` masking
  * `roll` at the first and fourth comparisons, and they are not reachable from
@@ -4199,8 +4207,8 @@ void FieldBattleCheck(void) {
             } else {
                 D_800716D0 = 0;
             }
-            if (FieldGetRandomU8FromList() < ((u32)D_8007173C * D_80062F19) >>
-                12) {
+            if (FieldGetRandomU8FromList() <
+                ((u32)D_8007173C * g_EncounterRateModifier) >> 12) {
                 StopFieldMapPreload();
                 D_8009ABF5 = 2;
                 D_8007EBC8 = 1;
@@ -4259,8 +4267,8 @@ void FieldBattleCheck(void) {
                     }
                 }
                 cur = &D_8009ABF6;
-                if (*cur != D_8007E774) {
-                    D_8007E774 = *cur;
+                if (*cur != g_FieldLastBattleFormationId) {
+                    g_FieldLastBattleFormationId = *cur;
                     return;
                 }
                 sum = 0;
@@ -4272,7 +4280,7 @@ void FieldBattleCheck(void) {
                     sum += (s32)(slot << 16) >> 26;
                     if ((u8)roll < (u8)sum) {
                         D_8009ABF6 = slot & 0x3FF;
-                        D_8007E774 = slot & 0x3FF;
+                        g_FieldLastBattleFormationId = slot & 0x3FF;
                         break;
                     }
                 }

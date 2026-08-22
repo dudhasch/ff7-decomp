@@ -339,21 +339,23 @@ INCLUDE_ASM("asm/us/field/nonmatchings/field4", KawaiSetColorToPartPkts);
  *     (v1) because its range is inside the last block. Worth 4 rows.
  *   - D_800DFCA0 and model->textureFaceId are re-read at every use. Caching
  *     either in a local collapses three loads into one.
- *   - The index tables are two-dimensional. `D_800DFCA4[faceId * 7 + sel]`
- *     folds the whole index into one `addu`; `[faceId][sel]` gives the
+ *   - The index tables are two-dimensional. `g_KawaiMouthTexPages[faceId * 7 +
+ * sel]` folds the whole index into one `addu`; `[faceId][sel]` gives the
  *     target's two, symbol-then-selector.
  *
  * Measured and inert (all 23 rows): `u8*` instead of `u_long*` for the source
  * pointer, `* 0x200` instead of `<< 9`, three separate source locals, `(s32)`
  * on the faceId subscript, all five declaration orders of the five locals,
- * `*(&D_800DFCA4[faceId][0] + sel)`, and `+ 0x300 + 8` for the second x.
- * Measured and worse: the selector byte hoisted into a local (50), either
+ * `*(&g_KawaiMouthTexPages[faceId][0] + sel)`, and `+ 0x300 + 8` for the second
+ * x. Measured and worse: the selector byte hoisted into a local (50), either
  * quotient computed before the source pointer (67 and 38), `&rect` hoisted
  * into a `RECT*` (60), `faceSel` copied to a local pointer (35), and the
  * pointer-plus spelling of the table index (58). Codegen pinned via
  * MASPSX_OVERRIDE; the #else is the verified C. */
-extern u8 D_800DFCA4[][7]; /* mouth texture page index, per face, per frame */
-extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
+extern u8 g_KawaiMouthTexPages[][7]; /* mouth texture page index, per face, per
+                                        frame */
+extern u8
+    g_KawaiEyeTexPages[][3]; /* eye texture page index, per face, per frame */
 
 /* Reload one model's eye and mouth textures into VRAM: three LoadImage calls
  * into a per-model 16x32 slot, the two mouth halves side by side at x+0x300
@@ -382,7 +384,8 @@ extern u8 D_800DFD94[][3]; /* eye texture page index, per face, per frame */
  *
  * `D_800DFCA0` is read three times, once per site, because each LoadImage
  * call invalidates it; writing it inline at every use is what reproduces
- * that. `D_800DFCA4` and `D_800DFD94` are each addressed once and hoisted. */
+ * that. `g_KawaiMouthTexPages` and `g_KawaiEyeTexPages` are each addressed once
+ * and hoisted. */
 s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
     RECT rect;
     u_long* src;
@@ -393,7 +396,7 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
     if (slot < 0x21) {
         sel = faceSel[0];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFCA4[model->textureFaceId][sel] << 9));
+                        (g_KawaiMouthTexPages[model->textureFaceId][sel] << 9));
         rect.x = ((slot - (slot / 4) * 4) << 4) + 0x300;
         rect.y = ((slot / 4) << 5) + 0x100;
         rect.w = 8;
@@ -401,7 +404,7 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
         LoadImage(&rect, src);
         sel = faceSel[1];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFCA4[model->textureFaceId][sel] << 9));
+                        (g_KawaiMouthTexPages[model->textureFaceId][sel] << 9));
         rect.x = ((slot - (slot / 4) * 4) << 4) + 0x308;
         rect.y = ((slot / 4) << 5) + 0x100;
         rect.w = 8;
@@ -409,7 +412,7 @@ s32 KawaiLoadEyesMouthTexToVram(FieldModelEntry* model, u8* faceSel) {
         LoadImage(&rect, src);
         sel = faceSel[2];
         src = (u_long*)((u8*)D_800DFCA0 + D_800DFCA0->pageOffset +
-                        (D_800DFD94[model->textureFaceId][sel] << 9));
+                        (g_KawaiEyeTexPages[model->textureFaceId][sel] << 9));
         rect.x = ((slot - (slot / 8) * 8) << 3) + 0x300;
         rect.y = ((slot / 8) << 5) + 0x1A0;
         rect.w = 8;
@@ -1210,11 +1213,11 @@ void FieldEventInit(
     g_FieldState = state;
     g_FieldModels = models;
     g_FieldScripts = scripts;
-    D_80095DCC = 0;
+    g_FieldScriptHalted = 0;
     D_8007EBE0 = 1;
     D_8009FE8C = 0;
     if (flags & 0x100) {
-        D_80095DCC = 1;
+        g_FieldScriptHalted = 1;
         g_FieldScriptRunState = 4;
     }
     if (scripts->eventDataVersion < 2) {
@@ -1243,7 +1246,7 @@ void FieldEventUpdate(s32 arg0) {
         ResetFieldRenderState();
         FieldDebugInitBuffers();
         InitFieldDebugPages();
-        D_80095DCC = 0;
+        g_FieldScriptHalted = 0;
         D_8009FE8C = 0;
         D_8007EBE0 = 0;
         if (g_FieldScripts->eventVersion < 5) {

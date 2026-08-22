@@ -94,3 +94,6 @@ g_BattleState = 0x800F83AC;
 
 D_800A0848 = 0x800A0848;
 D_800A08D0 = 0x800A08D0;
+g_EncounterRateModifier = 0x80062F19;
+g_FieldLastBattleFormationId = 0x8007E774;
+g_FieldScriptHalted = 0x80095DCC;

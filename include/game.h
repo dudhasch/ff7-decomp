@@ -789,7 +789,7 @@ extern u8 D_80062D98;  // battle_clearRenderList
 extern u8 D_80062D99;  // battle_isPaused
 extern s32 D_80062DCC;
 extern s8 _D_80062DFD;
-extern u8 D_80062F19; // Enemy Lure/Away Modifier
+extern u8 g_EncounterRateModifier; // Enemy Lure/Away Modifier
 extern u8 D_80062F1A;
 extern u8 D_80062F1B;
 extern Gpu D_80062F24;
@@ -845,7 +845,7 @@ extern u8 g_FieldScriptSyncState[48][8]; // sync states of entity scripts per
                                          // priority level
 extern FieldModelLoaderData* g_FieldModelLoaderData;
 extern s16 g_FieldLineCount;
-extern s8 D_80095DCC;
+extern s8 g_FieldScriptHalted;
 extern volatile u16 D_80095DD4;
 extern s16 g_PlayerModelId;
 extern s16 g_isFieldLoading;

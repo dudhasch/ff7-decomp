@@ -778,7 +778,7 @@ void FieldEventDebugError(const char* errmsg) {
     FieldDebugPageInit(0, 100, 100, 150, 12);
     FieldDebugPageSetColor(0, 0x7F, 0, 0);
     AddStrNextDebugRow(0, errmsg);
-    D_80095DCC = 1;
+    g_FieldScriptHalted = 1;
     g_FieldScriptRunState = 4;
 }
 
