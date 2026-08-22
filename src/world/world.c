@@ -25,6 +25,7 @@ u16 func_800BAE60(s16 window);
 void func_800BB350(u16 value, u8* dst);
 void func_800BB450(u16 value, u8* dst);
 void func_800BB568(u16 value, u8* dst);
+static void func_800BBA34(s8 arg0);
 void func_800BC9E8(s16 arg0);
 s16 func_800BCA38(void);
 void func_800BCA48(void);
@@ -3039,7 +3040,22 @@ s32 func_800B79B8(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7A40);
+void func_800B7A40(void) {
+    s32 id;
+    s32 t;
+    void (*f)(s32);
+
+    func_800B787C(D_8009D391, (u8*)D_8009D391 - 0x7B5, func_800A1DE0() != 2);
+    if (func_800A1DE0() != 2) {
+        id = func_800B79B8() & 0xFF;
+        t = func_800BBA44();
+        f = (void (*)(s32))func_800A9A04;
+        if (t != 0) {
+            f = (void (*)(s32))func_800BBA34;
+        }
+        f(id);
+    }
+}
 
 void func_800B7AC0(s16 arg0) {
     u8* src;
