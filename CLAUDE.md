@@ -4567,6 +4567,25 @@ a near-miss, in rough order of frequency:
   `src/battle/battle.c` carried three of these plus one genuinely conflicting
   forward declaration, and between them they blocked every measurement in a
   109-function file.
+* **Read the *preheader order* to tell a cached loop bound from one read in
+  the test.** Both spellings compile to a single load and the difference
+  shows up as one `move` in the wrong place, which reads as noise.
+  `count = D_800F3948;` ahead of the loop is an ordinary statement, so expand
+  emits it into the preheader *before* anything `move_movables` hoists. The
+  bound written into the test instead -- `do { ... } while (i < D_800F3948);`
+  behind an explicit `if (D_800F3948 > 0)` guard, so the value is already in a
+  register -- is a redundant load that cse rewrites as
+  `move <bound>,<guard>` **inside** the loop, and `move_movables` then hoists
+  it in insn order, i.e. *after* the constants the loop body uses at its top.
+  So a preheader reading `move a0,zero / li a3,-1 / move t0,v0` -- a hoisted
+  constant sandwiched between the two counter inits -- says the bound is in
+  the test, and `move t0,v0 / li a3,-1` says it is a local.
+  `func_800A304C` in `src/battle/battle.c`.
+  The guard is load-bearing in both directions: without it there is no earlier
+  load for cse to copy from, and with *both* an explicit guard and a `for`
+  loop the two zero-trip tests are not folded and you get a duplicate `blez`
+  (+1 instruction). Guard plus `do`/`while` is the shape that gives one test
+  and one copy.
 * **Wrong compiler** — check the `//!` header (see *Compiler selection*).
 
 The `$at` rematerialisation wall this section used to call unsolved -- gcc

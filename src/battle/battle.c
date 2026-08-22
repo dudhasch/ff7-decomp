@@ -166,7 +166,38 @@ static Unk800FA9D0* func_800A2FD0(void) {
     return ptr;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A304C);
+// Keep only the newest active record per D_800F9F3C slot: walk the record
+// table and, whenever two live records claim the same slot, clear bit 4 on
+// the older one.
+void func_800A304C(void) {
+    s32 slot[10];
+    u8 unusedLocals[8]; /* identity not recoverable; the target frame is 0x30 */
+    s32 fill;
+    s32 i;
+    s32 who;
+    s32 prev;
+
+    fill = -1;
+    for (i = 9; i >= 0; i--) {
+        slot[i] = fill;
+    }
+    if (D_800F3948 > 0) {
+        i = 0;
+        do {
+            who = D_800FA9D0[i].unk0;
+            if (who != -1) {
+                if (D_800FA9D0[i].unk4 & 4) {
+                    prev = slot[who];
+                    if (prev != -1) {
+                        D_800FA9D0[prev].unk4 &= 0xFFFB;
+                    }
+                    slot[who] = i;
+                }
+            }
+            i++;
+        } while (i < D_800F3948);
+    }
+}
 
 static Unk800F9F3C* func_800A311C(Unk800FA9D0* arg0) {
     Unk800F9F3C* ptr = &D_800F9F3C[D_800F394C];
