@@ -3715,6 +3715,12 @@ refuse every real match. And all thirteen are converted to `MASPSX_OVERRIDE`,
 which is byte-neutral — the build stays green because both macros assemble the
 same `.s`. **Spell a park `MASPSX_OVERRIDE` and nothing else.**
 
+`unpark.py` refuses on this spelling too, so a body parked that way cannot even
+be measured by hand without editing the source first. The check that costs
+nothing, before believing any file's park count: `grep -n 'INCLUDE_ASM' <file>`
+and look at what surrounds each hit — a genuinely unfinished function has no
+`#ifndef NON_MATCHINGS` above it and no `#else` body below.
+
 **A diff that stops early.** `diff.py --max-lines` defaults to **1024**, and it
 truncates silently: on a longer function the tail simply never enters the
 comparison, so it can differ freely while the visible rows look perfect.

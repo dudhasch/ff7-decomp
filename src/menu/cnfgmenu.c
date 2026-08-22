@@ -488,8 +488,41 @@ void func_801D069C(void) {
 // `unkA * 3 + unkB * 6` index, which the target recomputes each iteration
 // (181); calling func_801D0040 before the increment in the ATB case; merging
 // `corner` into `value`; and the declaration order of `value` and `setting`.
+//
+// THE BARRIER AXIS IS ALSO CLOSED (added after the note above). Neither pair
+// had ever been probed with `do { } while (0);`, which emits nothing and only
+// ends a basic block, so it is the one lever that can move a *scheduling*
+// residue without touching an allocno. Measured, baseline 4:
+//
+//   * ATB pair: barrier before the increment 4, after it 4 -- exactly inert,
+//     both of them. By CLAUDE.md's own probe rule that says the residue is not
+//     reachable by source position at all, which corroborates the height
+//     argument above rather than resting on it. (`setting = value;` moved
+//     ahead of the call, to lengthen the increment's chain by the edge the
+//     note says it cannot buy, is 6.)
+//
+//   * case 2 pair: a barrier after `rect.x = 0;` with the store written first
+//     *does* put it where the target has it -- row 250 matches -- and is the
+//     only thing found that does. It costs more than it buys: the y store
+//     becomes the lowest-LUID insn of the block behind the barrier and lands
+//     ahead of the call's arguments in its place, so the block is now two
+//     stores early instead of one, total 5. The remaining field order is a
+//     dead axis there (ywh 5, hwy/wyh/yhw 6, hyw/why 7), `*(s16*)&rect = 0;`
+//     for a non-struct MEM is 5 with the barrier and 6 without, `pr->x = 0;`
+//     with the barrier is 15, and plain x-first with no barrier is 6.
+//
+//   * The conserved pair survives a barrier too: with `rect.x = 0;` sunk to
+//     the end of the loop body (4, as recorded above), a barrier after the
+//     sunk store is *exactly* 4 and one before it is 6. So reorg is not
+//     taking the store across a block boundary it could be denied -- the
+//     store and `addiu s2,s2,0xc` are in the same block whatever is written
+//     between them, and the conservation is real.
+//
+// What this leaves: the case-2 pair is one store that has to be in the block
+// and ahead of the arguments while its three siblings stay behind them, and
+// no construct is known that isolates one store without promoting the next.
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
+MASPSX_OVERRIDE("asm/us/menu/nonmatchings/cnfgmenu", func_801D080C);
 #else
 void func_801D080C(s32 arg0) {
     RECT window;
