@@ -1239,7 +1239,23 @@ static void func_800D41FC(MATRIX* arg0, MATRIX* arg1, MATRIX* arg2) {
     MulMatrix(arg2, arg1);
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4284);
+// Project arg0 through the battle camera into arg2's translation column, then
+// push it arg1/4096 of the way along its own direction.
+MATRIX* func_800D4284(SVECTOR* arg0, s32 arg1, MATRIX* arg2) {
+    VECTOR sp10;
+    long sp20;
+
+    SetRotMatrix(&D_800FA63C.m);
+    SetTransMatrix(&D_800FA63C.m);
+    RotTrans(arg0, (VECTOR*)&arg2->t[0], &sp20);
+    if (arg1 != 0) {
+        VectorNormal((VECTOR*)&arg2->t[0], &sp10);
+        arg2->t[0] = ((arg1 * sp10.vx) >> 12) + arg2->t[0];
+        arg2->t[1] = ((arg1 * sp10.vy) >> 12) + arg2->t[1];
+        arg2->t[2] = ((arg1 * sp10.vz) >> 12) + arg2->t[2];
+    }
+    return arg2;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4368);
 
@@ -1255,7 +1271,34 @@ static void func_800D4484(u_long* ot, u16 tpage) {
 const s32 D_800A0DB8[] = {0x00000000, 0xFFFFF000, 0x00000000, 0x00000000};
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D44E8);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D461C);
+// Re-orthonormalise a 3x3 rotation in place: normalise the middle column,
+// build the first from its perpendicular in the XY plane, and take the third
+// as their cross product.
+void func_800D461C(MATRIX* m) {
+    VECTOR sp10;
+    VECTOR sp20;
+    VECTOR sp30;
+
+    sp20.vx = m->m[0][1];
+    sp20.vy = m->m[1][1];
+    sp20.vz = m->m[2][1];
+    VectorNormal(&sp20, &sp20);
+    m->m[0][1] = sp20.vx;
+    m->m[1][1] = sp20.vy;
+    m->m[2][1] = sp20.vz;
+    sp10.vx = sp20.vy;
+    sp10.vy = -sp20.vx;
+    sp10.vz = 0;
+    VectorNormal(&sp10, &sp10);
+    m->m[0][0] = sp10.vx;
+    m->m[1][0] = sp10.vy;
+    m->m[2][0] = sp10.vz;
+    OuterProduct12(&sp10, &sp20, &sp30);
+    VectorNormal(&sp30, &sp30);
+    m->m[0][2] = sp30.vx;
+    m->m[1][2] = sp30.vy;
+    m->m[2][2] = sp30.vz;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D4710);
 
