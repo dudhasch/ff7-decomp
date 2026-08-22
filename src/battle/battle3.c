@@ -308,7 +308,41 @@ void func_800DE3CC(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DE46C);
+void func_800DE46C(void) {
+    Unk80166F78* row;
+    Unk80166F78* entry;
+
+    if (D_800F977C == 0) {
+        func_800BB9B8(2);
+        D_800F977C = 1;
+    }
+    row = D_80166F78[D_80158CFC];
+    if ((D_800F3896 == 0x13) && (D_800F99E4 == 0)) {
+        func_800264A8(&D_800F92E2);
+        if (D_80062D7E & 0x20) {
+            D_800F99E4 = 1;
+            /* The scaled index has to be the first operand of the sum: as
+               `&row[...]` fold puts the pointer first and emits
+               `addu s0,s0,v0` where the target has `addu s0,v0,s0`. */
+            entry = (Unk80166F78*)((D_800F92E2.unkB + D_800F92E2.unk2) * 6 +
+                                   (s32)row);
+            if (!(entry->flags & 2)) {
+                func_800BB9B8(1);
+                D_800F389C = 0x20;
+                D_800F389E = entry->unk0;
+                D_801516F8 = D_8016375E;
+                if (entry->unk1 == 0) {
+                    D_800F3894 = 0x13;
+                    D_800F3896 = 0;
+                    D_800F38A2 = entry->unk2;
+                    func_800E6B94();
+                }
+            } else {
+                func_800BB9B8(3);
+            }
+        }
+    }
+}
 
 void func_800DE5D8(void) {}
 
