@@ -2,7 +2,7 @@
  "units": [
   {
    "unit": "field.c",
-   "lines": 2381,
+   "lines": 2681,
    "bodies": 13,
    "matching": 10,
    "parked": 3,
@@ -11,10 +11,10 @@
   },
   {
    "unit": "field2.c",
-   "lines": 5904,
+   "lines": 6023,
    "bodies": 46,
-   "matching": 37,
-   "parked": 9,
+   "matching": 38,
+   "parked": 8,
    "include_asm": 0,
    "handwritten": 0
   },
@@ -29,16 +29,16 @@
   },
   {
    "unit": "field4.c",
-   "lines": 10652,
+   "lines": 10507,
    "bodies": 259,
-   "matching": 251,
-   "parked": 8,
+   "matching": 256,
+   "parked": 3,
    "include_asm": 14,
    "handwritten": 14
   },
   {
    "unit": "field5.c",
-   "lines": 3116,
+   "lines": 3214,
    "bodies": 91,
    "matching": 89,
    "parked": 2,
@@ -47,10 +47,10 @@
   }
  ],
  "totals": {
-  "lines": 22238,
+  "lines": 22610,
   "bodies": 411,
-  "matching": 389,
-  "parked": 22,
+  "matching": 395,
+  "parked": 16,
   "include_asm": 20,
   "handwritten": 20,
   "functions": 431
@@ -58,21 +58,26 @@
  "handwritten_insns": 10732,
  "naming": {
   "globals_total": 203,
-  "globals_refs": 1192,
-  "renameable": 11,
+  "globals_refs": 1191,
+  "renameable": 16,
   "renameable_strings": 4,
-  "renameable_real": 7,
+  "renameable_real": 12,
   "renameable_names": [
+   "D_800722C4",
+   "D_8007E770",
    "D_8007EBCC",
    "D_8007EBDC",
+   "D_800831FC",
    "D_8009A15C",
    "D_8009A162",
    "D_8009ABF6",
    "D_8009AC2F",
-   "D_8009AC30"
+   "D_8009AC30",
+   "D_8009D820",
+   "D_801144D8"
   ],
-  "locked": 192,
-  "locked_by_parked_only": 186,
+  "locked": 187,
+  "locked_by_parked_only": 181,
   "locked_by_handwritten": 6,
   "unnamed_functions": 22,
   "m2c_locals": 0,
