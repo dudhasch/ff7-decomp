@@ -2686,7 +2686,32 @@ s32 func_800B1C1C(s32 arg0) {
     return (result & 0xFFFF) != 0;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B1C94);
+// Collapse operand bank arg0 back to a single value: take the first variable
+// its live-slot mask names, then broadcast it over all ten slots and mark them
+// all live again.
+s32 func_800B1C94(s32 arg0) {
+    s32 result = 0;
+    s32 mask;
+    s32 val;
+    s32 i;
+
+    if (D_800F4AC4->unk18[arg0] == 2) {
+        val = 0;
+        mask = D_800F4AC4->unk28[arg0];
+        for (i = 0; i < 10; i++) {
+            if ((mask >> i) & 1) {
+                val = D_800F4AC4->var[arg0][i];
+                break;
+            }
+        }
+        D_800F4AC4->unk28[arg0] = 0x3FF;
+        for (i = 9; i >= 0; i--) {
+            D_800F4AC4->var[arg0][i] = val;
+        }
+        result = 1;
+    }
+    return result;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B1D48);
 
