@@ -2661,7 +2661,27 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7228);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7480);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7620);
+void func_800B7620(s32* arg0, s32* arg1, s32* arg2) {
+    s32 flags;
+    u16* p;
+
+    if (arg0 != NULL) {
+        *arg0 = D_8011626C;
+    }
+    if (arg1 != NULL) {
+        *arg1 = D_80116270;
+    }
+    if (arg2 != NULL) {
+        flags = D_80116274;
+        if (D_80116278 != 0) {
+            flags |= 0x20000000;
+        }
+        *arg2 = flags;
+    }
+    p = &D_8009D2A6;
+    *p |= 0x300;
+    func_800B7480();
+}
 
 void func_800B76A8(void) {
     u32 var_a0;
