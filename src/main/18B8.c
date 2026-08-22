@@ -882,7 +882,17 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800197B8);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019978);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80019D1C);
+void func_80019E84(u8, u8);
+void func_80019D1C(u8 arg0, u8 arg1, s32 arg2) {
+    u8 temp_s1;
+    u8 temp_a0;
+
+    temp_s1 = arg1;
+    temp_a0 = func_8001AC9C(temp_s1, arg2);
+    if (arg0 == 1) {
+        func_80019E84(temp_a0, temp_s1);
+    }
+}
 
 void func_80019D74(u8 arg0, u8 arg1) {
     if (arg1 == 0xB) {
