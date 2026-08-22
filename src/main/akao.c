@@ -535,7 +535,28 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A094);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A28C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A43C);
+void func_8002A43C(void) {
+    Unk80096608* p;
+    u16 i;
+    s32 keep;
+
+    for (p = (Unk80096608*)D_80099788, i = 0x30; i < 0x38; i++, p++) {
+        if (p->unk54 != 2) {
+            p->unk56 = 0x204;
+            p->unk0 = D_80049C40;
+        }
+    }
+    if (D_80099E0C == 2) {
+        D_80099FD0 &= 0xC00000;
+        D_80099FD4 &= 0xC00000;
+        keep = D_80099FD8 & 0xFF3FFFFF;
+        D_80099FD8 = keep & g_AkaoChannelMask[0];
+    } else {
+        D_80099FD0 = 0;
+        D_80099FD4 = 0;
+        D_80099FD8 = g_AkaoChannelMask[0];
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A510);
 
