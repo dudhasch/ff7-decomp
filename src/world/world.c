@@ -138,7 +138,20 @@ static s32 func_800A1DE0(void) { return D_800E5634; }
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A1DF0);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A1FAC);
+void func_800A1FAC(SVECTOR* arg0) {
+    MATRIX m;
+    SVECTOR v;
+    VECTOR out;
+    long flag;
+
+    v = *arg0;
+    v.vy = -D_80116508;
+    SetRotMatrix(&D_800E5698);
+    SetTransMatrix(&D_800E56B8);
+    RotTrans(&v, &out, &flag);
+    TransMatrix(&m, &out);
+    SetTransMatrix(&m);
+}
 
 void func_800A2040(void) {
     SetRotMatrix(&D_800E5698);
