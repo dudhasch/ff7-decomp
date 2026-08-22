@@ -29,6 +29,25 @@ The scan is linear over the disassembly, so it can over-report on a function
 whose only write to a register sits below a backward branch into code above
 it. A hit is a lead to confirm by reading, not a verdict. It does not
 under-report: a register with no write anywhere is always flagged.
+
+Confirming a hit takes one grep -- find who branches to the flagged block:
+
+    grep -n '<0x-of-the-block> <' <dis>      # e.g. "367c <"
+
+`FieldDialogCopyTextFromField` in `src/field/field5.c` is the worked example
+of the false positive: it reads `$s6` at 0x3684 and `$s8` at 0x3698 where the
+writes are at 0x3748 and 0x3740, and the block looks unreachable because the
+instruction above it is the delay slot of a `j`. It is reached, by a `beq` at
+0x3824 -- below both definitions. Nothing to fix. A *real* hit has no branch
+into it from below the write, which is what makes `AddBackgroundToRender`'s
+`0($s3)` a bug: nothing in the function writes `$s3` at all.
+
+Run it across a whole unit by compiling with `-DNON_MATCHINGS`, which unparks
+every body at once. The offsets are wrong in that configuration (each parked
+body is a different length than its `.s`) and that does not matter here -- an
+undefined register read is visible whatever the neighbours do. All five
+`src/field/*.c` units were audited that way; only the false positive above
+came back.
 """
 import re
 import sys
