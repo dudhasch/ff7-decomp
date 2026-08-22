@@ -3033,7 +3033,23 @@ void func_800B6C84(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6D10);
+void func_800B6D10(void) {
+    s32 off;
+    s32 i;
+    s32 k;
+    s8 c;
+
+    D_80115A50 = 1;
+    off = (((u32*)D_80115A40)[2] >> 2) * 4 + 4;
+    D_80115A44 = off + D_80115A40;
+    for (i = 0x20, k = -9; i < 0x2B; i++, k++) {
+        c = i - 0x13;
+        D_80115A11[k] = c;
+        if (c >= 0 && k >= 0 && k < 2) {
+            func_800B624C(i, 0);
+        }
+    }
+}
 
 void func_800B6DCC(void) {
     if (D_80115A60 != 0) {
