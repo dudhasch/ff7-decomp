@@ -2460,7 +2460,13 @@ void func_800B76A8(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7714);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B77A8);
+void func_800B77A8(s32 arg0) {
+    if (arg0 & 0x40000000) {
+        func_800B7714(0x2100);
+    }
+    D_8011626C = 1;
+    D_80116274 = arg0;
+}
 
 void func_800B77F4(s32 arg0) {
     D_8009D268[0] = arg0;
