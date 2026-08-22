@@ -1417,7 +1417,16 @@ void func_80032500(AKAO_TRACK* track) {
     track->transpose = (s8)*track->addr++ + track->transpose;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8003252C);
+void func_8003252C(AKAO_TRACK* track) {
+    s32 steps;
+
+    steps = *track->addr++;
+    track->pitch_slide_steps = steps;
+    if (steps == 0) {
+        track->pitch_slide_steps = 0x100;
+    }
+    track->key_add = (s8)*track->addr++;
+}
 
 void func_8003257C(AKAO_TRACK* track) {
     u8 val = *track->addr++;
@@ -1443,7 +1452,21 @@ void func_800325E8(AKAO_TRACK* track) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032614);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032718);
+void func_80032718(AKAO_TRACK* track) {
+    u32 raw;
+    s32 base;
+    s32 depth;
+
+    raw = *track->addr++ << 8;
+    base = track->pitch_base;
+    track->vibrato_depth = raw;
+    depth = (raw & 0x7F00) >> 8;
+    if (raw & 0x8000) {
+        track->unk7C = (depth * base) >> 7;
+    } else {
+        track->unk7C = (depth * ((base * 16 - base) >> 8)) >> 7;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032770);
 
