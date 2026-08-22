@@ -3815,6 +3815,28 @@ defines the old `D_` label. And `symbols.*.us.txt` is parsed strictly: a comment
 containing a `:` is rejected with `error reading config/symbols.field.us.txt,
 line N`, so keep the prose colon-free and put `// size:0xN` on its own.
 
+**And it must *not* also go in `symbols.main.us.txt`, however natural that
+looks.** splat reads that file and the linker script for the same overlay, so
+naming a main-owned symbol in both makes it see one name at one vram twice and
+the split dies before anything compiles:
+
+```
+error reading config/sym_extern.us.txt, line 100:
+Duplicate symbol detected! g_PreemptiveRate clashes with g_PreemptiveRate
+  defined at vram 0x80062F1B.
+```
+
+The tempting fix -- put it only in `symbols.main.us.txt`, so main's own
+regenerated `.s` picks the name up too -- does not link: the name reaches
+main.elf but not `sym_export.us.txt`, so every *other* overlay's C fails with
+`undefined reference`. Both failure modes were hit in order while naming
+`g_PreemptiveRate`, `g_AkaoChannelMask` and `g_AkaoPendingMask`. The
+combination that works is the `g_FieldMusicLock` one and only that one:
+`sym_extern.us.txt` defines the address for every link, plus a
+`symbols.<ovl>.us.txt` entry for each overlay whose *assembly* should print the
+new name. main's own `.s` keeps the `D_` label, which is harmless -- both names
+resolve to the same address, and the overlay SHA-1s are the proof.
+
 ## Repository map
 
 | Path | Contents |

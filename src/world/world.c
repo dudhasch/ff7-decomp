@@ -2310,13 +2310,13 @@ s32 func_800B7B54(void) {
 s32 func_800B7B78(void) {
     s32 var_v1;
 
-    var_v1 = D_80062F1B & 0x7F;
+    var_v1 = g_PreemptiveRate & 0x7F;
     if (var_v1 >= 0x11)
         var_v1 *= 2;
     return var_v1;
 }
 
-u8 func_800B7BA0(void) { return D_80062F1B >> 7; }
+u8 func_800B7BA0(void) { return g_PreemptiveRate >> 7; }
 
 static u8 func_800B7BB0(void) { return D_80062F1A; }
 

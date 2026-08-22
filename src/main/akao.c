@@ -222,7 +222,7 @@ extern s32 D_80097768;
 extern s32 D_80097870;
 extern Unk80096608 D_80099868[];
 extern Unk80099788 D_80099788[];
-extern s32 D_80099FCC[];
+extern s32 g_AkaoChannelMask[];
 extern s32 D_80099FD8;
 extern s32 D_80099FDC;
 extern s32 g_AkaoNoiseMask;
@@ -230,7 +230,7 @@ extern s32 g_AkaoReverbMask;
 extern s32 g_AkaoPitchLfoMask;
 extern u16 D_8009A14E;
 extern s32 D_8009A104;
-extern s32 D_8009A108;
+extern s32 g_AkaoPendingMask;
 extern s32 D_8009A10C;
 extern s32 D_8009A110;
 extern s32 D_8009A114;
@@ -371,9 +371,9 @@ static void SoundChannelInit(AKAO_TRACK* arg0, u8* arg1) {
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80029C48);
 
 // Merges newly-requested bits (D_8009A128/D_8009A12C) into the pending mask
-// D_8009A108, then for each set bit points the matching D_80096608 slot at the
-// default D_80049C40 sample and marks it (unk56 = 0x204), clearing the request
-// bits as it goes.
+// g_AkaoPendingMask, then for each set bit points the matching D_80096608 slot
+// at the default D_80049C40 sample and marks it (unk56 = 0x204), clearing the
+// request bits as it goes.
 static void func_80029E98(void) {
     s32 mask;
     s32 bit;
@@ -381,7 +381,7 @@ static void func_80029E98(void) {
     s32 req0;
     s32 req1;
 
-    if (D_8009A108 != 0) {
+    if (g_AkaoPendingMask != 0) {
         slot = D_80096608;
         bit = 1;
         req0 = D_8009A128;
@@ -391,9 +391,9 @@ static void func_80029E98(void) {
         D_8009A110 = 0;
         D_8009A10C = 0;
         req0 |= req1;
-        mask = D_8009A108;
+        mask = g_AkaoPendingMask;
         mask |= req0;
-        D_8009A108 = mask;
+        g_AkaoPendingMask = mask;
         D_8009A114 |= mask;
         do {
             if (mask & bit) {
@@ -1044,7 +1044,7 @@ static void AkaoF8StreamReverbMaskClear(void) {
     s32 temp_v1;
 
     func_8002CFC0();
-    addr = D_80099FCC;
+    addr = g_AkaoChannelMask;
     temp_a0 = g_AkaoReverbMask;
     temp_v1 = ~D_80062F00;
     *addr &= temp_v1;
@@ -1056,10 +1056,10 @@ static void AkaoF9StreamReverbMaskRestore(void) {
     s32 temp_a0;
 
     func_8002CFC0();
-    temp_a0 = D_80099FCC[0];
-    D_80099FCC[0] = ~D_80062F00 & temp_a0;
+    temp_a0 = g_AkaoChannelMask[0];
+    g_AkaoChannelMask[0] = ~D_80062F00 & temp_a0;
     g_AkaoReverbMask |= D_80062F00;
-    func_80030038(temp_a0, D_80099FCC, D_80062F00);
+    func_80030038(temp_a0, g_AkaoChannelMask, D_80062F00);
 }
 
 static void func_8002CF78(void) { func_80029A50(); }

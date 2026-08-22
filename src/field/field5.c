@@ -571,8 +571,8 @@ s32 OpcodeFuncChmst(void) {
     if (g_DebugLevel & 3) {
         DebugPrintOpcode("chmst", 2);
     }
-    state = D_8009A108 != 0;
-    if (D_80099FCC[0] != 0) {
+    state = g_AkaoPendingMask != 0;
+    if (g_AkaoChannelMask[0] != 0) {
         state |= 2;
     }
     FieldEventWriteMemoryU8(2, 2, state);
@@ -2068,7 +2068,7 @@ void InitFieldDebugPages(void) {
     AddStrNextDebugRow(4, &D_800E0628);
     FieldDebugPageHide(4);
     FieldDebugPageInit(3, 0x6C, 0xA4, 0x6C, 0x5C);
-    AddStrNextDebugRow(3, &D_800E0630);
+    AddStrNextDebugRow(3, &g_FieldDebugWordLabel);
     FieldDebugPageHide(3);
     FieldDebugPageInit(1, 0, 0, 0x6C, 0xCA);
     AddStrNextDebugRow(1, &D_800E0628);

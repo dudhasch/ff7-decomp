@@ -89,7 +89,7 @@ extern char g_FieldDebugDigits[16]; // '0' to 'F' for hex digits
 extern char D_800A0270[4];
 extern s32 (*g_FieldOpcodes[256])(void);
 extern s8 D_800E0628;
-extern s8 D_800E0630;
+extern s8 g_FieldDebugWordLabel;
 extern u16 g_FieldBGCameraHeightBias; // camera height bias applied to the
                                       // tracked entity
 extern volatile u8
@@ -211,8 +211,8 @@ extern u8 g_CharIdToEntity[];
 extern FieldState g_FieldStateData;
 extern u8 g_FieldRandListIndex;
 extern u8 g_FieldRandListOffset;
-extern s32 D_8009A108;
-extern s32 D_80099FCC[];
+extern s32 g_AkaoPendingMask;
+extern s32 g_AkaoChannelMask[];
 extern u8 g_FieldCameraMatrixSel;
 extern u8 g_FieldAnimLock;
 extern u8 g_FieldAnimFreeze;

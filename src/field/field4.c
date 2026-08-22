@@ -2957,7 +2957,7 @@ void DebugPrintOpcode(char* name, u32 numArgs) {
         !g_FieldScriptDebugEntities[g_CurrentEntity]) {
         return;
     }
-    FieldDebugStringCopy(g_DebugText, &D_800E0630);
+    FieldDebugStringCopy(g_DebugText, &g_FieldDebugWordLabel);
     FieldDebugStringConcat(g_DebugText, name);
     if (g_DebugLevel & 1) {
         SetStrToDebugRow(3, 0, g_DebugText);

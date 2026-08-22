@@ -791,7 +791,7 @@ extern s32 D_80062DCC;
 extern s8 _D_80062DFD;
 extern u8 g_EncounterRateModifier; // Enemy Lure/Away Modifier
 extern u8 D_80062F1A;
-extern u8 D_80062F1B;
+extern u8 g_PreemptiveRate;
 extern Gpu D_80062F24;
 extern u16 D_80062F3C;
 extern s32 D_80062F58;

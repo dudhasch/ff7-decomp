@@ -3472,8 +3472,8 @@ const u32 D_800A00DC[] = {0x00000000};
  * below: an extern that only exists in a NON_MATCHINGS arm is not compiled
  * into the matching build, so gcc substitutes 0 for the identifier, keeps
  * generating code, and the assembler at the end of the pipe still exits 0. */
-extern u8 D_800DF08C[];
-extern u8 D_800DF0D4[];
+extern u8 g_FieldGlobalModelFiles[];
+extern u8 g_FieldGlobalTexFile[];
 extern u8* D_800E0204;
 
 /* The per-field model-file table: one 24-byte record per field, of which the
@@ -3532,8 +3532,8 @@ void FieldModelLoadAndInit(void) {
             (u_long*)0x801B0000, NULL);
     while (SystemCdromReadChain() != 0) {
     }
-    ((u8**)0x1F800000)[0] = D_800DF08C;
-    ((u8**)0x1F800000)[1] = D_800DF0D4;
+    ((u8**)0x1F800000)[0] = g_FieldGlobalModelFiles;
+    ((u8**)0x1F800000)[1] = g_FieldGlobalTexFile;
     g_FieldModelBufferTop = (u32)FieldModelLoadGlobalModels(
         (FieldModelFileDesc*)D_8007E770, g_FieldModelData,
         (u8*)g_FieldModelBufferTop, 1);
@@ -4245,7 +4245,7 @@ void FieldBattleCheck(void) {
         if ((control & 1) && g_FieldMovieStreamActive == 0 && D_8009AC2F == 0) {
             D_8007173C += (s32)g_FieldEntity[g_PlayerModelId].MoveSpeed /
                           (s32)(control >> 8);
-            if (FieldGetRandomU8FromList() < (D_80062F1B & 0x7F)) {
+            if (FieldGetRandomU8FromList() < (g_PreemptiveRate & 0x7F)) {
                 D_800716D0 = 4;
             } else {
                 D_800716D0 = 0;
@@ -4257,7 +4257,7 @@ void FieldBattleCheck(void) {
                 D_8007EBC8 = 1;
                 roll = FieldGetNextRandomU8();
                 roll >>= 2;
-                if (!(D_80062F1B & 0x80)) {
+                if (!(g_PreemptiveRate & 0x80)) {
                     sum = (s32)(enc->special[0] << 16) >> 26;
                 } else {
                     sum = (s32)(enc->special[0] << 16) >> 27;
@@ -4267,7 +4267,7 @@ void FieldBattleCheck(void) {
                     formation = enc->special[0] & 0x3FF;
                     goto found;
                 }
-                if (!(D_80062F1B & 0x80)) {
+                if (!(g_PreemptiveRate & 0x80)) {
                     rate = (s32)(enc->special[1] << 16) >> 26;
                 } else {
                     rate = (s32)(enc->special[1] << 16) >> 27;
@@ -4284,7 +4284,7 @@ void FieldBattleCheck(void) {
                     D_8009ABF6 = (total = slot) & 0x3FF;
                     return;
                 }
-                if (!(D_80062F1B & 0x80)) {
+                if (!(g_PreemptiveRate & 0x80)) {
                     rate = (s32)(enc->special[3] << 16) >> 26;
                 } else {
                     rate = (s32)(enc->special[3] << 16) >> 27;

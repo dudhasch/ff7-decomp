@@ -97,3 +97,6 @@ D_800A08D0 = 0x800A08D0;
 g_EncounterRateModifier = 0x80062F19;
 g_FieldLastBattleFormationId = 0x8007E774;
 g_FieldScriptHalted = 0x80095DCC;
+g_PreemptiveRate = 0x80062F1B;
+g_AkaoChannelMask = 0x80099FCC;
+g_AkaoPendingMask = 0x8009A108;
