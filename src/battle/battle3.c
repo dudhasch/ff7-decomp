@@ -814,7 +814,33 @@ void func_800DFFE4(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E010C);
+void func_800E010C(void) {
+    Unk80026448* menu;
+    u8* list;
+
+    list = &D_8009D8F8[D_800F38A1 * 0x440];
+    menu = (Unk80026448*)&D_800F910E[D_800F38A1];
+    if ((D_800F3896 == 0x18) && (D_800F99E4 == 0)) {
+        func_800264A8(menu);
+        if (D_80062D7E & 0x20) {
+            func_800BB9B8(1);
+            D_800F38A2 = *(list + menu->unkB + 3);
+            D_800F389E = *(list + menu->unkB);
+            D_800FAFD4 = (s8)(u8)menu->unkB;
+            func_800E6B94();
+            D_800F3894 = 0x18;
+            D_800F3896 = 0;
+            D_800F99E4 = 1;
+            return;
+        }
+        if (D_80062D7E & 0x40) {
+            func_800BB9B8(4);
+            D_800F99E4 = 1;
+            D_800F3896 = 1;
+            func_800D9F5C(0x18);
+        }
+    }
+}
 
 void func_800E026C(void) {}
 
