@@ -474,5 +474,10 @@ extern u8 D_800BF5F0[];
 extern u16 D_80116508;
 extern u32 D_8014A608;
 extern u8* D_8014A610;
+extern u8 D_800C6648[];
+extern u8 D_800C6940;
+extern u8 D_800C6A10[];
+extern u8 D_800E56DC[];
+extern u8 D_8010B434[];
 
 #endif

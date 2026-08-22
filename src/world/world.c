@@ -320,7 +320,55 @@ s32 func_800A40F0(s16 arg0) {
     return 0;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A4138);
+/* 3 rows at the exact 44 instructions, and all three are the same fact:
+ * `combine_givs` bases the loop's address giv on `D_800C6648 + 7` -- the
+ * last offset referenced in insn order -- and stores at `-4(s0)` / `0(s0)`,
+ * where the target keeps the plain biv at `D_800C6648 + 0` and stores at
+ * `3(s0)` / `7(s0)`. The target strength-reduces nothing in this loop: all
+ * three of its registers (`p`, the SetDrawMode byte offset, the counter) are
+ * bivs, and no spelling found leaves gcc's giv analysis alone.
+ *
+ * Measured, all against this 3-row body: swapping the two stores moves the
+ * base to +3 and is 5; `&D_800C6648[i * 0x14]` recomputed at the loop top is
+ * 14 and +2 instructions, with a separate byte offset 14 as well; indexing
+ * both stores off the counter (`D_800C6648[i * 0x14 + 3]`) is 29; writing
+ * the SetDrawMode argument as `i * 0xC` rather than a walked offset is 8;
+ * the three increments moved into a comma expression in the `while` is 5;
+ * `volatile` at the two use sites 4 and on the pointer's target 4, on the
+ * pointer itself 34. Declaration order is inert (3 either way).
+ *
+ * Re-basing cannot reach it by construction: the giv base is
+ * `symbol + <last offset>`, so putting it at the symbol needs a store at
+ * offset 0, which the function does not have.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world", func_800A4138);
+#else
+void func_800A4138(void) {
+    s32 i;
+    s32 off;
+    u8* p;
+    s32 tpage;
+
+    i = 0;
+    off = 0;
+    p = D_800C6648;
+    D_800E56F4 = 0;
+    do {
+        p[3] = 4;
+        p[7] = 0x64;
+        if (GetGraphType() == 1 || GetGraphType() == 2) {
+            tpage = 0x29;
+        } else {
+            tpage = 0x19;
+        }
+        SetDrawMode((DR_MODE*)(off + (s32)D_800E56DC), 0, 0, tpage, NULL);
+        off += 0xC;
+        i++;
+        p += 0x14;
+    } while (i < 2);
+}
+#endif
 
 void func_800A41E8(s32 arg0) {
     switch (arg0) {
