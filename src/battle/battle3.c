@@ -503,7 +503,16 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E05E4);
 
 void func_800E078C(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800E0794);
+void func_800E0794(void) {
+    s32 i;
+
+    func_80026448((Unk80026448*)&D_800F9144, 0, 0, 2, 1, 0, 0, 2, 1, 0, 0, 1, 0, 0);
+    for (i = 1; i < 0x20; i++) {
+        if ((i != 9) && (D_800F514C[i] != 0)) {
+            func_800D9F5C(i);
+        }
+    }
+}
 
 void func_800E084C(void) {
     if (D_800F3896 == 9) {
