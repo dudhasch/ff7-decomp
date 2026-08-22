@@ -1995,7 +1995,17 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AEA48);
 
 void func_800AF0A0(s32 arg0) { D_8010B174 = arg0; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF0B0);
+void func_800AF0B0(void) {
+    s32 i;
+    s32 off;
+
+    for (i = 0, off = 0; i < 0x10; off += 0x24, i++) {
+        *(u8*)(((u8*)D_8010B178 + 0x13) + off) = 0;
+        *(s32*)(((u8*)D_8010B178 + 4) + off) = 0;
+    }
+    D_8010B3B8 = NULL;
+    func_800AF110();
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF110);
 
