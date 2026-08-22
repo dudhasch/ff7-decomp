@@ -377,5 +377,27 @@ extern u8 D_80115A14[];
 extern s16 D_80116288;
 extern s16 D_8011628C;
 extern s16 D_800832A0;
+extern s8 D_800C752C;
+extern u8 D_800C8564[];
+extern s16 D_800C68E8[];
+extern s16 D_800C68FC[];
+extern s16 D_800C6910[];
+extern u8 D_800CC564[];
+extern s32 D_800D05DC;
+extern s32 D_800D05E0;
+extern s32 D_800D05E4;
+extern s32 D_800E580C;
+extern s32 D_800E5810;
+extern u8 D_80109A38[];
+extern u8* D_80109D38;
+extern s32 D_80109D40;
+extern u8 D_8010CB24[];
+extern s32 D_8010D930;
+extern u8* D_8010D9A4;
+extern s32 D_8010D9A8;
+extern s32 D_8010D9AC;
+extern s32 D_8010D9B0;
+extern s32 D_8010D9B4;
+extern s16 D_80116290;
 
 #endif

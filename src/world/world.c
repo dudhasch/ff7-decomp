@@ -2239,7 +2239,42 @@ s32 func_800B3350(void) {
            (D_8010CB14 << 0x18);
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B338C);
+/* 21 rows, 33 against the target's 35 instructions. The residue is block
+ * order: the target emits all six comparisons first and the three `r = X`
+ * arms after them in reverse source order, with `li a3,0x4` shared between
+ * the two `arg0 == 4` tests and `move a2,zero` in the second test's branch
+ * delay slot. Every spelling measured keeps the arms interleaved with the
+ * tests instead: if/else-if chain 37/+2, three plain `if`s 27, `else { r =
+ * NULL; }` 32, three `return`s 34, a literal goto chain reproducing the
+ * target's block order 24, nested `if (arg0 == 5) { if (arg1 == ...) }` 21
+ * (this body, -2 instructions), and `s32` parameters with `(s16)` casts at
+ * every use 24. Re-measured after every other function in the unit matched,
+ * so the numbers are not address-shift artifacts.
+ * The if/else-if form is +2 because it copies both parameters (`move a3,a0`
+ * / `move t0,a1`) where the target re-extends them from `$a0`/`$a1`; that
+ * copy is what the extra register pressure from an early `r = NULL` buys.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world", func_800B338C);
+#else
+s16* func_800B338C(s16 arg0, s16 arg1) {
+    s16* r;
+
+    r = NULL;
+    if (arg0 == 5) {
+        if (arg1 == 0x12) {
+            r = D_800C68E8;
+        }
+    } else if (arg0 == 4) {
+        if (arg1 == 0x11) {
+            r = D_800C68FC;
+        } else if (arg1 == 0xE) {
+            r = D_800C6910;
+        }
+    }
+    return r;
+}
+#endif
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B3418);
 
