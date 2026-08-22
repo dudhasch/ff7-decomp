@@ -2267,6 +2267,27 @@ a near-miss, in rough order of frequency:
   statements — the parameter load first, then the base — which is the same
   `scan_loop` ordering lever as the bullet above, applied to a straight-line
   block instead of a loop.
+* **`p + i * 4` and `p + (i << 2)` are the same arithmetic and put the `addu`'s
+  operands the other way round.** The bullet below says fold ranks the more
+  complex operand first and that a named local is the way out; there is a
+  second way out that costs nothing and does not create an induction
+  variable. A `MULT_EXPR` outranks the pointer, so `base + i * 4` emits
+  `addu <idx>,<base>`; an `LSHIFT_EXPR` ties with it, source order stands,
+  and you get `addu <base>,<idx>`. All three of `func_800D08B8`,
+  `func_800D0958` and `func_800D09D0` in `src/battle/battle2.c` are 2-9 rows
+  written with `* 4` and **match** written with `<< 2`, at the same length
+  and with no other change.
+
+  Reach for the shift before the local, because the local is not free here:
+  `off = i * 4;` as its own statement inside the loop becomes a giv, the loop
+  grows an `addiu off,off,4`, and `func_800D08B8` measures **14** rows that
+  way. Four other spellings are all exactly inert at 2 rows -- an `(s32)`
+  cast on the base, `((u32*)base)[i + 0x2F]`, `0xBC + (s32)(base + i * 4)`,
+  and a struct type with the two arrays declared at their real offsets --
+  which is what makes this look like a wall rather than a one-word fix. Note
+  the limit: this is about which *operand* is first, not about the `x * 16`
+  against `x << 4` cse rule further up, which is about two spellings of the
+  same value in one function failing to unify.
 * **Between two integer operands fold puts the *more complex* one first, so a
   named local is how a plain variable stays `op0` of an `addu`.** The
   companion to the bullet above with no pointer in sight: `base + (p->count *
@@ -4802,6 +4823,30 @@ scoping). A variant is described as *edits against a pinned base*, and each
 `old` string must match exactly once or the run aborts, so a typo cannot
 silently score as "no change".
 
+**A unit with a standing diagnostic cannot be measured at all, so clear those
+before picking a function.** `variant_eval.py` and `checkfn.py` treat any
+non-warning line from cc1 in the file under test as fatal — rightly, since
+gcc 2.6.3 substitutes 0 and carries on — and the check is per *file*, not per
+function. So two long-standing `conflicting types` errors in
+`src/battle/battle2.c` refused **every** verdict in a 60-function unit, and
+the first six variants of a session came back `FAILED` with diagnostics about
+declarations nobody had touched. This is the same second-order cost as the
+`batini.c` scoping bug one section down: an alarm that always fires is an
+alarm that stops meaning anything, and here it meant nothing could be scored.
+
+Clearing one is cheap and provable. Fix the declaration, then score a variant
+of a function in the same unit that **already matches** — it must come back
+`0 changed, 0 inserted`, which is proof the fix is byte-neutral. Both of
+battle2.c's were: a definition whose fourth parameter was `s32` where the
+header said `void (*)(int)` (same mode, same code), and a local redeclaration
+of `SystemAkaoExecute` with four arguments against `game.h`'s `(void)` — and
+those four arguments turned out to be dead, since they are already live in
+`$a0..$a3` where the call sits. The check to run before a batch:
+
+```shell
+ninja build/us/src/<ovl>/<unit>.c.o 2>&1 | grep ':[0-9]*:' | grep -v warning:
+```
+
 That "exactly once" is over the **whole unit**, not the function, and these
 units are full of near-clones: `    s32 off;` occurs ten times in `field5.c`,
 and `OpcodeFuncMove`'s model-entry lookup statement occurs four times in
@@ -5942,6 +5987,54 @@ overlay links unchanged. Delete the stale `asm/us/<ovl>/nonmatchings/<unit>/
 
 Check for this before picking any function whose rank score is 1.000 and
 whose caller search comes up empty; both halves of this pair scored 1.000.
+
+**A second shape the work list cannot screen: an asm-only helper of a
+handwritten function.** `/* Handwritten function */` is written into the `.s`
+of the handwritten function itself, and its private helpers do not carry it —
+so they arrive on the list looking like ordinary 40-instruction work.
+`func_800D32B4`, `func_800D3354`, `func_800D8304` and `func_800D83A4` in
+`src/battle/battle2.c` are four of them, and they were entries 8, 9, 15 and
+17 of a 60-function list, i.e. among the cheapest-looking picks in the file.
+Two tells, either one conclusive and both one `grep` away:
+
+* **the function returns through `jr $at`.** No C function does; `$at` is the
+  assembler's scratch register. These four have *two* exits — `jr $at` for the
+  early-out and `jr $ra` for the fall-through — which is a hand-written
+  two-result convention, not a compiled one.
+* **it reads `$t0`/`$t1`/`$t2` (or any register that is not `$a0..$a3`) before
+  writing them.** Arguments arrive in `$a0..$a3`; a first instruction of
+  `sll $v0, $t0, 16` means the caller set `$t0` up by hand.
+
+```shell
+grep -l 'jr *\$at' asm/us/<ovl>/nonmatchings/<unit>/*.s
+for f in *.s; do sed -n '5p' $f | grep -q '\$[ts][0-9]' && echo "$f"; done
+```
+
+Confirm by finding the callers: all four are called only from `func_800D29D4`
+and `func_800D7D3C`, which are themselves on the handwritten list. A helper
+whose only callers are handwritten is not remaining work.
+
+**And an instruction *after* the `.size` directive is object padding, which a
+merged unit cannot emit.** splat writes the bytes between the end of a
+function and the start of the next one into the first function's `.s`, past
+its own `.size`, so a function can be byte-exact in all its real instructions
+and still be four bytes short when written as C. `func_800D3520.s` is the only
+`.s` in `battle2.c` with one, and functions in that overlay are not 8-byte
+aligned in general (`func_800D7B1C` sits at `...B1C`), so it is an original
+translation-unit boundary rather than function alignment — `battle2.c` is
+several of the original `.c` files merged, and the pad belongs to the end of
+one of those objects. The failure mode is the cross-overlay one: 36 bytes
+where the target has 40 shifts every later symbol in `battle.elf` and comes
+back as `batini.c: undefined reference to D_800F7ED0`. The check costs one
+command and belongs next to the handwritten screen:
+
+```shell
+for f in *.s; do awk '/^\.size /{s=1;next} s&&/\/\* [0-9A-F]+ [0-9A-F]+ /{c++}
+  END{if(c)print FILENAME": "c" trailing"}' $f; done
+```
+
+`INCLUDE_ASM` hard-codes `.align 2`, so there is no in-source way to reserve
+the pad; such a function is a park however exact its body is.
 
 **Scope a rename by owner, not by name.** A struct member or a local is not
 a symbol, so renaming one cannot change codegen -- but only if the thing being
