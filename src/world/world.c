@@ -2623,7 +2623,21 @@ s32 func_800B79B8(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7A40);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7AC0);
+void func_800B7AC0(s16 arg0) {
+    u8* src;
+    u8* dst;
+    s32 i;
+    u8 c;
+
+    src = (u8*)func_800A40F0(arg0);
+    dst = (u8*)D_8009D288;
+    i = 0x368;
+    do {
+        c = *src++;
+        dst[i] = c;
+        i++;
+    } while (c != 0xFF && i < 0x380);
+}
 
 void func_800B7B1C(u8 arg0) { D_8009D684 = arg0; }
 
