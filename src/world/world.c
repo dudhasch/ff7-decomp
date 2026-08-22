@@ -2629,7 +2629,12 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B851C);
 
 static s32 func_800B857C(void) { return g_WindowData[0].state != WSTATE_INIT; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B858C);
+s32 func_800B858C(void) {
+    if (D_800832A0 != 0 && D_800832A0 != 7) {
+        func_800B89C4(0);
+    }
+    return D_800832A0 != 0;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B85D4);
 
