@@ -1387,7 +1387,25 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800308D4);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80030E7C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80031820);
+// Load an instrument: copy its record out of the table into the track's
+// shadow fields and flag every one of them dirty.
+void func_80031820(AKAO_TRACK* track, s32 id) {
+    AkaoInstrument* ins;
+
+    track->instr_id = id;
+    ins = &D_80075F28[(u16)id];
+    track->unkE4 = ins->unk0;
+    track->unkE8 = ins->unk4;
+    track->unkEC = ins->unkD;
+    track->unkF0 = ins->unkE;
+    track->unkF4 = ins->unkF;
+    track->unkFA = ins->unk8;
+    track->unkFC = ins->unk9;
+    track->unkFE = ins->unkA;
+    track->unk100 = ins->unkB;
+    track->unk102 = ins->unkC;
+    track->attr_mask |= 0x1FF80;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800318BC);
 
