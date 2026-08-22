@@ -958,6 +958,36 @@ a near-miss, in rough order of frequency:
   comes from. It is not a redundant copy — gcc keeps the snapshot in its own
   register and the whole allocation follows. `KawaiLightingApplyToPolyColor`
   went from 87 rows to 43 on this one line.
+* **A nested clear wants the row base hoisted as a *subscript* on the outer
+  counter and the inner access as a subscript on the inner one — writing
+  either walk by hand fails in a different direction.** For the target's
+  `addiu <row>,<row>,0x20` in the outer branch's delay slot with
+  `addiu <cell>,<row>,0x1e` in the inner preheader and `addiu <cell>,<cell>,-2`
+  as the inner step, the source is
+
+  ```c
+  do {
+      j = 0xF;
+      cell = (s16*)&D_80095DE0[i * 0x20];   /* outer giv -> walking pointer */
+      do { cell[j] = 0; j--; } while (j >= 0);   /* inner giv -> +0x1e, -2 */
+      i++;
+  } while (i < 0x40);
+  ```
+
+  and the two obvious alternatives each get exactly one of the two halves.
+  A hand-written `u8* row` walked `row += 0x20` reaches the walking pointer
+  and costs **two instructions**: `i` then has no use outside the exit test,
+  so `check_dbra_loop` reverses it (`bgez` in place of `slti`/`bnez`), *and*
+  the `+0x1E` folds into `row`'s initial value so the inner preheader's
+  `addiu` disappears — measured identically for `row + 0x1E` with `cell--`,
+  for `row + j * 2`, and for either increment order. Any form that keeps the
+  index in the address (`D_80095DE0[i * 0x20 + j * 2]`,
+  `&D_80095DE0[i * 0x20] + j * 2`, `((s16*)&D_80095DE0[i * 0x20])[j]`) gets
+  the inner giv right and leaves the outer row rebuilt with `sll`/`addu`,
+  **+1 instruction**. `FieldInitDefaultValues` in `src/field/field4.c`; the
+  tell is `addiu -2 / addu +1 / sll +1` in the opcode histogram with a `%hi`
+  naming the base *plus the inner constant* where the target names the base
+  alone.
 * **A pointer bumped once per outer iteration belongs in the `for` increment.**
   `for (i = 0; i < n; i++, p += stride)` emits `i++` ahead of `p += stride`;
   written as the body's last statement the two come out in the other order and
