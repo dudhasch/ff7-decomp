@@ -2402,7 +2402,12 @@ const u8 D_800A04BC[] = {
     0x40, 0x40, 0x00, 0x00, 0x00, 0x00, 0x8B, 0x0D, 0x00, 0x00};
 static s32 func_800AF834(s32 arg0);
 
-void func_800AEB20(s32 arg0, s32 arg1) {
+/* K&R definition on purpose -- func_800AF264 calls this with a third
+   argument it does not take and func_800AF3AC with none at all, both passing
+   registers straight through. See func_800A555C. */
+void func_800AEB20(arg0, arg1) s32 arg0;
+s32 arg1;
+{
     s32 index;
     u8* p;
 
@@ -2469,7 +2474,15 @@ void BATTLE_TryApplyHitEffect(s32 arg0, s32 arg1, s32 arg2) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800AF264);
+void func_800AF264(s32 arg0, s32 arg1, s32 arg2) {
+    func_800AEBF0();
+    func_800AEB20(arg0, arg1, arg2);
+    func_800A7254(0, arg0, 4, 0);
+    g_BattleState.combatant[arg0].status &= ~STATUS_MANIPULATE;
+    if (arg1 == 0xE) {
+        g_BattleState.combatant[arg0].status &= 0xF7FF7FB3;
+    }
+}
 
 void func_800AF320(s32 arg0, s32 arg1, s32 arg2) {
     func_800AEBF0();
