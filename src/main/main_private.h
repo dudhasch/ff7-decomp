@@ -194,6 +194,8 @@ extern u8 g_FieldWindowColors[12]; // menu color RGB-quadruplet
 extern s32 D_80049224[8];
 extern s32 D_80049474;    // play-clock divisor: 36000 (seconds per 10 hours)
 extern s32 D_80049478;    // play-clock divisor: 3600 (seconds per hour)
+extern s32 D_8004947C;    // play-clock divisor: 600 (seconds per 10 minutes)
+extern s32 D_80049480;    // play-clock divisor: 60 (seconds per minute)
 extern s32 D_80049500[8]; // party slot -> character id (endgame level snapshot)
 extern u8 D_80049520[];
 extern u8 D_80049528[];

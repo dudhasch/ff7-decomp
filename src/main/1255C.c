@@ -123,7 +123,18 @@ s32 func_80023788(s32 arg0) {
     return ((var_a0 / D_80049474) * 0xA) + ((var_a0 % D_80049474) / D_80049478);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_8002382C);
+// Minutes counterpart of func_80023788: the MM field of the HH:MM play-time
+// clock, as a plain decimal (tens*10 + units).
+s32 func_8002382C(s32 arg0) {
+    if (arg0 > 0x57E3F) { // clamp to 99:59:59, in seconds
+        arg0 = 0x57E3F;
+    }
+    // The parameter is the running remainder -- the target keeps it in $a0
+    // throughout, which a separate local cannot reproduce (16 rows of naming).
+    arg0 = arg0 % D_80049474;
+    arg0 = arg0 % D_80049478;
+    return ((arg0 / D_8004947C) * 0xA) + ((arg0 % D_8004947C) / D_80049480);
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80023940);
 
