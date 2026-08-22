@@ -1516,9 +1516,23 @@ void func_800D76B8(SVECTOR* arg0) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7724);
 
+void func_800D7888();
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7888);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7A88);
+// Claim a slot running func_800D7888. Six parameters, so arg4 and arg5 come
+// off the caller's stack; the store order 0x4, 0x6, 0x1C, 0x1A, 0x8, 0xA is
+// the source order, since gcc keeps struct stores where they were written.
+void func_800D7A88(s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4,
+                   s32 arg5) {
+    Unk801621F0* p = &D_801621F0[func_800BC04C(func_800D7888)];
+
+    p->D_801621F4 = arg0;
+    p->D_801621F6 = arg1;
+    *(s32*)&p->unk1C = arg2;
+    p->unk1A = arg3;
+    p->unk8 = arg4;
+    p->unkA = arg5;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7B1C);
 
