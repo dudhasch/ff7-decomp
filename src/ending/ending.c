@@ -29,13 +29,20 @@ typedef struct EndingModel {
     /* 0x40 */ SVECTOR trans;
 } EndingModel;
 
-/* An animated sprite/actor. func_800A343C fixes the colour block (0x10 current,
- * 0x14 per-step delta, 0x18 final) and the step counter at 0x2; func_800A34C4
- * fixes the animation pointer at 0xC with its delay and frame counters. */
+/* An animated on-screen actor, 0x88 bytes -- which is the stride every loop
+ * over D_800A652C walks, and it is what closes the layout: func_800A3368 hands
+ * actor+0x1C to func_800A379C as an EndingModel* and actor+0x78 as its target
+ * VECTOR, and 0x1C + sizeof(EndingModel) + sizeof(s32[4]) + sizeof(VECTOR) is
+ * exactly 0x88. The three `sh` stores at 0x5C/0x5E/0x60 that read as loose
+ * halfwords are the embedded model's translation SVECTOR.
+ *
+ * func_800A343C fixes the colour block (0x10 current, 0x14 per-step delta,
+ * 0x18 final) and the step counter at 0x2; func_800A34C4 fixes the animation
+ * pointer at 0xC with its delay and frame counters. */
 typedef struct EndingActor {
     /* 0x00 */ u16 flags;
     /* 0x02 */ s16 fadeSteps;
-    /* 0x04 */ s16 unk04;
+    /* 0x04 */ s16 speed;
     /* 0x06 */ u16 delay;
     /* 0x08 */ u16 frame;
     /* 0x0A */ u16 unk0A;
@@ -52,21 +59,23 @@ typedef struct EndingActor {
     /* 0x19 */ u8 endG;
     /* 0x1A */ u8 endB;
     /* 0x1B */ u8 unk1B;
-    /* 0x1C */ u8 unk1C[0x40];
-    /* 0x5C */ s16 unk5C;
-    /* 0x5E */ s16 unk5E;
-    /* 0x60 */ s16 unk60;
-    /* 0x62 */ u8 unk62[0x6];
-    /* 0x68 */ s32 unk68;
-    /* 0x6C */ s32 unk6C;
-    /* 0x70 */ s32 unk70;
-    /* 0x74 */ u8 unk74[0x4];
-    /* 0x78 */ u8 unk78[0x4];
+    /* 0x1C */ EndingModel model;
+    /* 0x64 */ s32 unk64;
+    /* 0x68 */ s32 posX;
+    /* 0x6C */ s32 posY;
+    /* 0x70 */ s32 posZ;
+    /* 0x74 */ s32 unk74;
+    /* 0x78 */ VECTOR target;
 } EndingActor;
 
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
+extern u8 D_800A6588[];
+extern u8 D_800A658A[];
+extern u8 D_800A658C[];
+extern s32 (*D_800A63DC[])(void);
 extern s32 D_800A6390;
+extern s32 D_800A6394;
 /* Three (sector, size) pairs in .data -- the ending overlay's own file
  * table, indexed by the script halfword func_800A1EEC and func_800A1F48 read.
  */
@@ -84,6 +93,8 @@ extern u32 D_800AF3EC;
 extern u32 D_800AF3F0;
 extern u32 D_800AF3F4;
 extern u32 D_800AF3F8;
+extern void* D_800AF3E8;
+extern void* D_800AF3FC;
 extern s32 D_800AF408;
 extern s32 D_800AF40C;
 extern s32 D_800AF410;
@@ -106,6 +117,11 @@ s32 func_80034FC8(u_long* dst, s32 index);
 s32 func_800484A8(void);
 s32 func_80048540(s32 arg0);
 void func_800A2504(s32 x, s32 y, s32 w, s32 r, u8 g, u8 b);
+void* func_800A358C(void* arg0, s32 arg1, void* arg2, EndingActor* actor);
+void func_800A3368(EndingActor* actor);
+void func_800A343C(EndingActor* actor);
+void func_800A34C4(EndingActor* actor);
+s32 func_800A379C(EndingModel* model, VECTOR* target, VECTOR* dir, s32 speed);
 s32 func_800A273C(s32 arg0);
 void func_800A2888(u_long* tim, u16* tpage, u16* clut);
 
@@ -113,7 +129,26 @@ INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0030);
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A04C4);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A09DC);
+void func_800A09DC(void) {
+    /* 0x100 bytes of frame no instruction names -- the target's
+     * `sw ra,0x11c(sp)` against a 0x10 outgoing-argument area. */
+    u8 unusedLocals[0x100];
+    s32 i;
+    s32 off;
+    EndingActor* actor;
+
+    for (i = 0, off = 0; i < 0x20; i++, off += 0x88) {
+        if (*(u16*)(D_800A652C + off) & 1) {
+            actor = (EndingActor*)(off + (s32)D_800A652C);
+            *(s16*)(D_800A6588 + off) = 0x28;
+            *(s16*)(D_800A658A + off) = 0x20;
+            *(s16*)(D_800A658C + off) = 0;
+            func_800A34C4(actor);
+            func_800A343C(actor);
+            D_800AF3FC = func_800A358C(D_800AF3E8, 0, D_800AF3FC, actor);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0AB8);
 
@@ -127,7 +162,27 @@ INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0F90);
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A11B4);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A12F0);
+void func_800A12F0(void) {
+    s32 i;
+    s32 off;
+    EndingActor* actor;
+
+    /* `off` is a giv here and a second biv in func_800A09DC -- two loops that
+     * differ in nothing else, and swapping the two spellings costs 17 rows in
+     * either direction. As a `for` increment the base address of D_800A652C
+     * becomes a loop invariant gcc hoists into a fifth callee-saved register;
+     * as `i * 0x88` it does not. */
+    for (i = 0; i < 0x20; i++) {
+        off = i * 0x88;
+        if (*(u16*)(D_800A652C + off) & 1) {
+            actor = (EndingActor*)(off + (s32)D_800A652C);
+            func_800A3368(actor);
+            func_800A34C4(actor);
+            func_800A343C(actor);
+            D_800AF3FC = func_800A358C(D_800AF3E8, 0, D_800AF3FC, actor);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A139C);
 
@@ -139,7 +194,21 @@ INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A17C0);
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A19A4);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A1E20);
+void func_800A1E20(void) {
+    s16* pc;
+
+    do {
+        pc = D_800A6528;
+        D_800A6394 = 0;
+        D_800A6528 = pc + 1;
+        if (D_800A63DC[*pc]() == 0) {
+            D_800A6528 = pc;
+            D_800A6390 = 0;
+        } else {
+            D_800A6390 = 1;
+        }
+    } while (D_800A6394 != 0);
+}
 
 void func_800A1ED4(s16* arg0) { D_800A6528 = arg0; }
 
@@ -507,7 +576,22 @@ EndingTask* func_800A3314(s16 arg0) {
     return NULL;
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A3368);
+void func_800A3368(EndingActor* actor) {
+    VECTOR step;
+
+    if (actor->flags & 0x10) {
+        if (func_800A379C(&actor->model, &actor->target, &step, actor->speed) !=
+            0) {
+            actor->flags ^= 0x10;
+        }
+        actor->posX += step.vx;
+        actor->posY += step.vy;
+        actor->posZ += step.vz;
+        actor->model.trans.vx = actor->posX / 0x1000;
+        actor->model.trans.vy = actor->posY / 0x1000;
+        actor->model.trans.vz = actor->posZ / 0x1000;
+    }
+}
 
 void func_800A343C(EndingActor* actor) {
     if (actor->flags & 8) {
@@ -546,4 +630,43 @@ void func_800A34C4(EndingActor* actor) {
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A358C);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A379C);
+s32 func_800A379C(EndingModel* model, VECTOR* target, VECTOR* dir, s32 speed) {
+    VECTOR delta;
+    s32 step;
+
+    delta.vx = target->vx - model->trans.vx;
+    delta.vy = target->vy - model->trans.vy;
+    delta.vz = target->vz - model->trans.vz;
+    if (delta.vx == 0) {
+        step = 0x1000;
+        if (delta.vy < 0) {
+            step = -0x1000;
+        }
+        dir->vx = 0;
+        dir->vy = step;
+        dir->vz = 0;
+    } else if (delta.vy == 0) {
+        step = 0x1000;
+        if (delta.vx < 0) {
+            step = -0x1000;
+        }
+        dir->vx = step;
+        dir->vy = 0;
+        dir->vz = 0;
+    } else {
+        VectorNormal(&delta, dir);
+    }
+    if (delta.vx >= -2 && delta.vx < 2 && delta.vy >= -2 && delta.vy < 2 &&
+        delta.vz >= -2 && delta.vz < 2) {
+        dir->vx = delta.vx << 12;
+        dir->vy = delta.vy << 12;
+        dir->vz = delta.vz << 12;
+        return 1;
+    }
+    if (speed != 0x1000) {
+        dir->vx = speed * dir->vx / 0x1000;
+        dir->vy = speed * dir->vy / 0x1000;
+        dir->vz = speed * dir->vz / 0x1000;
+    }
+    return 0;
+}
