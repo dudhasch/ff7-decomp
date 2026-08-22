@@ -527,7 +527,20 @@ s32 func_80014BA8(s32 arg0) {
     return (u8)(((func_80014B70() & 0xFF) * arg0) >> 8);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014BE4);
+s32 func_80014BE4(void) {
+    s32 lo;
+    s32 hi;
+
+    lo = func_80014B70();
+    if ((D_80062D4C++ & 7) != 0) {
+        func_80014B54();
+    }
+    /* `hi` has to be its own local: fold puts the more complex operand of the
+     * `or` first, so with the shift written inline it becomes op0 and the two
+     * registers come out the other way round. */
+    hi = (func_80014B70() & 0xFF) << 8;
+    return (lo & 0xFF) | hi;
+}
 
 /* The eight bytes at D_80062E10 are one object -- func_80014B70 walks them the
  * same way. Indexing through the cast keeps the `%hi`/`%lo` addressing the
