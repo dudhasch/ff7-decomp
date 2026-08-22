@@ -602,7 +602,22 @@ void func_800A886C(s32 arg0) {
 
 void func_800A8888(s32 arg0) { D_800E5824 = arg0; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A8898);
+void func_800A8898(VECTOR* out) {
+    WorldTriangle* tri;
+    SVECTOR* verts;
+    SVECTOR* n0;
+    SVECTOR* n1;
+    SVECTOR* n2;
+
+    tri = D_80109D60;
+    verts = D_80109D5C->norms;
+    n0 = (SVECTOR*)(tri->vert[0] * 8 + (s32)verts);
+    n1 = (SVECTOR*)(tri->vert[1] * 8 + (s32)verts);
+    n2 = (SVECTOR*)(tri->vert[2] * 8 + (s32)verts);
+    out->vx = n0->vx + n1->vx + n2->vx;
+    out->vy = n0->vy + n1->vy + n2->vy;
+    out->vz = n0->vz + n1->vz + n2->vz;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A891C);
 
