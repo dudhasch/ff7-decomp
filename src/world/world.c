@@ -2402,7 +2402,11 @@ void func_800B7820(void) {
     D_8009D2E7 = 0;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B7838);
+void func_800B7838(void) {
+    D_8011626C = 2;
+    D_80116270 = 0;
+    D_80116274 = 0;
+}
 
 s32 func_800B785C(void) { return D_8011626C; }
 
