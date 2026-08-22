@@ -18,10 +18,25 @@ score it reports is the parked body's own. That also means every guard
 neighbouring parked body shifts the offsets), compile diagnostics abort the
 run, and symbol aliases are discounted.
 
-The output is `TOTAL` rows per function. Read it with the usual caveat: rows
-are only comparable between bodies of the same length, so a function at the
-top of this list is only "closest" if its insertion count is small too. Pass
---verbose to see the changed/inserted/deleted breakdown.
+The output is one row per function: the diff row count, and the *length*
+delta against the target. Read the length first. Rows are only comparable
+between two bodies of the same length -- across lengths the count measures how
+well the diff happened to align, which is a property of where the insertion
+landed rather than of how wrong the body is. A body of the wrong size cannot
+match however few rows differ, so a nonzero length is both the thing to fix
+first and a sign that structural work is still available; `exact` means what
+is left is register allocation or scheduling.
+
+The distinction is not academic. `FieldEntityWalkmechCross` carried a park
+note reading "99 changed / +4 instructions" -- the 4 was the *insertion* count
+and the body was 11 instructions short, so every lever that would fix it added
+instructions and read as a regression by rows. The note had measured the one
+that mattered and rejected it on exactly that evidence. Ranked by length
+instead, the same function went to 34 rows at the exact size. Conversely
+`FieldDebugRenderPage` is 964 rows and one instruction from the right length,
+while `FieldModelCreatePktsForPart` is 247 rows at exactly the right size.
+
+Pass --verbose to see the full changed/inserted/deleted breakdown.
 """
 import glob
 import json
@@ -114,10 +129,45 @@ def main(argv):
     out = subprocess.run(cmd, capture_output=True, text=True).stdout
     if verbose:
         print(out)
-    else:
-        tail = out.split("=== summary, best first")
-        print("=== parked queue, closest first" + (tail[-1] if len(tail) > 1 else out))
+        return 0
+    print("=== parked queue, closest first")
+    for name, rows, ins, delta in parse(out):
+        if rows is None:
+            print("  %-34s FAILED" % name)
+            continue
+        print("  %-34s %5d rows  %3d ins  %s"
+              % (name, rows, ins,
+                 "length exact" if delta == 0 else
+                 "length %+d instructions" % delta))
     return 0
+
+
+ROW = re.compile(r"^VARIANT (\S+)", re.M)
+TOT = re.compile(r"^TOTAL (\d+)\s+\((\d+) changed, (\d+) inserted", re.M)
+LEN = re.compile(r"^ +length \d+ against \d+\s+\(([-+]\d+) instructions\)", re.M)
+
+
+def parse(out):
+    """[(name, rows, inserted, length_delta)], length_delta 0 when exact.
+
+    Read straight out of variant_eval's own text rather than its summary, so
+    the length line travels with the row count -- keeping them together is the
+    whole point of this table.
+    """
+    blocks = re.split(r"(?=^VARIANT )", out, flags=re.M)
+    got = []
+    for b in blocks:
+        m = ROW.search(b)
+        if not m or b.startswith("=== summary"):
+            continue
+        t, l = TOT.search(b), LEN.search(b)
+        if not t:
+            got.append((m.group(1), None, None, None))
+        else:
+            got.append((m.group(1), int(t.group(1)), int(t.group(3)),
+                        int(l.group(1)) if l else 0))
+    got.sort(key=lambda r: (r[1] is None, r[1] if r[1] is not None else 0))
+    return got
 
 
 if __name__ == "__main__":
