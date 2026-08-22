@@ -5,10 +5,160 @@ extern u16 D_8016376C;
 void func_800A3354(void); // battle callback for batini, move to battle.h
 void func_801B2308(void);
 
-// entrypoint
-INCLUDE_ASM("asm/us/battle/nonmatchings/batini", func_801B0050);
-
 static void func_801B23E0(s32 sceneID, void (*cb)(void));
+
+extern u8 D_800F6934[0x40][8]; // same records as D_800F6936, from offset 0
+extern u8 D_800F6B34[0xA][8];
+extern s8 D_800F6B86[2][8];
+extern u16 D_800F7DE8;
+extern u32 D_800FAFD0;
+extern u32 D_800F7ED0;
+extern u8 D_8009D7BC;
+extern u16 D_8009D7BE;
+extern s32 D_80062F88;
+extern s32 D_801620A8;
+
+/* Carried across a battle at 0x80075D04: a bitmask of slots whose HP is stale,
+ * the formation index the HP was saved for, and the HP itself, six enemies per
+ * formation. BATINI reaches all three off one base -- the target derives
+ * D_80075D04 and D_80075D0C as -4/+4 from the register holding the middle
+ * member -- so they have to be one object here or cse cannot relate them. */
+typedef struct {
+    /* 0x00 */ s32 staleMask;
+    /* 0x04 */ s32 formation;
+    /* 0x08 */ s32 hp[8][6];
+} BattleSavedHp;
+extern BattleSavedHp D_80075D04;
+
+void func_80014C44(s32 arg0);
+void func_800A3278(void);
+void func_800A283C(void);
+void func_800AD480(void);
+void func_800A71F4(void);
+void func_800DCF94(s32 arg0);
+void func_800A55BC(void);
+void func_801B1CB0(void);
+void func_800AE954(s32 slot);
+void func_801B19AC(void);
+void func_800A4540(void);
+void func_801B1120(void);
+void func_800A61D4(void);
+void func_800A4480(void);
+void func_800A5BC8(s32 arg0, s32 arg1);
+void func_801B137C(s32 arg0);
+void func_800A2894(void);
+void func_801B08C0(void);
+void func_801B1E0C(void);
+void func_801B0668(void);
+
+// entrypoint
+void func_801B0050(s32 sceneID) {
+    Unk800F83E0* c;
+    u8* p;
+    s32 i;
+    s32 k;
+    s32 formation;
+    s32 bit;
+    s32 hp;
+
+    func_80014C44(VSync(-1));
+    VSync(-1);
+    for (i = 0; i < 3; i++) {
+        func_80020058(i);
+        func_8001786C(i);
+    }
+    func_80017678();
+    p = (u8*)func_8001521C(0x7E);
+    D_800FAFD0 = p[0];
+    D_800F7ED0 = p[1];
+    func_800A3278();
+    func_800A283C();
+    func_800AD480();
+    /* The three descending clears walk their own thing and need their own
+     * counter: sharing `i` with the ascending loops below stretches that
+     * pseudo across all of them, and the -1 for D_801620A8 then loses $v0 to
+     * a callee-saved register -- which reorg can legally sink into the
+     * preceding call's delay slot where $v0 could not, because the call
+     * clobbers $v0. 3 rows, at the same length. Merge counters that describe
+     * one walk; these are a different one. */
+    for (k = 0x3F; k >= 0; k--) {
+        D_800F6934[k][0] = 0xFF;
+    }
+    for (k = 9; k >= 0; k--) {
+        D_800F6B34[k][0] = 0xFF;
+    }
+    for (k = 1; k >= 0; k--) {
+        D_800F6B86[k][0] = -1;
+    }
+    func_800A71F4();
+    D_801620A8 = -1;
+    func_800DCF94(-1);
+    for (i = 0; i < 10; i++) {
+        g_BattleState.combatant[i].unk8 = -1;
+        g_BattleState.combatant[i].unk13 = 0x10;
+    }
+    func_800A55BC();
+    func_801B08C0();
+    func_801B1CB0();
+    func_801B23E0(sceneID, 0);
+    func_801B1E0C();
+    func_801B085C(D_8009D7BC);
+    D_800F5F44.D_800F7DAA = (D_8009D7BE & 0xC0) >> 6;
+    for (i = 0; i < 10; i++) {
+        func_800AE954(i);
+        c = &g_BattleState.combatant[i];
+        if (c->unk8 != -1) {
+            g_BattleState.presentMask |= 1 << i;
+        }
+    }
+    g_BattleState.sceneID = sceneID;
+    D_800F83A8 = D_80163624.unk2;
+    func_801B19AC();
+    func_800A4540();
+    func_801B1120();
+    func_801B2308();
+    func_800A61D4();
+    func_800A4540();
+    func_801B0668();
+    func_800A4480();
+    D_800F7DE8 |= 1;
+    for (i = 0; i < 3; i++) {
+        func_800A5BC8(i, 1);
+    }
+    if (g_BattleState.setupFlags & 8) {
+        func_801B085C(0x80);
+        D_800F5F44.D_800F7DAA = 0;
+        for (i = 0; i < 3; i++) {
+            func_801B137C(i);
+        }
+    } else {
+        func_800A2894();
+    }
+    if (g_BattleState.setupFlags & 4) {
+        if (!(D_80062F88 & 4)) {
+            D_80062F88 |= 4;
+            D_80075D04.staleMask = -1;
+        }
+        formation = g_BattleState.unk28;
+        D_80075D04.formation = formation;
+        bit = 1 << (formation * 6);
+        for (i = 0; i < 6; i++) {
+            if (D_80075D04.staleMask & bit) {
+                D_80075D04.staleMask &= ~bit;
+            } else if (g_BattleState.combatant[i + 4].unk8 != -1) {
+                hp = D_80075D04.hp[formation][i];
+                g_BattleState.combatant[i + 4].curHP = hp;
+                if (hp == 0) {
+                    g_BattleState.combatant[i + 4].status |= 1;
+                    g_BattleState.combatant[i + 4].unk44[0] |= 1;
+                    g_BattleState.combatant[i + 4].unk4 &= ~0x18;
+                }
+            }
+            bit <<= 1;
+        }
+        func_800A4540();
+    }
+}
 void func_801B0490(s32 sceneID) {
     Unk800F83E0* c;
     s32 i;

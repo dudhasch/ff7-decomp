@@ -680,6 +680,30 @@ a near-miss, in rough order of frequency:
   is dozens of rows of `a3` against `a2` on loop counters and nothing else,
   count the target's counter registers before looking at anything: two
   registers means two variables, however many loops there are.
+* **Counting *down* is a different walk from counting up, and a loop whose
+  biv gcc eliminates outright still has to have its own variable.** The
+  partition above is about which loops share a counter; this is about a set
+  that must not. `func_801B0050` in `src/battle/batini.c` runs three
+  descending clears (`for (k = 0x3F; k >= 0; k--)`) among a dozen ascending
+  `for (i = 0; i < n; i++)` loops. The descending ones keep no counter at all
+  in the object -- the biv's only other use is the guard, so `strength_reduce`
+  retests the giv (`bgez` on the byte offset) and deletes it -- yet spelling
+  them with the same `i` as the ascending loops is **3 rows**, because the
+  *pseudo* still spans them and its live range decides what the allocator has
+  free afterwards. The consequence lands nowhere near the loops: a `-1`
+  materialised for a store two statements later loses `$v0` to a callee-saved
+  register, and a callee-saved register is one reorg may legally sink into the
+  preceding call's delay slot where `$v0` -- clobbered by the call -- may not,
+  so an unrelated `move sN,zero` gets displaced. The tell is a constant in a
+  callee-saved register with no reason to be there, plus one insn that has
+  swapped places with a `jal`'s delay slot.
+* **A caller-saved register cannot be moved into a preceding call's delay
+  slot, and a callee-saved one can.** `fill_simple_delay_slots` also scans
+  *forward* from a `jal` for a candidate, and rejects anything the call
+  clobbers -- so `li v0,K` immediately after a call stays put while a
+  `move sN,zero` from further down is hoisted over it into the slot. Read a
+  delay slot that holds an insn from suspiciously far below as evidence about
+  the *register class* of everything in between, not about statement order.
 * **`*p = 0xFF` gives `li -1` through an `s8*` and `li 0xff` through a `u8*`.**
   The constant is narrowed to QImode against the store, and an HImode/QImode
   `const_int` is sign-extended, so `0xFF` becomes -1 and gcc materialises it
@@ -3809,6 +3833,19 @@ are diffing a function with a whole `if` constant-folded out of it. Nothing in
 the build shouts. `checkfn.py` now scans the compile output for non-warning
 diagnostics and refuses to give a verdict, caching them beside the object so a
 later `no work to do` run cannot look clean.
+
+That check has to be scoped to the file under test, and for a long time it was
+not. `ninja <obj>` builds everything the object's edge depends on, and for
+`src/battle/batini.c` that is the *whole battle overlay* — the link needs
+`config/sym_export_battle.us.txt`, which is generated from `battle.elf`. So the
+captured output carries `battle.c`'s and `battle2.c`'s diagnostics, both of
+which have several standing ones, and `checkfn.py` refused every verdict in
+`batini.c` while quoting errors from files the caller was not editing. It now
+splits the output on ninja's `[N/M] psx cc <source>` edge lines and keeps only
+the section for the source it was asked about. The reason to fix it rather than
+work around it is the second-order one: an alarm that fires on somebody else's
+file is an alarm you learn to read past, and then it cannot tell you the day
+your own file starts folding an `if` away.
 
 The usual way to trip this is a symbol declared only inside a
 `#else /* NON_MATCHINGS */` block — `PreloadNextFieldMap`'s externs near the top

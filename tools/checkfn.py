@@ -130,8 +130,32 @@ def reference_for(source):
 DIAG_RE = re.compile(r"^\S.*:\d+: (?!warning:)")
 
 
-def diagnostics(output):
-    return [line for line in output.splitlines() if DIAG_RE.match(line)]
+# "[13/19] psx cc src/brom/brom.c" -- ninja prints this before the edge's own
+# output, so it is what separates one translation unit's diagnostics from the
+# next one's.
+CC_EDGE_RE = re.compile(r"^\[\d+/\d+\] psx cc (\S+)\s*$")
+
+
+def diagnostics(output, source_rel):
+    """The diagnostics from *this* source's compile, and no other's.
+
+    `ninja <obj>` also builds everything that object's edge depends on. For
+    `src/battle/batini.c` that is the whole battle overlay, because the link
+    needs `config/sym_export_battle.us.txt`, which is generated from
+    `battle.elf` -- so the captured output carries `battle.c`'s and
+    `battle2.c`'s diagnostics as well. Attributing those here refuses a verdict
+    for something the caller did not write and cannot fix from this file, and
+    the moment that becomes routine it also hides the day their own file starts
+    producing them, which is the entire point of the check.
+    """
+    mine, seen = [], False
+    for line in output.splitlines():
+        m = CC_EDGE_RE.match(line)
+        if m:
+            seen = m.group(1) == source_rel
+        elif seen and DIAG_RE.match(line):
+            mine.append(line)
+    return mine
 
 
 def rebuild(source):
@@ -160,7 +184,9 @@ def rebuild(source):
     if "no work to do" in proc.stdout:
         bad = open(stamp).read().splitlines() if os.path.exists(stamp) else []
     else:
-        bad = diagnostics(proc.stdout + proc.stderr)
+        bad = diagnostics(proc.stdout + proc.stderr,
+                          os.path.relpath(os.path.abspath(source),
+                                          REPO).replace(os.sep, "/"))
         with open(stamp, "w") as fh:
             fh.write("\n".join(bad))
     if bad:
