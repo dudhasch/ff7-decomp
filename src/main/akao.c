@@ -1880,7 +1880,37 @@ void func_800330C4(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033128);
+// Claim the lowest free voice slot for this track: walk the union of the
+// three in-use masks until a clear bit is found, and take it if it is still
+// inside the 24-voice range.
+void func_80033128(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    u32 busy;
+    u32 bit;
+    u16 slot;
+
+    track->unk102 = *track->addr++;
+    if ((track->update_flags & 0x200) == 0) {
+        slot = 0;
+        bit = 1;
+        busy = config->unk4 | config->unk24 | config->unk28;
+        for (;;) {
+            if ((busy & bit) == 0) {
+                goto found;
+            }
+            bit <<= 1;
+            slot++;
+            if ((bit & 0xFFFFFF) == 0) {
+                goto found;
+            }
+        }
+    found:;
+        if (bit & 0xFFFFFF) {
+            config->unk28 |= bit;
+            track->alt_voice_id = slot;
+            track->update_flags |= 0x200;
+        }
+    }
+}
 
 void func_800331CC(AKAO_TRACK* track, AKAO_CONFIG* config) {
     s32 off;
@@ -1931,7 +1961,21 @@ void func_800332EC(AKAO_TRACK* track) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8003337C);
+// As func_800332EC, but the branch also closes the loop slot.
+void func_8003337C(AKAO_TRACK* track) {
+    s32 count;
+
+    count = *track->addr++;
+    if (count == 0) {
+        count = 0x100;
+    }
+    if (track->loop_times[track->loop_id] + 1 != count) {
+        track->addr += 2;
+    } else {
+        track->addr += READ_S16(track->addr);
+        track->loop_id = (track->loop_id - 1) & 3;
+    }
+}
 
 // Loop end with no count: always go round again.
 void func_80033420(AKAO_TRACK* track) {
