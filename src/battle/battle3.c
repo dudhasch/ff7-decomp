@@ -375,7 +375,32 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DE94C);
 
 void func_800DEB10(void) {}
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DEB18);
+void func_800DEB18(void) {
+    BattleMenuWidget* widget;
+    s16 v;
+
+    D_800F977C = 0;
+    func_800A4F60(D_800F38A0, 0);
+    v = D_8009D86D[D_800F38A0 * 0x440];
+    D_800F1EF0 = D_800F3163[v];
+    D_800F1F02 = D_800F3163[v];
+    widget = (BattleMenuWidget*)D_800F90B4[D_800F38A0];
+    if (D_800F57CC == 0) {
+        widget->unkA = 0;
+        widget->cursorRow = 0;
+        widget->unk0 = 0;
+        widget->scroll = 0;
+    }
+    widget->unkC = v;
+    widget->unkD = 4;
+    *(u16*)widget->unk4 = v;
+    widget->unk6 = 4;
+    widget->unk10 = 0;
+    widget->unk11 = 1;
+    widget->unkE = 0;
+    widget->unkF = 0;
+    widget->unk8 = 0;
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DEC10);
 
