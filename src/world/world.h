@@ -116,6 +116,47 @@ typedef struct WorldUnk800E5768 {
     /* 0x04 */ s16 unk4;
 } Unk800E5768; // size: unknown
 
+/* One drawable part of a world model.  Lives in the buffer at
+ * WorldModel::unk1C, WorldModel::unk18 bytes in, WorldModel::unk3 of them
+ * back to back.  numPrims[] counts the eight primitive lists that follow the
+ * part header; func_800C3948 and func_800C6104 read those eight bytes as two
+ * words instead. */
+typedef struct {
+    /* 0x00 */ u8 unk0;
+    /* 0x01 */ u8 unk1;
+    /* 0x02 */ u8 unk2;
+    /* 0x03 */ u8 unk3;
+    /* 0x04 */ u8 numPrims[8];
+    /* 0x0C */ u8 unkC;
+    /* 0x0D */ u8 unkD;
+    /* 0x0E */ u16 unkE;
+    /* 0x10 */ u16 unk10;
+    /* 0x12 */ u16 unk12;
+    /* 0x14 */ u16 unk14;
+    /* 0x16 */ u16 unk16;
+    /* 0x18 */ u8* unk18;
+    /* 0x1C */ u8* unk1C;
+} WorldModelPart; /* size: 0x20 */
+
+typedef struct {
+    /* 0x00 */ u8 unk0;
+    /* 0x01 */ u8 unk1;
+    /* 0x02 */ u8 unk2;
+    /* 0x03 */ u8 unk3;
+    /* 0x04 */ u8 unk4;
+    /* 0x05 */ u8 unk5;
+    /* 0x06 */ u16 unk6;
+    /* 0x08 */ u32 unk8;
+    /* 0x0C */ u32 unkC;
+    /* 0x10 */ u32 unk10;
+    /* 0x14 */ u16 unk14;
+    /* 0x16 */ u16 unk16;
+    /* 0x18 */ u16 unk18;
+    /* 0x1A */ u16 unk1A;
+    /* 0x1C */ u8* unk1C;
+    /* 0x20 */ u8* unk20;
+} WorldModel; /* size: 0x24 */
+
 // entry of binary search table to find world map scripts
 typedef struct {
     /* 0x00 */ u16 unk0;
@@ -390,7 +431,7 @@ extern s32 D_800E580C;
 extern s32 D_800E5810;
 extern u8 D_80109A38[];
 extern u8* D_80109D38;
-extern s32 D_80109D40;
+extern WorldChunkHeader* D_80109D40;
 extern u8 D_8010CB24[];
 extern s32 D_8010D930;
 extern u8* D_8010D9A4;
@@ -399,5 +440,13 @@ extern s32 D_8010D9AC;
 extern s32 D_8010D9B0;
 extern s32 D_8010D9B4;
 extern s16 D_80116290;
+extern u16 D_8009D2A6;
+extern u8 D_800C6748[];
+extern u8* D_8010AD50;
+extern s32 D_8010CB20;
+extern u32 D_8010D9C0[];
+extern s32 D_801159BC;
+extern u8* D_801159C0[];
+extern s32 D_80116510;
 
 #endif

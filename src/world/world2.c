@@ -1,46 +1,5 @@
 #include "world.h"
 
-/* One drawable part of a world model.  Lives in the buffer at
- * WorldModel::unk1C, WorldModel::unk18 bytes in, WorldModel::unk3 of them
- * back to back.  numPrims[] counts the eight primitive lists that follow the
- * part header; func_800C3948 and func_800C6104 read those eight bytes as two
- * words instead. */
-typedef struct {
-    /* 0x00 */ u8 unk0;
-    /* 0x01 */ u8 unk1;
-    /* 0x02 */ u8 unk2;
-    /* 0x03 */ u8 unk3;
-    /* 0x04 */ u8 numPrims[8];
-    /* 0x0C */ u8 unkC;
-    /* 0x0D */ u8 unkD;
-    /* 0x0E */ u16 unkE;
-    /* 0x10 */ u16 unk10;
-    /* 0x12 */ u16 unk12;
-    /* 0x14 */ u16 unk14;
-    /* 0x16 */ u16 unk16;
-    /* 0x18 */ u8* unk18;
-    /* 0x1C */ u8* unk1C;
-} WorldModelPart; /* size: 0x20 */
-
-typedef struct {
-    /* 0x00 */ u8 unk0;
-    /* 0x01 */ u8 unk1;
-    /* 0x02 */ u8 unk2;
-    /* 0x03 */ u8 unk3;
-    /* 0x04 */ u8 unk4;
-    /* 0x05 */ u8 unk5;
-    /* 0x06 */ u16 unk6;
-    /* 0x08 */ u32 unk8;
-    /* 0x0C */ u32 unkC;
-    /* 0x10 */ u32 unk10;
-    /* 0x14 */ u16 unk14;
-    /* 0x16 */ u16 unk16;
-    /* 0x18 */ u16 unk18;
-    /* 0x1A */ u16 unk1A;
-    /* 0x1C */ u8* unk1C;
-    /* 0x20 */ u8* unk20;
-} WorldModel; /* size: 0x24 */
-
 /* One VRAM upload in the group func_800C0808 walks: a rect plus the byte
  * offset of the pixel data from the start of the group. */
 typedef struct {
