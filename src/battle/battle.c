@@ -2423,7 +2423,14 @@ static void BATTLE_InvalidateQueuedMessages(s32 arg0, s32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B1368);
+// Fetch a 16-bit little-endian immediate from the script cursor, consuming
+// two bytes.
+s32 func_800B1368(void) {
+    s32 lo = D_800F4AC0[D_800F4AC4->pc++];
+
+    lo |= D_800F4AC0[D_800F4AC4->pc++] << 8;
+    return lo;
+}
 
 // Resolve a packed variable reference for the battle-script VM (func_800B1D48):
 // map combatant arg0 + descriptor arg1 to a backing pointer (*arg2) and return
