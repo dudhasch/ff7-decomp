@@ -1627,35 +1627,158 @@ void func_80032D64(void) {}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032D6C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032E08);
+// The eight LFO-parameter opcodes are one shape: read a byte, flag the change
+// in attr_mask, store it in the track, and -- when the track is already live
+// (update_flags & 0x100) -- mirror it into the hardware-shadow record for this
+// track's voice. The mirror's address is written as a byte offset off
+// D_80096608 so the symbol stays in the mem and the assembler rebuilds it
+// through the $at macro, which is what the target does.
+void func_80032E08(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032E6C);
+    track->unkFA = *track->addr++;
+    track->attr_mask |= 0x900;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u16*)((u8*)D_80096608 + off + 0xFA) = track->unkFA;
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032ED0);
+void func_80032E6C(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032F34);
+    track->unkFC = *track->addr++;
+    track->attr_mask |= 0x1000;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u16*)((u8*)D_80096608 + off + 0xFC) = track->unkFC;
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032F98);
+void func_80032ED0(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80032FFC);
+    track->unkFE = *track->addr++;
+    track->attr_mask |= 0x8000;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u16*)((u8*)D_80096608 + off + 0xFE) = track->unkFE;
+    }
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033060);
+void func_80032F34(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800330C4);
+    track->unk100 = *track->addr++;
+    track->attr_mask |= 0x2200;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u16*)((u8*)D_80096608 + off + 0x100) = track->unk100;
+    }
+}
+
+void func_80032F98(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
+
+    track->unk102 = *track->addr++;
+    track->attr_mask |= 0x4400;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u16*)((u8*)D_80096608 + off + 0x102) = track->unk102;
+    }
+}
+
+void func_80032FFC(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
+
+    track->unkEC = *track->addr++;
+    track->attr_mask |= 0x100;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u32*)((u8*)D_80096608 + off + 0xEC) = track->unkEC;
+    }
+}
+
+void func_80033060(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
+
+    track->unkF0 = *track->addr++;
+    track->attr_mask |= 0x200;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u32*)((u8*)D_80096608 + off + 0xF0) = track->unkF0;
+    }
+}
+
+void func_800330C4(AKAO_TRACK* track, AKAO_CONFIG* config, u32 mask) {
+    s32 off;
+
+    track->unkF4 = *track->addr++;
+    track->attr_mask |= 0x400;
+    if (track->update_flags & 0x100) {
+        off = track->overlay_voice * 0x108;
+        *(u32*)((u8*)D_80096608 + off + 0xF4) = track->unkF4;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033128);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800331CC);
+void func_800331CC(AKAO_TRACK* track, AKAO_CONFIG* config) {
+    s32 off;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033224);
+    config->unk28 &= ~(1 << track->alt_voice_id);
+    off = track->instr_id * 0x40;
+    track->update_flags &= ~0x200;
+    track->unk102 = *((u8*)D_80075F34 + off);
+    track->attr_mask |= 0x4400;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033264);
+// Loop start: open the next of four nested loop slots.
+void func_80033224(AKAO_TRACK* track) {
+    track->loop_id = (track->loop_id + 1) & 3;
+    track->loop_addr[track->loop_id] = track->addr;
+    track->loop_times[track->loop_id] = 0;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800332EC);
+// Loop end with a repeat count: go round again until the count is reached,
+// then close the slot.
+void func_80033264(AKAO_TRACK* track) {
+    s32 count;
+
+    count = *track->addr++;
+    if (count == 0) {
+        count = 0x100;
+    }
+    if (++track->loop_times[track->loop_id] != count) {
+        track->addr = track->loop_addr[track->loop_id];
+    } else {
+        track->loop_id = (track->loop_id - 1) & 3;
+    }
+}
+
+// Branch out of the loop on the last-but-one pass (the count is tested
+// without being advanced), otherwise skip the 16-bit displacement.
+void func_800332EC(AKAO_TRACK* track) {
+    s32 count;
+
+    count = *track->addr++;
+    if (count == 0) {
+        count = 0x100;
+    }
+    if (track->loop_times[track->loop_id] + 1 != count) {
+        track->addr += 2;
+    } else {
+        track->addr += READ_S16(track->addr);
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8003337C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_80033420);
+// Loop end with no count: always go round again.
+void func_80033420(AKAO_TRACK* track) {
+    track->loop_times[track->loop_id]++;
+    track->addr = track->loop_addr[track->loop_id];
+}
 
 void func_8003345C(AKAO_TRACK* track) {
     u16 val = *track->addr++;
