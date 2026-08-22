@@ -742,7 +742,32 @@ static void func_800BA24C(void) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BA2BC);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BA360);
+extern s32 D_801590E8[];
+extern u8 D_801590E4[];
+extern u16 D_800F5B74;
+
+// build a one-shot descriptor in the scratchpad and hand it to the display
+// list builder. `neg` must be u8: as an s32 local, `v < 0` is folded to
+// `srl v,31`, and only a QImode destination leaves do_store_flag's `slti`.
+void func_800BA360(s32 arg0, u_long** arg1, s32 arg2, s32 arg3) {
+    Unk801B0C98* pkt;
+    s32 v;
+    u8 neg;
+    s32 flags;
+    u8 unusedLocals[8];
+
+    pkt = (Unk801B0C98*)0x1F800320;
+    v = D_801590E8[arg0];
+    pkt->unkC = 0x20;
+    pkt->unkE = 0;
+    pkt->unk8 = 0;
+    pkt->unk0 = (s32*)((v & 0x7FFFFFFF) + (s32)D_801590E4);
+    flags = arg3 | 0x180;
+    neg = v < 0;
+    pkt->unk4 = (neg << 3) | flags;
+    pkt->unkA = D_800F5B74;
+    D_80163C74 = func_800D29D4(pkt, arg1, arg2, D_80163C74);
+}
 
 static void func_800BA40C(void) {
     s32 i;
@@ -945,7 +970,21 @@ void func_800BBA40(s32 arg0) {
     SystemAkaoExecute();
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BBA84);
+// queue sound command 0x20 with a stereo pan derived from the model's
+// committed screen X (arg1 == -1 means "use the caller's pan verbatim")
+void func_800BBA84(u16 arg0, s16 arg1, s32 arg2) {
+    s32 param;
+
+    if (arg1 == -1) {
+        param = (u8)arg2;
+    } else {
+        param = (g_modelScreenPos[arg1].prevX / 5 * 2) & 0x7E;
+    }
+    D_8009A004[0] = param;
+    D_8009A000[0] = 0x20;
+    D_8009A008[0] = arg0 & 0xFFFF;
+    SystemAkaoExecute();
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800BBB20);
 
@@ -1438,7 +1477,15 @@ s32 func_800C2F20(s32 arg0, s16* arg1) {
     return 1;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C2FD4);
+// queue sound command 0x2A, same pan derivation as func_800BBA84
+void func_800C2FD4(s32 arg0, s16 arg1, s32 arg2) {
+    if ((u8)arg2 != 0) {
+        D_8009A000[0] = 0x2A;
+        D_8009A004[0] = (g_modelScreenPos[(u8)arg0].prevX / 5 * 2) & 0x7E;
+        D_8009A008[0] = arg1;
+        SystemAkaoExecute();
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C3068);
 
@@ -1584,7 +1631,37 @@ void func_800C55B8(void) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C5694);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C57B0);
+extern BattleModelSub D_8015E1E8[];
+s32 func_800B2F50(void);
+
+// scatter the 256 particle records: random direction, a downward speed, and
+// a shared model matrix. `base` has to be its own local -- without it gcc
+// folds the +0x3800 into the symbol and derives the record cursor from the
+// byte array instead of both from one materialised base, which is what the
+// target does.
+void func_800C57B0(void) {
+    BattleModelSub* p;
+    u8* q;
+    u8* base;
+    s32 i;
+
+    base = (u8*)D_8015E1E8;
+    q = base + 0x3800;
+    p = (BattleModelSub*)base;
+    for (i = 0; i < 0x100; i++) {
+        p->sv2.vx = (func_800B2F50() & 0x3FFF) - 0x2000;
+        p->sv2.vy = -0x2710 - func_800B2F50() / 2;
+        p->sv2.vz = (func_800B2F50() & 0x3FFF) - 0x2000;
+        p->sv1.vx = 0;
+        p->sv1.vy = 0;
+        p->sv1.vz = 0;
+        p->pm = (MATRIX*)&D_800FA63C;
+        p++;
+        q[0] = 0;
+        q[1] = 0;
+        q += 2;
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle1", func_800C5864);
 

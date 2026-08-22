@@ -549,6 +549,27 @@ a near-miss, in rough order of frequency:
   a *C* function and none in an assembled `.s`, so an unfiltered diff of a
   half-decompiled unit is thousands of lines of nothing. What is left is one
   row per real difference, with the relocation naming the symbol.
+* **`x < 0` gives `srl x,31` through an `s32` local and `slti x,0` through a
+  `u8` one.** `do_store_flag` has a special case for a sign test against zero
+  and emits the logical shift whenever the destination is the comparison's own
+  mode; a QImode destination is not, so the shift path is skipped and the
+  ordinary `slti` survives. Both are one instruction and both feed a following
+  `sll` identically, so the diff is a single row that reads like an
+  optimisation you cannot spell -- and the fix is the local's width, not the
+  comparison's spelling. `0 > v`, `(v < 0) ? 1 : 0`, `neg * 8` and `s16`/`u32`
+  locals were all measured and are the `srl` form; only `u8` reaches `slti`.
+  `func_800BA360` in `src/battle/battle1.c` matched on that one word.
+* **A `u16` parameter gets no entry mask when a prototype is in scope, so an
+  `andi 0xffff` at the *use* is the source's own `& 0xFFFF`.** With
+  `PROMOTE_PROTOTYPES` gcc trusts the caller to have extended the argument and
+  `assign_parms` emits nothing, so the entry-conversion rule ("`move` cannot
+  come from a `u8` parameter") only holds for the *un*prototyped case, which
+  is not how this codebase compiles. Read the parameter's width off the
+  **callers** instead: a caller loading the argument with `lhu` passes it to a
+  `u16` parameter and one loading `lh` to an `s32`, and the callee's own body
+  cannot tell you which. `func_800BBA84`'s `s32` reading matched the function
+  under test perfectly and moved two `lhu` to `lh` in `battle2.c`, which is
+  only visible in `make build` -- see the objdump recipe above.
 * **A range test written with `&&` is folded; nested `if`s are not.**
   `x < 6 && x >= 4` becomes `(unsigned)(x - 4) < 2` — one instruction where
   the target has two `slti` against the same register. `fold_range_test` only

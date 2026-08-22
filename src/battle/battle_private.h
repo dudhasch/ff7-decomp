@@ -603,7 +603,7 @@ static void func_800BA40C();
 static void func_800BB030(s16 arg0);
 void func_800BB2A8(u8);
 void func_800BB9B8(s32);
-void func_800BBA84(u16 arg0, s32 arg1, s32 arg2);
+void func_800BBA84(u16 arg0, s16 arg1, s32 arg2);
 static void func_800C0480(s16);
 static void func_800C0630(s16);
 static void func_800C0970(s16);
