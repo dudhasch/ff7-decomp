@@ -7,6 +7,8 @@ s32 func_80015B50(void);
 s32 func_80015B88(void);
 extern u8 D_80083084[];
 extern u8 D_80063048[];
+extern void* D_800707C0;
+void func_80014804(void);
 /* main's .bss, addressed %gp_rel under -G8 -- declare, never define. */
 extern s8 D_80062FFC;
 extern u8 D_80063020;
@@ -443,7 +445,29 @@ void func_80014804(void) {
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800148A0);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800148B4);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_800148B4);
+#else
+/* PARKED at 2 rows / +1 instruction, and the residue is the same %gp_rel
+ * blocker as func_8001A384 -- see CLAUDE.md on -G8. The single differing
+ * cluster is `sw $v0,%gp_rel(g_CurrentAction)($gp)` in the target against a
+ * `lui $at,%hi` plus `sw %lo` here; g_CurrentAction is at 0x80063014 in main's
+ * .bss, i.e. another object, so cc1 will not treat it as small data however it
+ * is declared. Everything else is instruction-for-instruction. Unpark this the
+ * day the .bss import lands; do not spend a codegen budget on it. */
+s32 func_800148B4(void) {
+    func_800148A0();
+    g_CurrentAction = (Unk800A8D04*)0x1F800000;
+    D_800707C0 = D_80063048;
+    func_80014610();
+    func_80014C70();
+    func_80014578(1, (void*)0x801B0000, func_80014804);
+    func_800145BC(0);
+    func_80014578(2, (void*)0x801B0000, func_80014750);
+    func_800145BC(0);
+    return 1;
+}
+#endif
 
 void func_80014934(void) {
     func_800148A0();
