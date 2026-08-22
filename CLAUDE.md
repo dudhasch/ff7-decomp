@@ -1753,22 +1753,34 @@ a near-miss, in rough order of frequency:
   measured with `md5sum`, twice, with the ninja output visible. So the change
   is free for everything currently written and would unblock 77 functions.
 
-  It is *not* landable yet, and the reason is a latent build-system bug rather
-  than codegen: changing the header forces splat to re-run, splat rewrites
-  `build/us/undefined_syms.<ovl>.txt`, and `src/menu/cnfgmenu.c` and
-  `src/menu/bginmenu.c` reference `D_80062F58` — an address that only gets
-  that name while splat knows no better one. The regenerated
-  `config/sym_export.us.txt` (untracked, produced from `main.elf`) names
-  `0x80062f58` `g_AkaoVolMulMusicSlideStep`, splat drops the `D_` line, and
-  both menu overlays fail to link with `undefined reference to D_80062F58`.
-  The stale file is what has been holding them up: `rm
-  build/us/undefined_syms.cnfgmenu.txt` and rebuilding reproduces the failure
-  with the header **unchanged**. The root cause is one address:
+  It is *not* landable yet, and the reason is a feedback loop in the build
+  rather than anything about codegen. Changing the `//!` line regenerates
+  `build.ninja`, which makes ninja re-run **splat for `main`**; splat's
+  `symbol_addrs_path` for `main` includes the untracked
+  `config/sym_export.us.txt`, which is itself generated from `main.elf`, so
+  the pass is not a fixpoint. After it, `sym_export` names `0x80062f58`
+  `g_AkaoVolMulMusicSlideStep`, splat therefore stops writing
+  `D_80062F58 = 0x80062F58;` into `build/us/undefined_syms.cnfgmenu.txt`, and
+  `src/menu/cnfgmenu.c` and `src/menu/bginmenu.c` — which reference the
+  address by its `D_` name — fail to link. The give-away that the assembler
+  flag is innocent: `rm build/us/undefined_syms.cnfgmenu.txt` and rebuild with
+  the header **unchanged** reproduces exactly the same failure, and a plain
+  `touch src/main/18B8.c` (which relinks `main` but does not regenerate
+  `build.ninja`) does **not**. The underlying discrepancy is one address —
   `config/symbols.main.us.txt` puts `g_AkaoVolMulMusicSlideStep` at
-  `0x80062F2C` while `main.elf` links it at `0x80062F58`, 0x2C apart. Fix that
-  and the assembler switch is a 77-function unblock. Until then, leave
-  `//! G=8` alone — and know that **any** change that makes splat re-run for
-  the menu overlays can surface the same failure out of nowhere.
+  `0x80062F2C` while `main.elf` links it at `0x80062F58`. Fix that and the
+  assembler switch is a 77-function unblock. Until then, leave `//! G=8`
+  alone — and know that **any** change that makes splat re-run for `main` can
+  surface this out of nowhere, in an overlay you did not touch.
+
+  All of the above was re-measured from scratch on an isolated Docker build
+  volume, because the first pass was taken while seven worktrees were sharing
+  one (see *Working in parallel*) and produced a *different* and wrong story —
+  a corrupt `psxsdk.c.o`, a `sym_export` that appeared to change on its own,
+  and two "reproducible" failures that landed on different overlays. **A
+  build-system finding measured on a shared volume is not a finding.** If a
+  failure cannot be attributed to a file you edited, check the volume before
+  spending anything on the symptom.
 * **`setShadeTex` is `ori 0x1`, `setSemiTrans` is `ori 0x2`.** Both are a
   read-modify-write of byte 7 of the packet and look identical in a diff except
   for the constant; do not assume a primitive-setup loop sets transparency
