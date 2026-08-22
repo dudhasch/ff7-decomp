@@ -12,6 +12,7 @@ static s32 func_800B716C(void);
 static s32 func_800B7B2C(void);
 s32 func_800B7B3C(void);
 void func_800B87D8(s16 window);
+void func_800B6DCC(void);
 void func_800B95E8(void);
 s32 func_800B962C(s16 window, s16 stringId);
 void func_800B98F0(s16 window);
@@ -2840,7 +2841,18 @@ void func_800B6AEC(void) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6B28);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6C84);
+void func_800B6C84(void) {
+    if (D_80115A60 == 0) {
+        func_800A7F38();
+        D_80115A40 = func_800A86C4(2);
+        if (func_800ADC80(2) != 0) {
+            D_80115A60 = 1;
+            D_80115A50 = 0;
+            DS_read(D_800C74DC, D_800C74E0, D_80115A40, func_800B6DCC);
+            SystemCdromReadChain();
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B6D10);
 
