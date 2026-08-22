@@ -1265,7 +1265,28 @@ void func_800A9678(s16 arg0) { func_800A9520(D_8010AD3C, arg0); }
 
 void func_800A96A4(s16 arg0) { func_800A9520(D_8010AD40, arg0); }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A96D0);
+void func_800A96D0(s16 arg0) {
+    WorldActor* actor;
+    s32 v;
+
+    if (D_8010AD3C != NULL) {
+        actor = D_8010AD3C;
+        if (D_8011650C == 1) {
+            if (actor->flags1 & 1) {
+                v = (u32)(actor->unk3E * 15 + arg0) >> 4;
+            } else {
+                v = (u32)(actor->unk3E * 3 + arg0) >> 2;
+            }
+        } else {
+            if (actor->flags1 & 1) {
+                v = (u32)(actor->unk3E * 7 + arg0) >> 3;
+            } else {
+                v = (u32)(actor->unk3E + arg0) >> 1;
+            }
+        }
+        actor->unk3E = v;
+    }
+}
 
 s16 func_800A97A8(void) {
     return D_8010AD3C == NULL ? 0 : D_8010AD3C->unk3C + D_8010AD3C->unk3E;
