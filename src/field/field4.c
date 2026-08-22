@@ -10136,6 +10136,38 @@ s32 OpcodeFuncNfade(void) {
  * insns, which the scorer charges 300 for. Nothing the randomizer can reach in
  * one step crosses that.
  *
+ * The *semantics* are now closed, against the opcode wiki
+ * (ff7-mods.github.io/ff7-flat-wiki, Opcodes/6B_FADE and 6C_FADEW). FADEW is
+ * one byte with no parameters, so `PC_INC(1)` is right, and FADE's page
+ * enumerates the type ids -- every one of them matches this repo's
+ * `FieldFadeType` name for the same value, 0..12 inclusive, including the two
+ * that only NFADE can set (11 and 12). It also explains why there are exactly
+ * two waiting arms and why they test opposite ends: "If the type id is odd,
+ * the adjust is 0xFF, if even, it is 0x00." The `!= 0` arm is types 1, 5, 7,
+ * 9 -- all odd, so the adjust counts *down* from 0xFF -- and the `< 0xFF` arm
+ * is 2, 6, 8, 10, all even, counting *up* from 0. The eleven-entry jump table
+ * the target's `sltiu v0,v1,0xb` implies is cases 0..10 with 3 falling to the
+ * default. So the "this arm is a different program" failure that CLAUDE.md
+ * warns about for jump-table functions is ruled out here; what is left is
+ * purely the cross-jump.
+ *
+ * Six more spellings measured after that and all *exactly* inert at 2 rows:
+ * inverting the `!= 0` guard to `if (adjust == 0) break; return 1;`, the same
+ * for the `< 0xFF` arm, both together, dropping the explicit
+ * `case FFT_SYS_FADE_TO_BLACK_FIELD_CHANGE` so only `default:` remains,
+ * spelling the bound `<= 0xFE`, and the polarity flip combined with the
+ * dropped case. fold normalises every one of them.
+ *
+ * And the 2x2 of which arm owns the `adjust` local was re-run, because the
+ * list above is ambiguous about it: arm 2 with its own local and the default
+ * arm keeping `adjust`, arm 2 inline, and the default arm with its own local
+ * all measure 9 rows -- **and 70 instructions against 73**. That length is
+ * the sharper number and it was not recorded before: every spelling that
+ * fixes the register is three instructions *short*, which is the cross-jump
+ * firing and deleting `beqz`/`ori`/`j`. It corroborates the diagnosis exactly
+ * and it is why this body, at 2 rows and the exact length, is the one to
+ * keep.
+ *
  * Note the scratch only became scoreable at all with
  * `tools/permuter_latedefines.py` and `tools/permuter_rodata_local.py` (see
  * CLAUDE.md step 4): before those, `PC_INC` was compiled as a call and the
