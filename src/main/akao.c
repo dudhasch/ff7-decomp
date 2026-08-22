@@ -52,7 +52,8 @@ typedef struct {
     u16 key_stored;
     s16 portamento_steps;
     s16 sfx_mask;
-    u8 unk70[0xE];
+    u8 unk70[0xC];
+    s16 unk7C;
     s16 vibrato_depth;
     s16 vibrato_depth_slide_steps;
     u8 unk82[0xE];
@@ -73,7 +74,7 @@ typedef struct {
     s16 unkAC;
     s16 unkAE;
     u8 unkB0[0x8];
-    s16 loop_id;
+    u16 loop_id;
     u16 loop_times[0x4];
     u16 length_stored;
     u16 length_fixed;
@@ -90,10 +91,25 @@ typedef struct {
     s16 pan_lfo_vol;
     s32 unkDC;
     s32 attr_mask;
-} AKAO_TRACK;
+    u8 unkE4[0x8];
+    u32 unkEC;
+    u32 unkF0;
+    u32 unkF4;
+    u16 unkF8;
+    u16 unkFA;
+    u16 unkFC;
+    u16 unkFE;
+    u16 unk100;
+    u16 unk102;
+    u8 unk104[0x4];
+} AKAO_TRACK; // size:0x108
 
 typedef struct {
-    u8 pad0[0x2C];
+    u8 pad0[0x18];
+    u32 tempo;
+    u8 pad1C[0x8];
+    u32 unk24;
+    u32 unk28;
     u32 noise_mask;
     u32 reverb_mask;
     u32 pitch_lfo_mask;
@@ -152,7 +168,9 @@ typedef struct {
     u8* unk0;
     u8 pad04[0x52];
     u16 unk56;
-    u8 pad58[0xB0];
+    u8 pad58[0x88];
+    s32 unkE0;
+    u8 padE4[0x24];
 } Unk80096608; // size 0x108
 
 extern void (*D_80049548[])(Unk8002B7E0*);
@@ -160,7 +178,9 @@ extern u8 D_800499A8[]; // opcode lenghts
 extern u8 D_80049C40[];
 extern s32 g_AkaoWaveTableKey[];
 extern s32 D_80062F00;
+extern s32 D_80062F04;
 extern u16 D_80062F1E;
+extern u8 D_80075F34[];
 // Music-driver slide state: each MulMusic value is a fixed-point scalar for
 // pitch/volume/tempo (current value in the upper 16 bits, lower 16 bits are
 // fractional precision the driver accumulates every tick for a smooth
@@ -229,6 +249,7 @@ extern s32 g_AkaoNoiseMask;
 extern s32 g_AkaoReverbMask;
 extern s32 g_AkaoPitchLfoMask;
 extern u16 D_8009A14E;
+extern u16 D_8009A152;
 extern s32 D_8009A104;
 extern s32 g_AkaoPendingMask;
 extern s32 D_8009A10C;
