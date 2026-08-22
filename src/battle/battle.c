@@ -2570,8 +2570,25 @@ static void func_800B2CAC(s32 arg0, s32 arg1) {
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B2CFC);
 
-u16* func_800B2EBC();
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B2EBC);
+// Look up an attack record by id: ids below 0x100 index the kernel-resident
+// table directly, higher ones are scene-local and are found by scanning the
+// scene's attackIDs list.
+u16* func_800B2EBC(s32 id) {
+    u16* result = NULL;
+    s32 i;
+
+    if (id < 0x100) {
+        result = (u16*)&D_800708C4[id];
+    } else {
+        for (i = 0; i < 0x20; i++) {
+            if (D_800F5F44.attackIDs[i] == id) {
+                result = (u16*)&D_800F5F44.attacks[i];
+                break;
+            }
+        }
+    }
+    return result;
+}
 
 u8 func_800B2F30(void) { return func_80014B70(); }
 

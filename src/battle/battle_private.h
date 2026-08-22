@@ -242,6 +242,8 @@ typedef struct {
     /* 0x04 */ u8 unk4[0x64];
 } Unk800F83E4; // size:0x68
 
+extern AttackEntry D_800708C4[]; // kernel-resident attack table, indexed by
+                                 // attack id (see func_800B2EBC)
 extern u8 D_800708C8[];       // kernel-region table, 0x1C-byte rows, indexed by
                               // attack/effect id
 extern u8 D_800708D0[][0x1C]; // kernel-region table, indexed by
