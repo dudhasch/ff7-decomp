@@ -11,7 +11,7 @@
   },
   {
    "unit": "field2.c",
-   "lines": 5604,
+   "lines": 5592,
    "bodies": 46,
    "matching": 37,
    "parked": 9,
@@ -29,7 +29,7 @@
   },
   {
    "unit": "field4.c",
-   "lines": 10546,
+   "lines": 10543,
    "bodies": 259,
    "matching": 251,
    "parked": 8,
@@ -38,7 +38,7 @@
   },
   {
    "unit": "field5.c",
-   "lines": 3081,
+   "lines": 3063,
    "bodies": 91,
    "matching": 89,
    "parked": 2,
@@ -47,7 +47,7 @@
   }
  ],
  "totals": {
-  "lines": 21649,
+  "lines": 21616,
   "bodies": 411,
   "matching": 389,
   "parked": 22,
@@ -75,8 +75,8 @@
   "locked_by_parked_only": 186,
   "locked_by_handwritten": 6,
   "unnamed_functions": 22,
-  "m2c_locals": 140,
-  "m2c_local_refs": 779,
+  "m2c_locals": 0,
+  "m2c_local_refs": 0,
   "unk_members": 235
  },
  "queue": [
@@ -216,7 +216,7 @@
  "queue_measured": true,
  "history": [
   {
-   "lines": 21649,
+   "lines": 21616,
    "bodies": 411,
    "matching": 389,
    "parked": 22,
