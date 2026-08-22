@@ -2308,7 +2308,35 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AFCC8);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AFFBC);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B0098);
+void func_800B0098(s32 arg0, s32 arg1) {
+    s32 i;
+    s32 tpage;
+
+    if (D_8010B488 < D_8010B494) {
+        D_8010B47C = arg0;
+        i = 0;
+        do {
+            if (GetGraphType() == 1 || GetGraphType() == 2) {
+                if (arg1 == 1) {
+                    tpage = 0x126;
+                } else {
+                    tpage = 0xA6;
+                }
+            } else {
+                if (arg1 == 1) {
+                    tpage = 0x56;
+                } else {
+                    tpage = 0x36;
+                }
+            }
+            SetDrawMode(
+                (DR_MODE*)(i * 0x24 + (s32)D_8010B434), 0, 1, tpage, NULL);
+            i++;
+        } while (i < 2);
+    } else {
+        D_8010B47C = 0;
+    }
+}
 
 void func_800B017C(s32 arg0) {
     s32 off;
