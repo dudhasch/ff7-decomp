@@ -65,9 +65,18 @@ typedef struct {
 extern AkaoInstrument D_80075F28[];
 extern s32 D_80076C68[];
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800293D0);
+// SPU transfer-complete callback: clears the "transfer in progress" flag.
+void func_800293D0(void) {
+    SpuSetTransferCallback(0);
+    D_80062E08 = 0;
+}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_800293F4);
+// Arm func_800293D0 as the transfer-complete callback and mark a transfer in
+// progress.
+void func_800293F4(void) {
+    D_80062E08 = 1;
+    SpuSetTransferCallback(func_800293D0);
+}
 
 static void func_80029424(s32 arg0, s32 arg1) {
     func_800293F4();
