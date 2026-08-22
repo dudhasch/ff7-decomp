@@ -1338,6 +1338,23 @@ extern u8 D_8009AD38;   // top of a 9-byte block set to 0xFF downward
  *     146 rows. The scaled subscript folds the symbol into the address
  *     register and the whole `$at` form is lost -- CLAUDE.md's
  *     scaled-subscript rule, seen from the wrong side.
+ 
+ * Re-measured at 100 rows / +3, with the head's store grouping read against
+ * the target rather than guessed. Two things are now settled:
+ *   - the *order* of the 44 `g_FieldState->member = 0;` stores is already the
+ *     target's. Read straight off the `.s` the sequence is eventCmd(0x1),
+ *     eventCmdParam(0x2), movieCommandState(0x26), characterLock(0x32),
+ *     walkAnimId(0x2e), pcModelId(0x2a), idleAnimId(0x2c), runAnimId(0x30),
+ *     D_80081DC4, modelCount(0x28), suspendWalkAndAnim(0x33), and that is
+ *     what the body below writes. What differs is only which stores share a
+ *     base-register load, and since stores through one base are provably
+ *     non-overlapping, sched2 reorders them freely -- so the grouping is not
+ *     reachable from statement order here.
+ *   - both globals really are re-read at every use. Caching `g_FieldScripts`
+ *     in a local is **-17 instructions** (135 rows), caching `g_FieldState`
+ *     is **-61** (211), and both together **-80** (238). Those numbers are
+ *     the count of reloads the target has, so the repeated-expression form
+ *     the body already uses is right and is not what the residue is about.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field4", FieldInitDefaultValues);
@@ -1607,7 +1624,7 @@ void FieldInitDefaultValues(void) {
  * wall-clock limit rather than to exhaustion -- for exactly **one** row in the
  * real build. The other 25 outputs are between 160 and 390 and none of them is
  * worth opening. Do not read a score that size as progress; re-measure every
- * output with variant_eval. 
+ * output with variant_eval.
  * One correction to the paragraph above, and it is the kind of thing the
  * permuter's score cannot see: `pcBase` buys its row by *breaking* the
  * preheader's movable order. Without it the two hoisted symbol addresses come
