@@ -2060,6 +2060,42 @@ a near-miss, in rough order of frequency:
   different conflict set rather than a different ranking, and the target's
   `.s` cannot tell you which.
 
+* **Read the allocno arithmetic *forwards*: it does not only tell you when to
+  stop, it tells you what the fix has to deliver.** This file already records
+  the priority formulae as a stopping criterion -- work out which term you can
+  change, and park if the answer is none. Run the other way they are a
+  specification. `FieldEntityWalkmechCross`' residue was 34 rows that read as
+  pure register naming; cc1's `-dl` dump named the two quantities and both
+  terms, `link` at 3 refs over 12 insns (`(3-12)/12 = -0.75`) against its
+  sign-extension at 3 over 6 (`-0.50`), so the extension is allocated first
+  and takes the lower register. That is not a verdict, it is an equation with
+  a solution: `link` at **4** refs is `(2*4-12)/12 = -0.33` and wins, because
+  4 crosses a `floor_log2` step. The question then stops being "what should I
+  try" and becomes "what source change gives that variable more references",
+  which has a small and enumerable answer set. Two changes fell straight out
+  of it and took the function to 6 rows at the exact length.
+* **Per-arm locals and one shared local are a lever in *both* directions, and
+  which way it points depends on the surrounding guard shape.** This file
+  records splitting one variable per arm as worth 13 rows on
+  `FieldCalcPointOnLine` and on `FieldEntityWalkmechCross`, and that is true.
+  It is also true that *merging* the same three locals back into one is worth
+  16 rows on the same function once its guard is written as nested `if`s
+  rather than `&&` -- because merging is how a HImode value gets from 3
+  references to 9 and out-ranks the sign-extension competing with it. The two
+  measurements are 99->86 and 22->6 on the same lines of the same function.
+  So this is not a rule with a direction; it is a reference-count knob, and
+  the `.lreg` dump is what says which way to turn it. Re-measure both
+  directions after any change to the guard around them.
+* **Nest a guard rather than `&&` when a value's live range is what you need
+  to shorten.** `shift = link >> 3; if (link >= 0 && bit(shift) == 0)` and
+  `if (link >= 0) { shift = link >> 3; if (bit(shift) == 0) }` are the same
+  program; the second computes the sign-extension's consumer inside the test,
+  which shortens that pseudo's live range and re-ranks it. Worth 12 rows
+  across three arms in `FieldEntityWalkmechCross`, and it fixed a *different*
+  register pair (the table base against the scaled index) as a side effect.
+  Note this is the opposite lever from `OpcodeFuncLader`, where a range test
+  had to be *un*-folded into nested `if`s to stop `fold_range_test`; here the
+  nesting is about live ranges, not about folding.
 * **When two locals hold each other's register and nothing you write moves
   them, you are looking at `allocno_compare`, and only two of its three terms
   are reachable from C.** gcc 2.6.3 sorts global allocnos by
@@ -3647,6 +3683,22 @@ full build is red. Only run `make build` once the diff is clean.
 **Never delete or stub an `INCLUDE_ASM` line to make the build pass.** That
 silently drops a function. If you cannot match a function, revert your changes to
 that function and leave the `INCLUDE_ASM` in place.
+
+**Scope a rename by owner, not by name.** A struct member or a local is not
+a symbol, so renaming one cannot change codegen -- but only if the thing being
+renamed is really the one you meant. `unk10` occurs in six unrelated structs
+across the tree and `unk6` in three within `include/game.h` alone; a pass that
+renamed every `->unkNN` touched battle, main, world and magic, and every one of
+those edits would have compiled. Both halves need scoping: the **declaration**
+inside the owning typedef's braces -- anchored on the closing `} Name;` and
+walked back to the nearest preceding `typedef struct ... {`, since a non-greedy
+match from the first typedef in the file spans every struct above it -- and each
+**use** by the expression that reaches it (`part->unk1C`, never `->unk1C`). The
+same applies to locals: `var_v0_10` was dead in `FieldEntityMovementUpdate` and
+live in `FieldEntityMove` twenty lines below, so a file-scoped dead-declaration
+sweep deleted a live one. gcc 2.6.3 does not stop on the undeclared identifier
+-- it substitutes 0 and keeps generating code -- so the only symptom would have
+been the score.
 
 **Never edit generated files.** `asm/`, `build/`, `expected/`,
 `config/sym_export*.txt` and `build.ninja` are all produced by the build. Editing

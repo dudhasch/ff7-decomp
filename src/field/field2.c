@@ -2396,12 +2396,12 @@ extern s16 D_801144CC;
  *     baseline -- and the absolute constant `(s32*)0x1F800010` is +2
  *     instructions. fold normalises every address spelling, so the operator
  *     is not reachable from the expression. Note the target emits **both**
- *     forms off `$s0` in one function: `addiu` at the two `FieldEntityVectorSub`
- *     calls and `ori a1,s0,0x10` at the `FieldEntityCalculateZ` call, so
- *     whatever chooses is per-block and not a property of the declaration.
- *     `D_1F800010`/`D_1F800020` are splat inventions -- they are in no config
- *     and appear in four `.s` files in the tree -- so there is no symbol to
- *     name here.
+ *     forms off `$s0` in one function: `addiu` at the two
+ * `FieldEntityVectorSub` calls and `ori a1,s0,0x10` at the
+ * `FieldEntityCalculateZ` call, so whatever chooses is per-block and not a
+ * property of the declaration. `D_1F800010`/`D_1F800020` are splat inventions
+ * -- they are in no config and appear in four `.s` files in the tree -- so
+ * there is no symbol to name here.
  *   - **Four rows: the fast path's last branch polarity.** The target has
  *     `bgez a0,<done>` falling through to `j <chain>` with both delay slots
  *     empty; ours has `bltz a0,<chain>` falling through to `j <done+4>`, and
@@ -2415,7 +2415,21 @@ extern s16 D_801144CC;
  *     last argument is 35; and `do { } while (0);` in front of `done:` is
  *     exactly inert, which by CLAUDE.md's own test says this residue is
  *     allocation rather than sched2 and that further barriers will be inert
- *     too. */
+ *     too.
+ *
+ * decomp-permuter has had a bounded go at exactly those two groups and the
+ * result is recorded rather than left to be repeated. The scratch needed one
+ * fix first: the target names `D_1F800010`/`D_1F800020`, which are splat
+ * inventions the C cannot produce, so both `%lo` operands were rewritten to
+ * plain `0x10`/`0x20` in the scratch's `target.s` and it was reassembled --
+ * without that the relocation sets differ and `--stop-on-zero` can never
+ * fire. Base score 800 with the relocations then matching, 291 instructions
+ * on both sides. A `PERM_GENERAL` set covering the four fast-path spellings,
+ * three address spellings at each of the two `FieldEntityVectorSub`
+ * destinations and three shapes of the `done:` block enumerates **108
+ * candidates**; every one scored 800 and the run terminated on its own. So
+ * the two groups are inert not only individually but crossed, which is what
+ * the single-lever sweeps above could not establish. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityWalkmechCross);
 #else
