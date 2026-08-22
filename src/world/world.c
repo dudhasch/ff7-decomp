@@ -199,7 +199,19 @@ void func_800A31C0(s16 arg0) { D_800E5668 = arg0 - 0x800 + D_800E5608; }
 
 s32 func_800A31E8(void) { return !D_800E5628; }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A31F8);
+void func_800A31F8(void) {
+    s32 v;
+
+    if (D_800E5650 == 0) {
+        v = 0x78 - ((D_800E5660 * 30) >> 8);
+    } else {
+        v = 0xA0 - ((D_800E5660 * 70) >> 8);
+    }
+    D_800E55F0 = v;
+    D_800C65EC = 0x190 - ((D_800E5660 * 200) >> 8);
+    D_800E5614 = 0x2710 - ((D_800E5660 * 6000) >> 8);
+    D_800E5678 = 0x1388 - ((D_800E5660 * 2500) >> 8);
+}
 
 s32 func_800A32F4(void) { return D_800E5678; }
 
