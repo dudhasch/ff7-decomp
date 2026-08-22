@@ -78,8 +78,17 @@ def main(argv):
     ap.add_argument("--only", help="restrict to this local")
     a = ap.parse_args(argv)
 
+    # Read the *pinned base*, not the live source: variant_eval applies every
+    # edit to `.variants/_base_<source>.c`, so a declaration block taken from a
+    # source that has moved on since the pin matches nothing, every variant
+    # aborts, and the table comes back empty with no explanation. That cost a
+    # sweep on func_801D2408 that read as "no scalar locals are worth
+    # anything" and was in fact "no variant ran".
     path = os.path.join(HERE, a.source)
-    text = io.open(path, encoding="utf-8", newline="").read()
+    base = os.path.join(HERE, ".variants", "_base_%s.c"
+                        % re.sub(r"\W", "_", a.source))
+    text = io.open(base if os.path.exists(base) else path,
+                   encoding="utf-8", newline="").read()
     lo, hi = body_span(text, a.func)
     block, lines = decl_block(text[lo:hi])
     if text.count(block) != 1:
@@ -129,6 +138,13 @@ def main(argv):
         L = LENGTH.search(chunk)
         delta = int(L.group(1)) - int(L.group(2)) if L else 0
         rows.append((abs(delta), int(r.group(1)), delta, label.get(tag, tag)))
+    if not rows:
+        # Never report an empty table as a flat sweep: every variant failing
+        # looks exactly like every width being worthless.
+        for p in specs:
+            os.remove(p)
+        sys.stderr.write(out)
+        sys.exit("width_sweep: no variant produced a score -- see above")
     rows.sort()
     print("\n  %-28s %7s %8s" % ("change", "rows", "length"))
     for _, n, d, lab in rows:

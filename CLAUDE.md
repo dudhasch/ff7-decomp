@@ -948,6 +948,24 @@ a near-miss, in rough order of frequency:
   above a run of raw `*(s32*)0xNNNN` stores, spell the stores as an array
   (`scratch[12]`) rather than the load as a cast -- same effect, and the
   array indexing is usually what the original wrote anyway.
+* **A store written through a pointer local pins every later load; the same
+  store written to the symbol does not, and the two are not always both
+  available.** `true_dependence` cannot disambiguate a store through a
+  computed pointer from anything, so `*p = table[idx];` stops a struct load
+  below it from being hoisted, while `SYM = table[idx];` -- a plain `extern`,
+  not `MEM_IN_STRUCT_P` -- lets it float. That is the usual rule; the part
+  worth knowing is that it can *collide* with the address-form rule one
+  section down. `func_801D2408` in `src/menu/savemenu.c` needs both halves at
+  once and cannot have them: the target stores the first play-clock digit
+  through a base register (`sb v1,0(s0)`, with the packet destination reached
+  later as `addiu s0,s0,0x66`), which requires `&D_801E6D52` to have a second
+  symbol reference for cse to relate -- and routing the store through the
+  pointer is exactly what stops `Savemap.header.time`'s second read floating
+  above it, which is what puts the clock's base in the target's `$s0` rather
+  than `$s1`. Measured: `*p = ...` is 24 rows, `SYM = ...` is 68. When two
+  documented idioms each fix half a residue and each breaks the other's half,
+  say so in the note -- it is a much more useful statement than either
+  measurement alone.
 * **A store's struct-ness decides whether a later load may float above it.**
   The companion to the aliasing bullet above, run forwards instead of
   backwards: `true_dependence` lets a `MEM_IN_STRUCT_P` load move past a store
@@ -3167,7 +3185,13 @@ a near-miss, in rough order of frequency:
   sweep in one run, so there is no reason to sample it.
   `tools/width_sweep.py` does exactly that -- every alternative width for
   every scalar local of one function, scored and sorted by length first --
-  and it is cheap enough to run before reading a single diff row.
+  and it is cheap enough to run before reading a single diff row. **Re-pin
+  before running it**: it takes the declaration block from the pinned base
+  (it used to read the live source), because `variant_eval` applies every
+  edit to the pin, so a block that has moved on since the pin matches nothing
+  and *every* variant aborts. The table then comes back empty, which reads
+  exactly like "no width is worth anything"; it now refuses rather than
+  printing a header with no rows.
   `FieldCalcPointOnLine`'s 150 variants over 30 locals come back flat in
   about a minute, which closes a whole dimension that
   `perm_randomize_internal_type` would otherwise spend a search on.
@@ -3555,6 +3579,23 @@ a near-miss, in rough order of frequency:
   by which pseudo holds the base, not by the source. Worth 7 rows in
   `PreloadNextFieldMap`. Reach for the local when the target *reloads* the
   global; reach for the symbol when it computes the same address twice.
+* **A named local for a call's address argument, assigned *before* the
+  statement above the call, is how that call's delay slot stays a `nop`.**
+  reorg fills a `jal`'s slot from the insn immediately before it and will not
+  take a store (a call may read memory), so a target with an empty slot after
+  `jal` is telling you the last insn before the call is the *store*, with the
+  argument move already issued. Written inline, `expand_call` emits
+  `move a1,<addr>` right before the `jal` and reorg takes it. Hoisting the
+  address into a local assigned one statement earlier -- `base =
+  &Savemap.header.leader_level;` above the memcpy that precedes
+  `D_80062D99 = 1; f(0x10F0, base);` -- makes sched2 issue the move first and
+  leaves the flag store adjacent to the call. Worth the last instruction and
+  six rows in `func_801D2408`. Where the assignment goes is the whole lever:
+  one statement earlier is right, at the top of the block it is hoisted out
+  and costs a second materialisation of the object's base, and empty
+  `do { } while (0);` barriers at six points around the call are inert or
+  worse -- which is the probe saying the residue was allocation, not
+  scheduling, and that the position of a *definition* was the thing to move.
 * **A call written out in both arms of an `if`/`else` puts its shared argument
   setup ahead of the branch.** With one call after the `if`, reorg fills the
   conditional branch's delay slot from the fall-through thread, is left with

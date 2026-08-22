@@ -801,7 +801,212 @@ void func_801D224C(void) {
     func_801D21F0(Savemap.header.place_name, &Savemap.memory_bank_4[0x68]);
 }
 
+// Digit glyph pairs, indexed by (digit * 2 + 0x20): the low byte of each pair
+// is at D_801DEF08 and the high byte at D_801DEF09, which is how the original
+// reaches them -- two symbols one byte apart rather than one 2-byte table.
+extern u8 D_801DEF08[];
+extern u8 D_801DEF09[];
+// The 15 save-slot records the file-select screen draws from, stride 0x3F6.
+extern u8 D_801DF120[];
+// The 0x200-byte memory-card file header being assembled: "SC", version, block
+// count, the 0x40-byte title, then the play-clock digits at +0x1A and +0x20.
+extern u8 D_801E6D38;
+extern u8 D_801E6D39;
+extern u8 D_801E6D3A;
+extern u8 D_801E6D3B;
+extern u8 D_801E6D52;
+extern u8 D_801E6D53;
+extern u8 D_801E6D54;
+extern u8 D_801E6D55;
+extern u8 D_801E6D58;
+extern u8 D_801E6D59;
+extern u8 D_801E6D5A;
+extern u8 D_801E6D5B;
+extern u8 D_801E6D98[];
+
+s32 func_80023788(s32);
+s32 func_8002382C(s32);
+
+// Write the current game to one memory-card file. Builds the card's own
+// 0x200-byte header block -- magic, block count, the title the caller passes,
+// and the play clock rendered as four glyph indices -- copies the slot's
+// record in behind it, checksums the live Savemap into D_801E7138, then
+// deletes any existing file and creates a fresh one. Every step is retried
+// 30 times because the card answers slowly after an insert.
+//
+// 1 = could not create the file, 2 = could not reopen it for writing,
+// 3 = gave up part-way through the write, 0 = saved.
+// 20 changed / 4 inserted at the exact 395 instructions, from a cold m2c seed
+// at 90 rows. `insn_histogram.py` is down to one fault: `lui +1 / ori -1`,
+// which is one extra materialisation of `&Savemap` (the per-address table
+// names it), so the program is right and what is left is where three
+// addresses live.
+//
+// The four residue clusters, and what each one is:
+//
+//  * `addiu s0,s0,0x5f` one slot earlier than the target's, against the
+//    `li v0,0x1b` beside it. Pure sched2 ordering of two independent insns.
+//  * the play-clock base: the target reuses $s0 (freed by the header walk)
+//    for `&Savemap.header.time` and reads it twice, early; this build keeps
+//    it in $s1 because the second read is *not* hoisted above the digit
+//    stores. The reason is aliasing, and it is the whole knot: the target
+//    stores the first digit through a base register (`sb v1,0(s0)`), which
+//    only happens if `&D_801E6D52` has a second symbol reference for cse to
+//    relate -- and writing that store through a pointer (`*p = ...`) is
+//    exactly what stops the clock load floating above it, because a store
+//    through a pointer may alias anything while a store to a plain `extern`
+//    may not. So the two halves are mutually exclusive in every spelling
+//    measured: `*p = ...` gives the base register and costs the hoist
+//    (24 rows), `D_801E6D52 = ...` gives the hoist and rebuilds the address
+//    (68). The original has both, which means it reaches `&D_801E6D52 + 0x66`
+//    some way this note has not found.
+//  * the reciprocal constant (0xCCCCCCCD, gcc's divide-by-10) in $s2 rather
+//    than $s1 -- a consequence of the clock base taking $s1.
+//  * `&Savemap` materialised once here and never in the target, which derives
+//    it as `addiu a2,s0,-0x4` off the `base` local below.
+//
+// Measured and rejected, in rough order of how much each was worth:
+//   split the header pointer into a base (`r`, block-local, dies at the
+//     func_801D21B8 call) and a walker (`q`)                    103 -> 93
+//   `u16 digit` for the two BCD digits                           93 -> 30
+//     (`u8` is 93, `s8` 66, `s16`/`s32`/`u32` 88..92; the width sweep found
+//      it and nothing in the target predicts it, since the mask the target
+//      emits is `andi 0xff`)
+//   `base` = &Savemap.header.leader_level, assigned *before* the 0x200-byte
+//     memcpy, so sched2 issues `move a1,s0` ahead of the D_80062D99 store
+//     and the checksum call's delay slot stays the `nop` the target has
+//                                                                30 -> 24
+//   the clear loop on its own counter rather than on `retries`   90 -> 69
+//   deriving the checksum store and the second memcpy from `base` as well
+//     (`*(u32*)(base - 4)`, `base - 4`), which is what the target's
+//     `sw v0,-4(s0)` / `addiu a2,s0,-0x4` / `addiu t0,s0,0x10ec` look like:
+//     39, because `base` is then assigned early enough that its
+//     materialisation is hoisted above the memcpy
+//   `t % 10` against `t - (t / 10) * 10`: identical
+//   declaration order: flat over eight permutations, so `allocno_compare`'s
+//     tie-break says these priorities were never tied
+//   a `s32*` local for the clock, with and without the assignment folded
+//     into the first read: exactly inert
+//   empty `do { } while (0);` barriers at six points around the checksum
+//     call: inert or worse (101, 111), so that residue is allocation and not
+//     scheduling
+//   `p = &D_801E6D52` assigned at four different points, and the memcpy
+//     destination spelled off D_801E6D53/D_801E6D58 instead: all flat
+#ifndef NON_MATCHINGS
 INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D2408);
+#else
+s32 func_801D2408(s8* path, u8* title) {
+    // Never touched; the original reserved 0x200 bytes below the outgoing
+    // argument area, which is exactly the size of the header block this
+    // function assembles in .bss. Its identity is not recoverable.
+    u8 unusedLocals[0x200];
+    u8* p;
+    u8* q;
+    s32 fd;
+    s32 retries;
+    s32 n;
+    u8 t;
+    u8 idx;
+    u16 digit;
+    u8* r;
+    u8* base;
+    s32 i;
+
+    func_801D224C();
+    D_801E8F40 = 0x2000;
+    r = &D_801E6D38;
+    *r = 0x53;         // 'S'
+    D_801E6D39 = 0x43; // 'C'
+    D_801E6D3A = 0x11;
+    D_801E6D3B = 1; // one block
+    func_801D21B8(r + 4, title);
+    q = r + 0x5F;
+    for (i = 0x1B; i >= 0; i--) {
+        *q-- = 0;
+    }
+
+    t = func_80023788(Savemap.header.time);
+    digit = t / 10;
+    idx = digit * 2 + 0x20;
+    p = &D_801E6D52;
+    *p = D_801DEF08[idx];
+    D_801E6D53 = D_801DEF09[idx];
+    digit = t % 10;
+    idx = digit * 2 + 0x20;
+    D_801E6D54 = D_801DEF08[idx];
+    D_801E6D55 = D_801DEF09[idx];
+    p += 0x66;
+
+    t = func_8002382C(Savemap.header.time);
+    digit = t / 10;
+    idx = digit * 2 + 0x20;
+    D_801E6D58 = D_801DEF08[idx];
+    D_801E6D59 = D_801DEF09[idx];
+    digit = t % 10;
+    idx = digit * 2 + 0x20;
+    D_801E6D5A = D_801DEF08[idx];
+    D_801E6D5B = D_801DEF09[idx];
+
+    memcpy(D_801E6D98, &D_801DF120[D_801E3D50 * 0x3F6], 0x20);
+    memcpy(p, &D_801DF120[D_801E3D50 * 0x3F6 + 0x2C], 0x80);
+    base = &Savemap.header.leader_level;
+    memcpy(D_801E6F38, &D_801E6D38, 0x200);
+
+    D_80062D99 = 1;
+    Savemap.header.checksum = func_801D1950(0x10F0, base);
+    memcpy(D_801E7138, &Savemap, sizeof(SaveWork));
+    D_80062D99 = 0;
+
+    retries = 0;
+    do {
+        fd = open(path, 1);
+        retries++;
+        if (fd != -1) {
+            delete (path);
+            close(fd);
+            break;
+        }
+    } while (retries < 10);
+
+    retries = 0x1E;
+    do {
+        fd = open(path, (D_801E6D3B << 16) | 0x200);
+        if (fd != -1) {
+            goto created;
+        }
+        retries--;
+    } while (retries != 0);
+    return 1;
+created:
+    close(fd);
+    retries = 0x1E;
+    do {
+        fd = open(path, 2);
+        if (fd != -1) {
+            goto opened;
+        }
+        retries--;
+    } while (retries != 0);
+    return 2;
+opened:
+    retries = 0x1E;
+    do {
+        n = write(fd, D_801E6F38, D_801E8F40);
+        if (n == D_801E8F40) {
+            goto ok;
+        }
+        retries--;
+        if (n != -1) {
+            D_801E8F40 -= n;
+        }
+    } while (retries != 0);
+    close(fd);
+    return 3;
+ok:
+    close(fd);
+    return 0;
+}
+#endif
 
 const char* D_801E2CB8[] = {
     "ＦＦ７／ＳＡＶＥ０１／００：００", "ＦＦ７／ＳＡＶＥ０２／００：００",
