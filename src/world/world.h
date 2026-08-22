@@ -479,6 +479,9 @@ extern u8 D_800C6940;
 extern u8 D_800C6A10[];
 extern u8 D_800E56DC[];
 extern u8 D_8010B434[];
+extern MATRIX D_800C6808;
+extern MATRIX D_800C6828;
+extern MATRIX D_800C6848;
 extern s32 D_800C74DC;
 extern s32 D_800C74E0;
 

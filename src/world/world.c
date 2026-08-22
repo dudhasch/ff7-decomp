@@ -2222,7 +2222,59 @@ void func_800AF0B0(void) {
     func_800AF110();
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800AF110);
+/* 2 rows at the exact 38 instructions, and both are the position of one
+ * insn. The target compares the two `func_800A1DE0()` results against a
+ * single `ori $s0,$zero,0x2` -- one pseudo, live across the middle call, so
+ * it takes a callee-saved register and grows the frame to 0x18. Writing the
+ * comparisons against a literal materialises `li $v1,0x2` twice (10 rows,
+ * +2 instructions); naming the constant in a local reproduces the sharing
+ * exactly, but the def is then emitted where the *statement* is -- before
+ * the `lui $a0,%hi(D_800C6808)` that the else arm contributes -- where the
+ * target emits it after, immediately ahead of the `bne`. That is the whole
+ * residue: same insns, `li` one slot early.
+ *
+ * The target's placement is where `expand_expr` would put it if the pseudo
+ * were created by the *comparison* and shared forward by cse, which needs
+ * the second compare to sit in the first one's extended basic block; it does
+ * not, because the join after SetLightMatrix has two predecessors. No source
+ * statement can be placed between the arm's address setup and the compare,
+ * so the emission order is not reachable from C by moving the assignment.
+ *
+ * Measured, all against this 2-row body: `if (... == (two = 2))` 2,
+ * `two = 2;` as its own statement 2, the second compare with the operands
+ * reversed 3; and without the shared local, two literals 10, `!=` with the
+ * arms swapped 18, both constructs as two calls each 10, the call result in
+ * a named local 10, the pointer-default form for SetLightMatrix 18, the
+ * value-default form for SetBackColor 26, both default forms 33.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/world/nonmatchings/world", func_800AF110);
+#else
+void func_800AF110(void) {
+    s32 r;
+    s32 g;
+    s32 b;
+    s32 two = 2;
+
+    if (func_800A1DE0() == two) {
+        SetLightMatrix(&D_800C6828);
+    } else {
+        SetLightMatrix(&D_800C6808);
+    }
+    if (func_800A1DE0() == two) {
+        r = 0x20;
+        g = 0x20;
+        b = 0x30;
+    } else {
+        r = 0x40;
+        g = 0x40;
+        b = 0x40;
+    }
+    SetBackColor(r, g, b);
+    SetColorMatrix(&D_800C6848);
+    SetFarColor(0, 0, 0);
+}
+#endif
 
 void func_800AF1A8(u32 arg0, s32 arg1) {
     Unk8010B178* temp_v1;
