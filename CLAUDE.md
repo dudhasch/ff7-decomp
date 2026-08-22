@@ -1986,6 +1986,34 @@ a near-miss, in rough order of frequency:
   already correct, and a whole conversion was written and landed on that
   reading before the length and row counts contradicted it.
 
+  **That paragraph was true as a specification and false as a description for
+  as long as it existed, and the same wrong reading happened again on the
+  strength of it.** The tool counted per symbol *name*: it discarded the
+  addend on both sides (`split("+")[0]` against objdump, a bare-name regex
+  against the `.s`) and never folded a renamed global against the `D_` name a
+  frozen `.s` still uses. So `AddBackgroundToRender` reported eight
+  materialisations of one base against six distinct neighbours -- which reads
+  exactly like the original declaring six scalars where the C has an array --
+  and every handler in `src/field/field4.c` reported twelve complementary
+  rows. All phantom. Both were diagnosed, written up and dispatched before a
+  direct look at the object showed the addends were zero and
+  `g_EntityToModel` was `D_8007EB98`. It is fixed and validated now (both
+  tables go to `(identical)` on a function `checkfn` calls pure register
+  naming, while `FieldDebugRenderPage` keeps its real spread), but the
+  transferable rule is the one that would have caught it in either decade:
+  **a note saying a tool resolves something is not evidence that it does.**
+  When a table hands you a structural diagnosis, confirm it against
+  `objdump -drz` on the object before spending anything on it -- one grep of
+  the relocations would have cost a minute and saved both.
+
+  What the corrected tool then says about `AddBackgroundToRender` is worth
+  recording on its own, because it is the rarer verdict: opcodes identical
+  *and* addresses identical at the exact length, with 65 rows still
+  differing. That is proof the residue is nothing but register naming, which
+  **confirms** the park note's `allocno_compare` arithmetic rather than
+  refuting it. A body with two clean histogram tables and rows remaining is a
+  park, not a search, and specifically not a permuter target.
+
 * **On a function hundreds of rows out, count instructions before reading
   any.** `tools/insn_histogram.py <src> <func>` prints the compiled length and
   two tables: opcodes (objdump's aliases folded back to the `.s` spelling, or
