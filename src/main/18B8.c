@@ -759,7 +759,14 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018D4C);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018E18);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018E90);
+void func_80018E90(void) {
+    s32 i;
+    s32 off;
+
+    for (i = 0, off = 0x1C0; i < 0x10; i++, off += 8) {
+        *(u8*)(D_80062E60 + off + 0x10F) |= D_80062E78;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80018ECC);
 
