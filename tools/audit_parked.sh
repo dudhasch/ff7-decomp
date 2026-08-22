@@ -19,7 +19,7 @@
 # carry parked bodies. Add a unit here when you park your first body in it.
 srcs="$*"
 [ -n "$srcs" ] || srcs="src/field/field.c src/field/field2.c src/field/field3.c
-src/field/field4.c src/field/field5.c src/world/world2.c"
+src/field/field4.c src/field/field5.c src/world/world2.c src/main/1255C.c"
 
 for src in $srcs; do
   [ -f "$src" ] || continue
