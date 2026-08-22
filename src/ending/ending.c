@@ -102,6 +102,27 @@ extern u32 D_800AF3C4;
 extern EndingTask D_800AF3C8;
 extern EndingTask* D_800AF3CC;
 extern EndingTask D_800A762C;
+/* 0x4C: an EndingModel plus one word. The stride is what func_800A17C0's
+ * first loop walks, and the two pointers it strength-reduces -- one at +0 for
+ * func_800A2934's argument, one at +0x40 for the three translation stores --
+ * are what say this is an array of a struct rather than a byte offset. */
+typedef struct EndingStar {
+    /* 0x00 */ EndingModel model;
+    /* 0x48 */ s32 unk48;
+} EndingStar;
+
+extern EndingModel D_800A767C;
+extern s16 D_800A76BC;
+extern s16 D_800A76BE;
+extern s16 D_800A76C0;
+extern EndingStar D_800A76C8[];
+extern u8 D_800AC2C8[];
+extern u8 D_800AC2CC[];
+extern u8 D_800AC2CD[];
+extern u8 D_800AC2CE[];
+extern u8 D_800AC2D4[];
+extern u8 D_800AC2D5[];
+extern u8 D_800AC2D6[];
 extern u8 D_800A763C[];
 extern u8 D_800A765C[];
 extern EndingTask D_800AF3D8;
@@ -363,7 +384,105 @@ s32 func_800A16E4(void) {
 }
 #endif
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A17C0);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/ending/nonmatchings/ending", func_800A17C0);
+#else
+/* 35 changed / 2 inserted at the exact 121 instructions, from 85 rows and
+ * +13 at the first reading. Everything left is register naming, and it all
+ * follows from one insn: the target has `move s1,v0` in the first loop's
+ * preheader, keeping the symbol's address in its own short-lived pseudo so
+ * the giv at +0x40 and the walking pointer are both initialised from it.
+ * We fold the address straight into the walking pointer, so every
+ * callee-saved register from s1 up is numbered one lower for the rest of
+ * the function.
+ *
+ * What got it here, in order of what each was worth:
+ *   - the first loop walks an EndingStar*, it is not a byte offset. Written
+ *     as `D_800A76C8[i]` gcc computes i*0x4C and addresses through the
+ *     assembler's $at macro (+13 instructions); a walking pointer lets
+ *     strength_reduce build the two bases the target has.
+ *   - combine_givs bases that loop's second pointer on the *last* field the
+ *     source block stores, so `trans.vx` has to be written after vy and vz
+ *     to get `addiu s0,v0,0x40` rather than +0x44.
+ *   - the second loop's offset is `outer + k * 0x14` computed in the body
+ *     (a giv), not a second `for` increment (a biv): 51 rows -> 37.
+ *   - `q = (LINE_G2*)(off + (s32)D_800AC2C8);` assigned *before* the three
+ *     D_800AC2D4/5/6 stores rather than between them, 46 -> 35. Without the
+ *     named pointer at all, gcc turns the two D_800AC2CC references into a
+ *     giv and the b0/g0 pair into two more $at expansions -- the exact
+ *     inverse of the target, which reaches D_800AC2CC through $at and
+ *     b0/g0 through a shared base.
+ *   - `q->g0 = q->b0 = 0;` in that order: a chained assignment stores right
+ *     to left, so the target's `sb zero,6(v0)` before `sb zero,5(v0)` means
+ *     b0 is the rightmost term.
+ *
+ * Measured and rejected for the remaining `move`, all at the exact length:
+ *   `star` initialised in the for-init                        37
+ *   a separate `base` local copied into `star`                (does not
+ *       compile as a variant; the plain form is 37)
+ *   `star++` before `i++` in the increment list               36
+ *   `(EndingModel*)star` instead of `&star->model`            37
+ * and for the second loop:
+ *   `setRGB1(q, ...)` for the D_800AC2D4/5/6 stores           57
+ *   a `white` local for the three 0x10 stores                 (spec failed)
+ *
+ * The two single-use constants 0xA0 and 0xDC are hoisted into callee-saved
+ * registers in our build and materialised inline in the target, which is
+ * `move_movables`' threshold and not something a spelling reaches -- the
+ * frame is nevertheless the target's, so they cost rows and not length. */
+s32 func_800A17C0(void) {
+    s32 i;
+    s32 j;
+    s32 k;
+    s32 off;
+    s32 outer;
+    s32 x;
+    s32 y;
+    s32 r;
+    LINE_G2* p;
+    LINE_G2* q;
+    EndingStar* star;
+
+    srand(VSync(1));
+    func_800A2934(NULL, &D_800A767C);
+    x = -0x2000;
+    y = -0x3ED;
+    D_800A76BC = 0;
+    D_800A76BE = 0;
+    D_800A76C0 = -0x400;
+    star = D_800A76C8;
+    for (i = 0; i < 0x100; i++, star++) {
+        func_800A2934(&D_800A767C, &star->model);
+        r = rand() / 2 + 0x4000;
+        star->model.trans.vy = y;
+        star->model.trans.vz = r;
+        star->model.trans.vx = x;
+        x += 0x400;
+        if (x >= 0x2000) {
+            x = -0x2000;
+            y += 0x100;
+        }
+    }
+    for (j = 0, outer = 0; j < 2; j++, outer += 0x1400) {
+        p = (LINE_G2*)D_800AC2C8;
+        for (k = 0; k < 0x100; k++, p++) {
+            off = outer + k * 0x14;
+            q = (LINE_G2*)(off + (s32)D_800AC2C8);
+            *(u8*)(D_800AC2D4 + off) = 0xA0;
+            *(u8*)(D_800AC2D5 + off) = 0xDC;
+            *(u8*)(D_800AC2D6 + off) = 0xFA;
+            *(u8*)(D_800AC2CC + off) = 0x10;
+            *(u8*)(D_800AC2CD + off) = 0x10;
+            *(u8*)(D_800AC2CE + off) = 0x10;
+            q->g0 = q->b0 = 0;
+            *(u8*)(D_800AC2CC + off) = 0;
+            SetLineG2((LINE_G2*)(outer + (s32)p));
+        }
+    }
+    SetDispMask(1);
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A19A4);
 
