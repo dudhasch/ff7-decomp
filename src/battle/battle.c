@@ -2926,7 +2926,30 @@ static s32 func_800B10B4(s32 arg0) {
 }
 
 void func_800B10F0(s32, s32, s32, s32, s32, s32, s32);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800B10F0);
+// Open one queued event and its matching action record in a single call, then
+// commit both.
+void func_800B10F0(
+    s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4, s32 arg5, s32 arg6) {
+    Unk800A2F4C* ev;
+    Unk800FA9D0* act;
+
+    ev = func_800A2F4C();
+    act = func_800A2FD0();
+    ev->unk1 = 1;
+    ev->unk8 = -1;
+    ev->unk0 = arg0;
+    ev->unk5 = arg1;
+    ev->unk3 = arg2;
+    ev->unk2 = arg3;
+    ev->unk4 = 0;
+    ev->unk6 = arg4;
+    act->unk0 = arg0;
+    act->unk1 = arg0;
+    act->unk2 = 0x33;
+    act->unk4 = arg5;
+    act->unk8 = arg6;
+    func_800A317C();
+}
 
 // find arg0 in D_800F5F44.attackIDs[]; returns its index, or 0x20 (and signals
 // func_800155A4) if it is not present
