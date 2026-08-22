@@ -564,7 +564,10 @@ INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A835C);
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A86C4);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A886C);
+void func_800A886C(s32 arg0) {
+    D_80109D64 = 2;
+    D_80109D68 = arg0;
+}
 
 void func_800A8888(s32 arg0) { D_800E5824 = arg0; }
 
