@@ -4702,6 +4702,53 @@ a near-miss, in rough order of frequency:
   three stores go through an out-pointer that may alias the two globals, so
   the three addresses have to be named in locals or every one of them is
   recomputed after each store (+18 instructions).
+* **A global referenced twice is promoted to a register; spelling one of the
+  two references as an offset from a *neighbouring* symbol keeps both in the
+  `$at` macro form.** The companion idiom already here runs the other way --
+  write a neighbour as an offset to *give* an address a second reference and
+  win it a register. The inverse is a lever too, and it is the only cheap way
+  to reproduce a target that expands `lui at / sw %lo(sym)(at)` twice for the
+  same object: `(u8*)NEIGHBOUR + 4` reaches RTL as
+  `(const (plus (symbol_ref) (const_int)))`, which is not the rtx cse hashed
+  the plain `symbol_ref` under, so it is neither unified with the other
+  reference nor folded against the neighbour's own register. `func_800B650C`
+  in `src/world/world.c` writes `D_8009A000` three times and `D_8009A004`
+  twice; written through its own symbol the second one costs a *second*
+  callee-saved register, eight bytes of frame and 12 rows, and written
+  `*(u32*)((u8*)D_8009A000 + 4) = 0;` it matches. The relocation then names
+  `D_8009A000+4`, which `checkfn` aliases against `D_8009A004`.
+* **One counter shared by two unrelated loops conflicts with everything live
+  between them, and that is a conflict-set fault, not a ranking one.** This
+  file records `find_reg` as lowest-free-that-does-not-conflict and warns that
+  a different assignment can come from a different conflict set; here is the
+  worked case. `func_800B392C` in `src/world/world.c` runs a descending
+  free-list build and then, after six unrelated stores, a second descending
+  clear. With one `off` serving both, the pseudo spans the middle block, so it
+  conflicts with the `%hi`/`%lo` of a symbol `local_alloc` has already put in
+  `$v0` there, `global_alloc` gives it `$v1`, and every instruction of the
+  first loop renames -- 8 rows, 0 insertions, exact length. `tools/qty_pri.py`
+  is actively misleading on it: the counter scores 18.0 against the walking
+  pointer's 9.3 and *should* be allocated first, which reads as "the ranking
+  is already right, park it". Giving the second loop its own `k` matches. The
+  tell is in the target: the two loops use **different** registers for their
+  counters, which is the identity rule saying they were two variables.
+* **`for (…; i < N; i++) { …; if (c == K) break; }` and
+  `do { …; i++; } while (c != K && i < N);` differ by one delay slot.**
+  Same instructions either way, but in the `for` the increment sits after the
+  break test, so `fill_simple_delay_slots` scanning back from the `beq` finds
+  the *store* and takes it; in the `do`/`while` the increment is the insn
+  immediately above the branch and goes in the slot instead, leaving the store
+  where the target has it. `func_800B7AC0` in `src/world/world.c` is one row
+  between them.
+* **`slt` against a register end-pointer means the loop was written on a
+  signed *index*, not on a pointer.** A pointer comparison is unsigned by
+  construction, so no spelling of `while (p < end)` reaches `slt` -- casting
+  both sides to `s32` is folded straight back. What produces it is
+  `for (i = A; i < B; i++) { … base[i] … }`: `strength_reduce` eliminates the
+  biv in favour of the reduced address giv and rewrites the guard as
+  `giv < base + B`, keeping the signed comparison the `int` counter had. So a
+  diff whose only opcode fault is `sltu` against `slt` on a cursor is telling
+  you the cursor is a giv, and the fix is to index rather than to walk.
 * **A narrowing conversion at a call site comes from the prototype, and a
   callee defined *later in the same file* has no prototype.** gcc 2.6.3 takes
   the call as an implicit declaration, promotes the argument to `int` and
