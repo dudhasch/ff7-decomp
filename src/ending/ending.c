@@ -70,6 +70,7 @@ typedef struct EndingActor {
 
 extern s16* D_800A6528;
 extern u8 D_800A652C[];
+extern u8 D_800A6530[];
 extern u8 D_800A6532[];
 extern u8 D_800A6534[];
 extern u8 D_800A6538[];
@@ -79,6 +80,12 @@ extern u8 D_800A653E[];
 extern u8 D_800A6588[];
 extern u8 D_800A658A[];
 extern u8 D_800A658C[];
+extern u8 D_800A6594[];
+extern u8 D_800A6598[];
+extern u8 D_800A659C[];
+extern u8 D_800A65A4[];
+extern u8 D_800A65A8[];
+extern u8 D_800A65AC[];
 extern s32 (*D_800A63DC[])(void);
 extern s32 D_800A6390;
 extern s32 D_800A6394;
@@ -229,7 +236,31 @@ void func_800A0E68(void) {
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A0F90);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A11B4);
+s32 func_800A11B4(void) {
+    s32 file = *D_800A6528++;
+    s32 frame = *D_800A6528++;
+    s32 i;
+    s32 off;
+
+    for (i = 0; i < 0x20; i++) {
+        off = i * 0x88;
+        if (!(*(u16*)(D_800A652C + off) & 1)) {
+            *(u16*)(D_800A652C + off) = 1;
+            *(s16*)(D_800A6532 + off) = 0;
+            *(s16*)(D_800A6534 + off) = frame;
+            *(u_long**)(D_800A6538 + off) =
+                func_80034D18((u_long*)0x800D0000, file);
+            *(s16*)(D_800A6588 + off) = 0x18;
+            *(s16*)(D_800A658A + off) = 0xC8;
+            *(s16*)(D_800A658C + off) = 0;
+            *(u8*)(D_800A653C + off) = 0x80;
+            *(u8*)(D_800A653D + off) = 0x80;
+            *(u8*)(D_800A653E + off) = 0x80;
+            return 1;
+        }
+    }
+    return 0;
+}
 
 void func_800A12F0(void) {
     s32 i;
@@ -253,11 +284,84 @@ void func_800A12F0(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A139C);
+s32 func_800A139C(void) {
+    s32 i;
+    s32 off;
+
+    for (i = 0, off = 0; i < 0x20; off += 0x88, i++) {
+        *(s16*)(D_800A652C + off) = 0;
+        *(s16*)(D_800A6532 + off) = 0;
+        *(s16*)(D_800A6534 + off) = 0;
+        *(s32*)(D_800A6538 + off) = 0;
+        *(s16*)(D_800A6588 + off) = 0;
+        *(s16*)(D_800A658A + off) = 0;
+        *(s16*)(D_800A658C + off) = 0;
+        *(s32*)(D_800A6594 + off) = 0;
+        *(s32*)(D_800A6598 + off) = 0;
+        *(s32*)(D_800A659C + off) = 0;
+        *(u8*)(D_800A653C + off) = 0;
+        *(u8*)(D_800A653D + off) = 0;
+        *(u8*)(D_800A653E + off) = 0;
+    }
+    func_800A3178(&D_800A762C, 4, 0x80, func_800A12F0);
+    return 1;
+}
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A14BC);
 
-INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A16E4);
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/ending/nonmatchings/ending", func_800A16E4);
+#else
+/* 20 rows at the exact 55 instructions, and all 20 are one register pair:
+ * the target keeps `p` in $a1 and each loaded value in $v1, we get the
+ * reverse. `off` lands in $a0 either way, so the pair is adjacent in
+ * block_alloc's quantity order and nothing else in the function moves.
+ *
+ * Getting here was worth 15 rows and is the finding to keep. Written the
+ * house way -- five `*D_800A6528++` -- the function is 35 rows and +4
+ * instructions, because a post-increment on a *pointer* expands as
+ * [store p+1][load *p]: gcc materialises the new pointer, stores it, and
+ * only then dereferences the old one, so every load's delay slot needs a
+ * nop. The target has [load][store p+N], one instruction shorter per
+ * statement, and the only way to reach that order is to name the pointer
+ * and write the five updates as explicit `D_800A6528 = p + N;`.
+ *
+ * Measured and rejected against that body, all at the exact length:
+ *   the five reads as `*D_800A6528++`                     35 (+4 insns)
+ *   `*D_800A6528` with `D_800A6528++` as its own stmt     38
+ *   all five values read into locals up front             46
+ *   one shared s32 temp per store / four separate temps   35 / 35
+ *   the |= split into a load, an or and a store           35
+ *   `0x10 | x` operand order                              35
+ *   `D_800A6528++` in place of `D_800A6528 = p + N`       20
+ *   each update moved one statement earlier / later       29 / 37
+ *   a second cursor `q` for the updates                   33
+ *   `off` declared before `p`, `p` assigned after both    20 / 20
+ *   `p[N]` written `*(p + N)`                             20
+ *   `off` as s16                                          30
+ *
+ * Six spellings sit at exactly 20, which is the flat-dimension signature:
+ * this is QTY_CMP_PRI arithmetic in a function with no branches at all, so
+ * every quantity is block-local and there is no live range to lengthen
+ * without emitting an instruction. Park, not a permuter target. */
+s32 func_800A16E4(void) {
+    s16* p = D_800A6528;
+    s32 off;
+
+    D_800A6528 = p + 1;
+    off = p[0] * 0x88;
+    *(u16*)(D_800A652C + off) |= 0x10;
+    D_800A6528 = p + 2;
+    *(s32*)(D_800A65A4 + off) = p[1];
+    D_800A6528 = p + 3;
+    *(s32*)(D_800A65A8 + off) = p[2];
+    D_800A6528 = p + 4;
+    *(s32*)(D_800A65AC + off) = p[3];
+    D_800A6528 = p + 5;
+    *(u16*)(D_800A6530 + off) = p[4];
+    return 1;
+}
+#endif
 
 INCLUDE_ASM("asm/us/ending/nonmatchings/ending", func_800A17C0);
 
