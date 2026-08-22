@@ -716,7 +716,52 @@ void func_800DFC38(void) {}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DFC40);
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle3", func_800DFE34);
+/* 20 changed / 4 inserted / +1 instruction (107 against 106).  Same shape as
+ * func_800DFA94 and one instruction closer: the target saves one more
+ * callee-saved register (sw ra at 0x1c against 0x18).  sel is
+ * unkA + unkB * 2 + unk2 * 2 here, which is what the two sll/addu pairs in
+ * the target say, and the row layout is shared with func_800DFA94. */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/battle3", func_800DFE34);
+#else
+void func_800DFE34(void) {
+    Unk80026448* menu;
+    BattleListRow* list;
+    BattleListRow* row;
+    s16 sel;
+
+    func_800A4F60(D_800F38A0, 3);
+    list = (BattleListRow*)&D_8009DB94[D_800F38A0 * 0x440];
+    menu = (Unk80026448*)&D_800F90FC[D_800F38A0];
+    if ((D_800F3896 == 4) && (D_800F99E4 == 0)) {
+        func_800264A8(menu);
+        if (menu->unk8 == 0) {
+            if (D_80062D7E & 0x20) {
+                D_800F99E4 = 1;
+                sel = menu->unkA + (menu->unkB * 2) + (menu->unk2 * 2);
+                row = &list[sel];
+                if (!(row->flags & 2) && (row->unk0 != 0xFF)) {
+                    func_800BB9B8(1);
+                    D_800F389E = row->unk0;
+                    D_800FAFD4 = sel;
+                    D_800F38A2 = row->unk5;
+                    func_800E6B94();
+                    D_800F3896 = 0;
+                    D_800F3894 = 4;
+                    return;
+                }
+                func_800BB9B8(3);
+                return;
+            }
+            if (D_80062D7E & 0x40) {
+                D_800F99E4 = 1;
+                D_800F3896 = 1;
+                func_800D9F5C(4);
+            }
+        }
+    }
+}
+#endif
 
 void func_800DFFDC(void) {}
 
