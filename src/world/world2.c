@@ -59,7 +59,22 @@ typedef struct {
     /* 0x8 */ WorldTim entries[1];
 } WorldTimGroup;
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800BFBF0);
+u8* func_800BFCAC(WorldModelPart* part, u8* buf, s32 arg2, s32 arg3);
+void func_800C1D58(WorldModel* model, s16 arg1, s32 arg2);
+
+u8* func_800BFBF0(WorldModel* model, u8* buf, s32 arg2) {
+    u32 i;
+    WorldModelPart* part;
+
+    model->unk20 = buf;
+    buf += model->unk2 * 32;
+    part = (WorldModelPart*)(model->unk18 + (s32)model->unk1C);
+    for (i = 0; i < model->unk3; i++) {
+        buf = func_800BFCAC(&part[i], buf, 0, arg2);
+    }
+    func_800C1D58(model, model->unk16, 0);
+    return buf;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world2", func_800BFCAC);
 
