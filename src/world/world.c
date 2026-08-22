@@ -395,7 +395,26 @@ s16 func_800A4F08(s16 x, s16 y) {
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A4F78);
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A5208);
+Unk800E5768* func_800A5208(Unk800E5768* arg0) {
+    Unk800E5768* p;
+    Unk800E5768* ret;
+    s32 off;
+
+    p = func_800A52A4();
+    if (p != NULL) {
+        arg0->unk6 = p - D_800E5718;
+        off = arg0->unk6 * 8;
+        *(s16*)(((u8*)D_800E5718 + 4) + off) = arg0->unk4;
+        ret = arg0->next;
+        arg0->next = D_800E5810;
+        D_800E5810 = arg0;
+    } else {
+        ret = arg0->next;
+        arg0->next = D_800E580C;
+        D_800E580C = arg0;
+    }
+    return ret;
+}
 
 Unk800E5768* func_800A52A4(void) {
     Unk800E5768* p;
