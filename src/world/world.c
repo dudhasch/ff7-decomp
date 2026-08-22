@@ -504,7 +504,11 @@ void func_800A6994(VECTOR* arg0, s32 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A6B8C);
+void func_800A6B8C(VECTOR* dst) {
+    if (dst != NULL) {
+        *dst = D_80109D44;
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A6BCC);
 
