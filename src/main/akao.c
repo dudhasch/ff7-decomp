@@ -1207,11 +1207,67 @@ void func_8002C8C4(Unk8002B7E0* arg0) { D_8009A152 = arg0->unk4; }
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C8DC);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C9E4);
+// Retire the sound-effect voices queued in D_8009A118: mark each one for a
+// full hardware refresh, hand the set to the pending mask and re-run the
+// three key-on/key-off passes.
+void func_8002C9E4(void) {
+    s32 mask;
+    Unk80096608* p;
+    u32 bit;
+    s32 queued;
+
+    mask = D_8009A118;
+    if (mask != 0) {
+        bit = 1;
+        p = D_800966E8;
+        do {
+            if (mask & bit) {
+                *(s32*)p |= 0x2203;
+                mask ^= bit;
+            }
+            bit <<= 1;
+            p++;
+        } while (mask != 0);
+        queued = D_8009A118;
+        D_8009A118 = 0;
+        g_AkaoPendingMask = queued;
+        func_8002FF4C();
+        func_80030038();
+        func_80030148();
+    }
+    D_80062FF8 &= ~1;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002CA84);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002CB78);
+// As func_8002C9E4, for the music channels.
+void func_8002CB78(void) {
+    s32 mask;
+    Unk80096608* p;
+    u32 bit;
+    s32 queued;
+
+    mask = D_80099FDC;
+    if (mask != 0) {
+        bit = 0x10000;
+        p = D_80099868;
+        do {
+            if (mask & bit) {
+                *(s32*)p |= 0x2203;
+                mask ^= bit;
+            }
+            bit <<= 1;
+            p++;
+        } while (mask != 0);
+        queued = D_80099FDC;
+        D_80099FDC = 0;
+        g_AkaoChannelMask[0] = queued;
+        func_8002FF4C();
+        func_80030038();
+        func_80030148();
+    }
+    D_80062FF8 &= ~2;
+}
 
 typedef struct {
     u32 unk0;
