@@ -465,5 +465,14 @@ extern s32 D_80115A4C;
 extern s32 D_80115A54;
 extern s32 D_80115A5C;
 extern s32 D_80115A6C;
+extern s16 D_8009ABF6;
+extern s16 D_8009ABF8;
+extern s16 D_8009ABFA;
+extern s16 D_8009AC16;
+extern s16 D_8009AC18;
+extern u8 D_800BF5F0[];
+extern u16 D_80116508;
+extern u32 D_8014A608;
+extern u8* D_8014A610;
 
 #endif
