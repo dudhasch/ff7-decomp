@@ -2319,7 +2319,10 @@ a near-miss, in rough order of frequency:
   Say so in the park note, and say the function must not be unparked at the
   wrong length — the build stays green because the body is still pinned.
 
-* **A `do { } while (0);` is a free test for which pass you are fighting.** It
+* **An *empty* `do { } while (0);` is a free test for which pass you are
+  fighting** — and the word *empty* is load-bearing, see the reference-
+  multiplier bullet below, which is the same construct with a body and is not
+  free at all. Empty, it
   emits nothing, so it cannot change an allocno's reference count or live
   range; all it does is end a basic block, which is a scheduling boundary. So
   drop one at the end of a loop body and re-measure: if the row count moves at
