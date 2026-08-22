@@ -516,7 +516,20 @@ INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002AABC);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002AFB8);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002B1A8);
+void func_8002B1A8(s32* src0, s32* dst0, s32* src1, s32* dst1) {
+    u16 i;
+
+    i = 0x630;
+    do {
+        i--;
+        *dst0++ = *src0++;
+    } while (i != 0);
+    i = 0x18;
+    do {
+        i--;
+        *dst1++ = *src1++;
+    } while (i != 0);
+}
 
 void func_8002B1F8(Unk8002B7E0* arg0) {
     func_80029B78(arg0->unk4, arg0->unk8);
