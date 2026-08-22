@@ -2160,7 +2160,30 @@ void func_800ADA08(void) {
             func_800AD970(var_s0);
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800ADA64);
+void func_800ADA64(WorldActor* actor) {
+    u8* p;
+    u8* end;
+    s32 v;
+
+    p = D_8010AD50;
+    end = p + 0x30;
+    if (p < end) {
+        for (; p < end; p += 8) {
+            if (((*(s32*)p >> 19) & 0x1F) == actor->actorType) {
+                break;
+            }
+        }
+        if (p < D_8010AD50 + 0x30 && actor != NULL) {
+            v = *(s32*)p & 0x7FFFF;
+            actor->pos.vx = actor->altPos.vx = v;
+            actor->pos.vy = actor->altPos.vy = *(s32*)(p + 4) >> 18;
+            actor->pos.vz = actor->altPos.vz = *(s32*)(p + 4) & 0x3FFFF;
+            actor->facing = actor->unk3C = actor->direction =
+                (*(s32*)p >> 20) & 0xFF0;
+            actor->unk3E = 0;
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800ADB30);
 
