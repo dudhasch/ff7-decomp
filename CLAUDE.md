@@ -5621,6 +5621,27 @@ source: repoint every path string, and **move** the `MASPSX_OVERRIDE` `.s`
 files into the new directory by hand — splat never regenerates those, so they
 do not appear there on their own.
 
+**And that move does not travel, because `asm/` is generated and untracked.**
+Every *other* worktree keeps an `asm/` copied before the split, so the first
+`make build` there dies with `can't open asm/us/<ovl>/nonmatchings/<newunit>/
+<fn>.s for reading` naming a function nobody touched — while the split's own
+worktree is perfectly green. The `akao`/`akao2` split caught three worktrees
+this way in one session, each losing a build cycle to a failure that reads
+like a broken merge. After splitting a unit, fix every sibling worktree in
+the same breath:
+
+```shell
+for w in .claude/worktrees/wt-*; do
+  mkdir -p "$w/asm/us/<ovl>/nonmatchings/<newunit>"
+  cp "$w/asm/us/<ovl>/nonmatchings/<oldunit>/<fn>.s" \
+     "$w/asm/us/<ovl>/nonmatchings/<newunit>/" 2>/dev/null
+done
+```
+
+The general form: **a split moves state that lives in two places, and only
+one of them is under version control.** The `.c`, the config and the path
+strings travel with the commit; the pinned `.s` does not.
+
 Nine of the eleven functions this blocked are now plain matching C: `IfCheck`,
 `If2CheckSigned`, `If2CheckUnsigned`, `OpcodeFuncSetx`, `OpcodeFuncGetx`,
 `OpcodeFuncSrchx`, `OpcodeFuncFadew` and `FieldEventRequestRun`. The two that
