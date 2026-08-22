@@ -3161,6 +3161,34 @@ this file recommends elsewhere (`perm_temp_for_expr` naming a subexpression,
 an extra local), applied to exactly the residue a reading of the diff
 identifies -- so being plausible is not evidence either.
 
+**When to run it at all: the residue has to be block structure or a temporary,
+not allocno arithmetic.** One session's record, every output re-measured with
+`variant_eval` rather than read off the score:
+
+| function | base -> best | what it was worth |
+| --- | --- | --- |
+| `FieldBattleCheck` (13 rows) | 85 -> 30 | 13 -> 6 rows |
+| `FieldBattleCheck` (6 rows) | 30 -> **0** | **match**, 3,150 candidates |
+| `LoadLocalFieldModelAndInitAll` | 1055 -> 580 | 46 -> 37 rows |
+| `OpcodeFuncMove` (14 rows) | 85 -> 55 | 14 -> 10 rows |
+| `OpcodeFuncMove` (10 rows) | 55 -> 35 | **69 rows / +43 instructions** |
+| `OpcodeFuncVwoft` | 85 -> none | nothing in 101,000 |
+| `FieldModelStructInit` | 5 -> none | nothing in 87,000 |
+
+Every win is `perm_ins_block` or `perm_temp_for_expr` -- a dead conditional, a
+duplicated block, an assignment to an existing local -- on a body that was
+otherwise correct. Every failure is a function whose note had already reduced
+the residue to `allocno_compare`/`QTY_CMP_PRI` and shown that neither term is
+reachable from C without emitting an instruction. That is not a coincidence:
+the permuter only edits C, so a residue proved unreachable from C is
+unreachable for it too. **A note that ends in the allocno arithmetic is a park,
+not a permuter target** -- and the same three functions have now absorbed
+400,000 candidates between them across sessions for nothing.
+
+The `OpcodeFuncMove` row is the other half of the warning: a 36% score
+improvement bought a candidate that is 43 instructions longer, because the
+`FieldModelData` temporary it introduced broke the arm-identity that lets flow
+delete one copy of a duplicated block. Never land an output unmeasured.
 **Re-import the scratch after every hand improvement — a stale base is why a
 search runs forever.** The permuter hill-climbs from `base.c`, which `import.py`
 froze at the moment the scratch was built, so every row you close by hand
