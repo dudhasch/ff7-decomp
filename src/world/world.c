@@ -2644,7 +2644,11 @@ s16 func_800B86C4(void) {
     return g_WindowData[0].state == WSTATE_INIT ? D_80116290 : -1;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B86E8);
+void func_800B86E8(RECT* arg0) {
+    if (arg0 != NULL) {
+        func_800B8B00(0, arg0->x, arg0->y, arg0->w, arg0->h);
+    }
+}
 
 void func_800B8720(s16 arg0, s16 arg1) { func_800B8A5C(0, arg0, arg1); }
 
