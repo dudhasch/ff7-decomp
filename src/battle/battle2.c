@@ -1049,7 +1049,26 @@ INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3658);
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D376C);
 
 void func_800D3994(s32 arg0, s32 arg1, void* arg2);
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D3994);
+// func_800D3A6C below with the source matrix reached by index rather than by
+// pointer: model arg0's sub-part arg1. The two multiplies are written arg1
+// first because fold swaps a sum of two multiplies -- written arg0 first the
+// chains come out in the other order and it is 20 rows.
+void func_800D3994(s32 arg0, s32 arg1, void* arg2) {
+    MATRIX sp10;
+    s32 off = arg1 * sizeof(BattleModelSub) + arg0 * sizeof(BattleModel);
+
+    ((SVECTOR*)arg2)->vx =
+        (s16)(*(u16*)((u8*)D_801518E4 + 0x188 + off) -
+              *(u16*)&D_800FA63C.m.t[0]);
+    ((SVECTOR*)arg2)->vy =
+        (s16)(*(u16*)((u8*)D_801518E4 + 0x18C + off) -
+              *(u16*)&D_800FA63C.m.t[1]);
+    ((SVECTOR*)arg2)->vz =
+        (s16)(*(u16*)((u8*)D_801518E4 + 0x190 + off) -
+              *(u16*)&D_800FA63C.m.t[2]);
+    TransposeMatrix(&D_800FA63C.m, &sp10);
+    ApplyMatrixSV(&sp10, (SVECTOR*)arg2, (SVECTOR*)arg2);
+}
 
 // Take the low 16 bits of each of arg0's translation components relative to the
 // camera D_800FA63C, then rotate that offset by the camera's transposed
@@ -1723,7 +1742,21 @@ void func_800D7BA4(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
     func_800D7A88(arg0, arg1, base + d, a, arg2, arg3);
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7C2C);
+// func_800D7B1C and func_800D7BA4 in one call pair, sharing the model offset
+// and the sub-part array base across both.
+void func_800D7C2C(s32 arg0, s32 arg1, s32 arg2, s32 arg3) {
+    s32 off = arg1 * sizeof(BattleModel);
+    s32 n = *(u8*)((u8*)D_801518E4 + 0x31 + off);
+    s32 a = *(s16*)((u8*)D_801518E4 + 0x1A + off);
+    s32 base = (s32)((u8*)D_801518E4 + 0x174) + off;
+    s32 d = n * sizeof(BattleModelSub);
+
+    func_800D7A88(arg0, arg1, base + d, a, arg2, arg3);
+    n = *(u8*)((u8*)D_801518E4 + 0x32 + off);
+    a = *(s16*)((u8*)D_801518E4 + 0x1C + off);
+    d = n * sizeof(BattleModelSub);
+    func_800D7A88(arg0, arg1, base + d, a, arg2, arg3);
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle2", func_800D7D3C);
 
