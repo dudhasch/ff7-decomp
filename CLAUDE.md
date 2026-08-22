@@ -642,6 +642,34 @@ a near-miss, in rough order of frequency:
   came out with two base registers instead of one, 20 rows. This is the
   opposite of the counter-merging idiom above: merge *loop counters* that
   describe the same walk, split *pointers* that describe different ones.
+* **Two levers rejected for moving the length in *opposite* directions can
+  cancel, so test the pair before believing either rejection.** The length
+  rule -- fit the length first, treat a row count that improves while the
+  length grows as evidence against the change -- is right per change and
+  wrong as a filter on a *set* of changes. `FieldMain` carried two clusters
+  whose fixes were each measured alone, each moved the length by one in a
+  different direction, and each was parked as a regression: spelling the
+  `FieldEventInit` argument `&g_FieldStateData` so cse can relate it to the
+  `%lo` the neighbouring stores just materialised is 51 rows at **785**, and
+  `s16 fieldId` for the sign-extension the target has before the `preloadId`
+  compare is 74 rows at **787**. Applied together they are **39 at the exact
+  786**. Neither is findable from the other's rejection line. When a note
+  lists two entries at -1 and +1, cross them before moving on -- it is one
+  extra measurement and it was worth 20 rows here.
+
+* **A parked function whose `.rodata` blob is carried as a file-scope object
+  measures worse than it will be when it lands, and the queue does not know
+  it.** A local aggregate initialiser emits its constant into the unit's
+  `.rodata`; while the function is pinned that object has to exist under its
+  own name, and `parked_queue.py` / `variant_eval.py` measure it *in place*.
+  Every `%lo` in the function then reads against a shifted pool. `FieldMain`
+  reports 34 rows with `const u32 D_800A0000[]` present and **27** with it
+  deleted -- a constant 7 rows that vanish the moment the function is
+  unparked, which is exactly when the object must be deleted anyway (see
+  *Seven ways a clean-looking diff lies*). So for any parked function with a
+  local aggregate initialiser, take the honest baseline by scoring one
+  variant that deletes the object, and record both numbers in the note.
+
 * **Read variable *identity* off the destination registers, and read it in
   both directions.** The bullet below says a value in *different* registers in
   two arms cannot be one variable, and that is half the rule; this project
