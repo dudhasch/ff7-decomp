@@ -2064,7 +2064,13 @@ void func_800B01C4(s32 arg0) {
         (*(s32*)((u8*)&D_8010B488 + off) > 0) ? -0x10 : 0;
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800B0200);
+void func_800B0200(s32 arg0) {
+    s32 off;
+
+    func_800B017C(arg0);
+    off = arg0 * 4;
+    *(s32*)((u8*)&D_8010B4A0 + off) = 0x64;
+}
 
 s32 func_800B0240(void) { return !D_8010B47C; }
 
