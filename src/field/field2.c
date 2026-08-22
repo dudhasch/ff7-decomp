@@ -3787,7 +3787,20 @@ extern u8 D_801144D8; // blink RNG cursor
  * still -- 16 to 51 rows and always +1 instruction, because the loop then
  * builds its own second constant. A u8 blinkOpen at the loop top is 2 rows,
  * i.e. exactly the body below: cse folds it away and nothing changes.
- */
+ *
+ * The movable-order half has now been attacked from the *pointer* side too,
+ * which is what CLAUDE.md's `FieldEntityLineInteract` bullet says to do --
+ * there the three arrangements of a pointer and a constant at a loop top
+ * measured 19, 17 and 0 rows. Here every one is much worse, so the analogy
+ * does not carry: `faceSel = (u8*)0x1F800000;` moved from the top of the
+ * function to immediately above loop 4 is **51 rows**, as loop 4's first
+ * statement 50 and +6 instructions, as its second statement 50 and +6, and
+ * naming the constant above the pointer at function scope 40. The pointer's
+ * 644-insn live range is load-bearing rather than incidental: it is what
+ * keeps loops 1 and 2 rematerialising 0x1F800000 through the `$at` macro,
+ * the same coupling that makes routing those two stores through `faceSel`
+ * cost 5 instructions. So `live_length` is unreachable from this end as
+ * well, and the 2/3/13 trichotomy stands. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", HandleKawaiDataInModel);
 #else
@@ -4710,7 +4723,52 @@ void KawaiSetColorToModelPkts(FieldModelEntry* model, u8* color);
  * FieldBattleCheck run that matched in 3,150. Both finds here are
  * perm_temp_for_expr on an existing local, so weight that pass and stop early
  * if nothing appears in the first few thousand.
- */
+ *
+ * **32 rows / -1 instruction -> 11 changed / 0 inserted, at the exact 529.**
+ * Two statement placements, both of which the note above had reasoned past
+ * rather than measured, and the first is the length.
+ *
+ *   - **`fixup = (s32)buf - 0x80000000;` goes *before*
+ *     `count = block->modelCount;`, not after.** The target materialises
+ *     `lui v0,0x8000` ahead of the `lw` and pays the load-delay `nop`; with
+ *     the statements the other way round gcc has the constant available to
+ *     fill that slot and the function comes out an instruction short. That
+ *     single missing `nop` was the whole of the -1 this note has carried
+ *     since it was written, and the note's own advice -- fit the length
+ *     first -- is what found it: the diff row is an *insertion* of the
+ *     target's `lui` two slots up, which reads as scheduling noise.
+ *     32 -> 15 and exact. `-0x80000000 + (s32)buf` is identical; splitting
+ *     the subtraction into two statements is 24; hoisting it above
+ *     `FieldModelLoadBsxTexToVram` is 102 and +1.
+ *   - **`flip = &D_800DF114;` belongs at the top of the packet loop's body,
+ *     not in front of the loop.** In front it is ordinary code and its
+ *     `%hi`/`%lo` pair lands *before* the loop's zero-trip guard; at the top
+ *     of the body it is a movable, `move_movables` lifts it into the
+ *     preheader, and the preheader is after the guard -- which is where the
+ *     target has it. This is CLAUDE.md's always-executed-path rule read for
+ *     position rather than for whether the hoist happens at all. 15 -> 11
+ *     and the two insertions go with it. Inside the `npcFlag` arm instead is
+ *     34 rows and -2 instructions (not on the always-executed path, so no
+ *     hoist at all); swapping it with `pkts = (u8*)block;` at function level
+ *     is exactly inert.
+ *
+ * The 11 rows left are two clusters, both re-swept at the new baseline:
+ *
+ *   - six rows in the `words` copy loop -- `words` in `$t1` against our
+ *     `$t3`, and the two strength-reduced +0xC bases emitted in the opposite
+ *     order (`addiu a2,s1,0xc` / `addiu a1,a3,0xc`). The registers agree; it
+ *     is purely the order the two giv initialisers land in the preheader,
+ *     which `strength_reduce` sets from reverse discovery order, i.e. reverse
+ *     insn order in the body -- and `d[k] = s[k]` cannot put the store's
+ *     pointer ahead of the load's. Re-measured here and still exactly inert:
+ *     `s`/`d` in either assignment order, either declaration order, and both;
+ *     writing `d[3] = s[3]` first is 17.
+ *   - four rows reloading the spilled `models` at `0x38(sp)` in the third
+ *     loop, in `$t7` against our `$v0`, with the scaled index following it.
+ *     Note the note's earlier verdict on walking `models` there ("48 rows,
+ *     and turns -1 into +1") was measured when the body was an instruction
+ *     short; the length is exact now, so that one is worth re-running before
+ *     anything else. */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE(
     "asm/us/field/nonmatchings/field2", LoadLocalFieldModelAndInitAll);
@@ -4784,8 +4842,8 @@ u8* LoadLocalFieldModelAndInitAll(
     FieldModelLoadBsxTexToVram(bsx);
     DrawSync(0);
 
-    count = block->modelCount;
     fixup = (s32)buf - 0x80000000;
+    count = block->modelCount;
     for (i = 0; i < count; i++) {
         if (models[i].npcFlag != 0) {
             rec = &block->models[i];
@@ -4845,8 +4903,8 @@ u8* LoadLocalFieldModelAndInitAll(
     }
 
     pkts = (u8*)block;
-    flip = &D_800DF114;
     for (i = 0; i < count; i++) {
+        flip = &D_800DF114;
         if (models[i].npcFlag != 0) {
             modelIndex = models[i].modelEntryIndex;
             pkts = FieldModelCreatePktsAndScale(
