@@ -1179,6 +1179,26 @@ a near-miss, in rough order of frequency:
   written as the body's last statement the two come out in the other order and
   land in different branch delay slots. Eight rows across four loops, and no
   other spelling reaches it.
+
+  **But a value the loop only *reads* is the opposite case: derive it from the
+  counter inside the body, never carry it as a second `for` increment.** Two
+  distinct things go wrong at once when it is carried.
+  `for (i = 0, slot = 0x13F; i < 5; i++, slot -= 6)` leaves `i` with no use
+  outside the exit test, so `check_dbra_loop` reverses the whole loop and it
+  counts *down* from 4 — `addiu s0,s0,-1` / `bgez` where the target has
+  `addiu s0,s0,1` / `slti 5`. And the second counter's initialiser is an
+  ordinary preheader insn, so it is emitted *before* whatever `move_movables`
+  and `strength_reduce` put there, while the target has it after. Written
+  `slot = 0x13F - i * 6;` as the first statement of the body, `i` keeps a
+  reference, `slot` becomes a reduced giv with the `addiu <r>,<r>,-6` the
+  target has, and the giv's initialiser lands in the preheader behind the
+  hoists. `func_80025174` in `src/main/1255C.c` is 18 rows and one instruction
+  short the first way and **matches** the second; `func_800260DC` in the same
+  unit is the same lever for a `cy` that is only passed to a call (2 rows to
+  0, with the fully inline `i * 0x30 + 0x138` at the call site measuring
+  byte-identical to the named local). Read the target's loop direction before
+  anything else: a down-counting loop where you expect an up-counting one is
+  `check_dbra_loop` telling you a variable the source had is missing.
 * **A residue of exactly one `nop` may be the assembler, not the C — and
   `tools/maspsx` is a fork under this project's own account, so it is
   fixable.** This one has been fixed, and the shape of it is the lesson.

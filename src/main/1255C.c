@@ -13,7 +13,7 @@
 // (see tools/ninja/gen.py) keeps these as COMMON so the link binds to those
 // rather than seeing two definitions.
 s32 D_80062DF8;
-s8 D_80062DFC;
+u8 D_80062DFC;
 s32 D_80062ECC;
 s32 D_80062F0C;
 s32 D_80062F20;
@@ -292,7 +292,67 @@ void func_80025174(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025288);
+// Take `arg0`'s count of item ((count << 9) | id) out of the inventory.
+// Returns the entry actually removed, or 0xFFFF if the item is not carried.
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/1255C", func_80025288);
+#else
+/* PARKED -- 13 changed, 2 inserted, at the exact 34 instructions. Every
+ * opcode is right; the residue is which block-local quantity gets which
+ * caller-saved register, plus the position of two preheader insns.
+ *   target: id=$t2  ret=$a3  i=$t0  want=$t1, and the preheader reads
+ *           andi t2 (id) / li a3 (ret) / move t0 (i) / li t3 (the hoisted
+ *           0xFFFF) / andi+srl (want) / sll+or (the returned entry)
+ *   ours:   id=$t2  ret=$t1  i=$a3  want=$t0, with `move a3,zero` and
+ *           `li t3,0xffff` emitted *after* the want chain rather than before
+ * The two insertions are exactly those two displaced insns. Note what the
+ * target's order implies: `li t3` is `move_movables`' hoist of the loop's
+ * 0xFFFF compare, so it is emitted at the loop start -- and it sits *before*
+ * the `andi`/`srl` that computes `want`, which means in the original those
+ * live inside the loop as movables too. No spelling found puts them there:
+ * `arg0 |= want << 9` is not loop-invariant once it is in the body, and a
+ * value used only inside the `if` arm is not hoisted at all (CLAUDE.md's
+ * always-executed-path rule).
+ * Measured, all at the exact length (rows):
+ *   this body                                            15
+ *   `ret = 0xFFFF` moved below the want chain            15
+ *   `ret = 0xFFFF` moved above `id`                      15
+ *   `i = 0;` as its own statement before `want`          16
+ *   both arms `return ret;` instead of `break`           31
+ *   the store before the `ret` assignment in arm 1       22
+ *   `break` written per-arm instead of after the if      15
+ * tools/width_sweep.py: 25 variants over the five scalar locals, every one
+ * inert or worse -- `ret` must stay `u16` (the `andi v0,a3,0xffff` in the
+ * `jr ra` delay slot is its promotion; `s32`/`u32` are +1 instruction).
+ * The sibling func_80025380 matched with the same idioms, so the difference
+ * is local to this function's variable set. */
+u16 func_80025288(s32 arg0) {
+    s32 i;
+    s32 id;
+    s32 want;
+    s32 have;
+    u16 ret;
+
+    id = arg0 & 0x1FF;
+    ret = 0xFFFF;
+    want = (u16)arg0 >> 9;
+    arg0 |= want << 9;
+    for (i = 0; i < 0x140; i++) {
+        if (D_8009CBE0[i] != 0xFFFF && id == (D_8009CBE0[i] & 0x1FF)) {
+            have = D_8009CBE0[i] >> 9;
+            if (want < have) {
+                ret = arg0;
+                D_8009CBE0[i] = ((have - want) << 9) | id;
+            } else {
+                ret = D_8009CBE0[i];
+                D_8009CBE0[i] = 0xFFFF;
+            }
+            break;
+        }
+    }
+    return ret;
+}
+#endif
 
 // Find the inventory slot holding item `arg0` and return the whole packed
 // entry ((count << 9) | id), or 0xFFFF if the item is not carried.
@@ -312,7 +372,32 @@ s32 func_80025310(s32 arg0) {
 
 void func_80025360() { func_8001FA28(0x19F); }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025380);
+// Add `arg0` ((count << 9) | id) to the inventory: merge into the existing
+// stack if the item is already carried (capped at 99), else take a free slot.
+void func_80025380(s32 arg0) {
+    s32 i;
+    s32 id;
+    s32 total;
+
+    id = arg0 & 0x1FF;
+    total = (u16)arg0 >> 9;
+    for (i = 0; i < 0x140; i++) {
+        if (D_8009CBE0[i] != 0xFFFF && id == (D_8009CBE0[i] & 0x1FF)) {
+            total += D_8009CBE0[i] >> 9;
+            if (total >= 0x64) {
+                total = 0x63;
+            }
+            D_8009CBE0[i] = (total << 9) | id;
+            return;
+        }
+    }
+    for (i = 0; i < 0x140; i++) {
+        if (D_8009CBE0[i] == 0xFFFF) {
+            D_8009CBE0[i] = arg0;
+            return;
+        }
+    }
+}
 
 s32 func_8002542C(s32 arg0) {
     s32 i;
@@ -401,7 +486,30 @@ u8* GetCharacterName(s32 battleCharId) {
     return Savemap.party[g_BattleCharIdToCharId[battleCharId]].name;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025800);
+// Subtract `amount` from the party member's current HP, clamping at zero,
+// then mirror the new value into the save-game record. Empty slots (0xFF)
+// are a no-op. func_80025988 is the MP twin.
+void func_80025800(s32 partyId, s32 amount) {
+    u8 battleCharId;
+    s32 new_var;
+    s32 emptySlot;
+    s32 charId;
+    s32 hp;
+
+    battleCharId = D_8009CBDC[partyId];
+    emptySlot = 0xFF;
+    if (battleCharId != emptySlot) {
+        new_var = g_BattleCharIdToCharId[battleCharId];
+        charId = new_var;
+        hp = D_8009D84C[partyId].hp - amount;
+        if (hp < 0) {
+            D_8009D84C[partyId].hp = 0;
+        } else {
+            D_8009D84C[partyId].hp = hp;
+        }
+        Savemap.party[charId].hp_cur = D_8009D84C[partyId].hp;
+    }
+}
 
 // Add `amount` HP to the battle record of party slot `partyId`, clamped to the
 // member's max HP, then mirror the new value into the save-game party record
@@ -425,7 +533,28 @@ void SystemMenuAddHpByPartyId(s32 partyId, s32 amount) {
     }
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80025988);
+// MP twin of func_80025800.
+void func_80025988(s32 partyId, s32 amount) {
+    u8 battleCharId;
+    s32 new_var;
+    s32 emptySlot;
+    s32 charId;
+    s32 mp;
+
+    battleCharId = D_8009CBDC[partyId];
+    emptySlot = 0xFF;
+    if (battleCharId != emptySlot) {
+        new_var = g_BattleCharIdToCharId[battleCharId];
+        charId = new_var;
+        mp = D_8009D84C[partyId].mp - amount;
+        if (mp < 0) {
+            D_8009D84C[partyId].mp = 0;
+        } else {
+            D_8009D84C[partyId].mp = mp;
+        }
+        Savemap.party[charId].mp_cur = D_8009D84C[partyId].mp;
+    }
+}
 
 // Add `amount` MP to the battle record of party slot `partyId`, clamped to the
 // member's max MP, then mirror the new value into the save-game party record
@@ -716,7 +845,7 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026A94);
 
 void func_80026B5C(void) {}
 
-void func_80026B64(s8 arg0) { D_80062DFC = arg0; }
+void func_80026B64(u8 arg0) { D_80062DFC = arg0; }
 
 // strlen but for FF7 strings
 // FF7 string is 0x00: ' ', 0x10: '0', 0x21: 'A', 0xFF: terminator
@@ -729,7 +858,22 @@ INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80026F44);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_8002708C);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80027354);
+// Draw an FF7-encoded string one glyph at a time, 8 pixels apart, stopping at
+// the 0xFF terminator or after D_80062DFC glyphs.
+void func_80027354(s16 x, s16 y, u8* str, u8 color) {
+    s16 i;
+    s32 c;
+
+    if (str != NULL) {
+        for (i = 0; i < D_80062DFC; i++, x += 8) {
+            c = *str++;
+            if (c == 0xFF) {
+                break;
+            }
+            func_8002708C(x, y, c, color);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/1255C", func_80027408);
 
