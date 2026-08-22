@@ -314,6 +314,7 @@ extern s16 D_800F389E;
 extern s16 D_800F3896; // btlmenu_activeWindowId
 extern s32 D_800F3944;
 extern s32 D_800F3948;
+extern u16 D_800F7DE2;          // 7777-damage bonus counter, capped at 0x40
 extern volatile s32 D_800F499C; // selects the row of the three tables below
 extern s32 D_800F49A0[2];
 extern s32 D_800F49A8[2][10];

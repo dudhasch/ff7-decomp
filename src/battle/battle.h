@@ -450,7 +450,7 @@ typedef struct {
     s32 unk20;
     s32 unk24;
     u8 unk28;
-    s8 unk29;
+    u8 unk29; // tested `& 0x80` in func_800A2894, which needs `lbu`
     s16 unk2A;
     s32 unk2C;
     s32 unk30;

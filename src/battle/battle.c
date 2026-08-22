@@ -79,7 +79,24 @@ void func_800A283C(void) {
     }
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A2894);
+// Every 0x40 uses at most, award the "took exactly 7777 damage" bonus to any
+// party member currently sitting on 7777 HP that has not had it yet.
+void func_800A2894(void) {
+    u16* counter;
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        counter = &D_800F7DE2;
+        if (g_BattleState.combatant[i].curHP == 0x1E61) {
+            if (!(g_CombatantTurnState[i].unk29 & 0x80)) {
+                if ((*counter)++ < 0x40) {
+                    g_CombatantTurnState[i].unk29 |= 0x80;
+                    func_800A3E98(i, 1, 1, 0, 0);
+                }
+            }
+        }
+    }
+}
 
 INCLUDE_ASM("asm/us/battle/nonmatchings/battle", func_800A2974);
 
