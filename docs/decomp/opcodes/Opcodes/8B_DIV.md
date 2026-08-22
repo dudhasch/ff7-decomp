@@ -1,0 +1,23 @@
+---
+title: 8B_DIV
+---
+
+- Opcode: **0x8B**
+- Short name: **DIV**
+- Handler: `OpcodeFuncDiv`
+- Status: verified -- compiled from C in a green build
+- Length: **4** bytes (`PC_INC(4)`)
+- The in-game debugger prints 3 argument byte(s); this saturates at 8 and is not the instruction length.
+
+#### Memory layout
+
+| 0x8B | *B1 / B2* | *arg2* | *arg3* |
+|------|-----------|--------|--------|
+
+#### Arguments
+
+- **const Bit\[4\]** *B1*: bank selector, high nibble of byte 0x01; zero means the value is a literal.
+- **const Bit\[4\]** *B2*: bank selector, low nibble of byte 0x01; zero means the value is a literal.
+- **const Byte** *arg2*: at byte 0x02, addressed through *B1*.
+- **const Byte** *arg3*: at byte 0x03, addressed through *B2*.
+
