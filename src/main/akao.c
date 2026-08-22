@@ -467,9 +467,46 @@ static void func_8002A6C4(s32* arg0, s32* arg1, u16 arg2) {
     *arg1 = val1;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A748);
+// Flag every voice named by the pending mask as needing a hardware update.
+void func_8002A748(void) {
+    Unk80096608* p;
+    s32 mask;
+    u32 bit;
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A798);
+    mask = g_AkaoPendingMask;
+    p = D_80096608;
+    if (mask != 0) {
+        bit = 1;
+        do {
+            if (mask & bit) {
+                p->unkE0 |= 3;
+                mask ^= bit;
+            }
+            p++;
+            bit <<= 1;
+        } while (mask != 0);
+    }
+}
+
+void func_8002A798(void) {
+    Unk80096608* p;
+    s32 mask;
+    u32 bit;
+
+    mask = g_AkaoChannelMask[0];
+    p = (Unk80096608*)D_80099788;
+    if (mask != 0) {
+        bit = 0x10000;
+        do {
+            if (mask & bit) {
+                p->unkE0 |= 3;
+                mask ^= bit;
+            }
+            p++;
+            bit <<= 1;
+        } while (mask != 0);
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002A7E8);
 
