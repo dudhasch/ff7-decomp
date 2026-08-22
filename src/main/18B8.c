@@ -658,7 +658,19 @@ void func_80014DD0(s32 arg0, s32 arg1, u8* arg2) {
     func_80014D58(arg2, (u8*)func_80014D9C(arg0, arg1, 0), -1);
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014E0C);
+u8* func_80014E0C(s32 charId, u8* dst) {
+    s32 i;
+
+    /* One variable, not two: the target returns `move $v0,$a0` from a single
+     * exit, with the call's result written back over `dst`. */
+    for (i = 0; i < 9; i++) {
+        if (D_8009C738[i].char_id == charId) {
+            dst = func_80014D58(dst, D_8009C738[i].name, 0xC);
+            break;
+        }
+    }
+    return dst;
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80014E74);
 
