@@ -272,7 +272,12 @@ void func_800A40B8(s32 arg0) {
     func_800BC9E8((arg0 >> 2) & 3);
 }
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A40F0);
+s32 func_800A40F0(s16 arg0) {
+    if (arg0 >= 0 && arg0 < D_800BE5F0[0]) {
+        return D_800BE5F0[arg0 + 1] + (s32)D_800BE5F0;
+    }
+    return 0;
+}
 
 INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A4138);
 
