@@ -11,7 +11,7 @@
   },
   {
    "unit": "field2.c",
-   "lines": 6023,
+   "lines": 6156,
    "bodies": 46,
    "matching": 38,
    "parked": 8,
@@ -29,10 +29,10 @@
   },
   {
    "unit": "field4.c",
-   "lines": 10507,
+   "lines": 10408,
    "bodies": 259,
-   "matching": 256,
-   "parked": 3,
+   "matching": 258,
+   "parked": 1,
    "include_asm": 14,
    "handwritten": 14
   },
@@ -47,37 +47,68 @@
   }
  ],
  "totals": {
-  "lines": 22610,
+  "lines": 22644,
   "bodies": 411,
-  "matching": 395,
-  "parked": 16,
+  "matching": 397,
+  "parked": 14,
   "include_asm": 20,
   "handwritten": 20,
   "functions": 431
  },
  "handwritten_insns": 10732,
  "naming": {
-  "globals_total": 203,
-  "globals_refs": 1191,
-  "renameable": 16,
+  "globals_total": 201,
+  "globals_refs": 1185,
+  "renameable": 47,
   "renameable_strings": 4,
-  "renameable_real": 12,
+  "renameable_real": 43,
   "renameable_names": [
+   "D_8007078C",
+   "D_800716C8",
+   "D_800716DC",
+   "D_80071748",
+   "D_80071A88",
    "D_800722C4",
+   "D_800756E8",
+   "D_80075E12",
+   "D_80075F23",
    "D_8007E770",
+   "D_8007EB98",
    "D_8007EBCC",
    "D_8007EBDC",
+   "D_80081D90",
+   "D_80081DC4",
+   "D_80082248",
    "D_800831FC",
+   "D_8008325C",
+   "D_800833F8",
+   "D_80095D84",
+   "D_80095DE0",
    "D_8009A15C",
    "D_8009A162",
+   "D_8009A1C4",
    "D_8009ABF6",
    "D_8009AC2F",
    "D_8009AC30",
+   "D_8009AD38",
+   "D_8009CBDC",
+   "D_8009CBDD",
+   "D_8009CBDE",
+   "D_8009D288",
+   "D_8009D289",
+   "D_8009D29B",
+   "D_8009D391",
+   "D_8009D392",
+   "D_8009D393",
+   "D_8009D78A",
    "D_8009D820",
+   "D_8009D828",
+   "D_8009FE8C",
+   "D_800E0628",
    "D_801144D8"
   ],
-  "locked": 187,
-  "locked_by_parked_only": 181,
+  "locked": 154,
+  "locked_by_parked_only": 148,
   "locked_by_handwritten": 6,
   "unnamed_functions": 22,
   "m2c_locals": 0,
@@ -92,14 +123,8 @@
    "length_delta": 0
   },
   {
-   "name": "HandleKawaiDataInModel",
-   "rows": 2,
-   "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "OpcodeFuncFadew",
-   "rows": 2,
+   "name": "LoadLocalFieldModelAndInitAll",
+   "rows": 5,
    "ins": 0,
    "length_delta": 0
   },
@@ -110,82 +135,40 @@
    "length_delta": 0
   },
   {
-   "name": "OpcodeFuncMove",
-   "rows": 10,
+   "name": "FieldCalcPointOnLine",
+   "rows": 25,
    "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "FieldMoveToEntityUpdate",
-   "rows": 10,
-   "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "LoadLocalFieldModelAndInitAll",
-   "rows": 11,
-   "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "OpcodeFuncVwoft",
-   "rows": 12,
-   "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "FieldEventRunInit",
-   "rows": 15,
-   "ins": 0,
-   "length_delta": 0
-  },
-  {
-   "name": "FieldBackgroundInitPackets",
-   "rows": 45,
-   "ins": 4,
    "length_delta": 0
   },
   {
    "name": "FieldMain",
-   "rows": 54,
-   "ins": 8,
+   "rows": 34,
+   "ins": 4,
    "length_delta": 0
   },
   {
-   "name": "FieldCalcPointOnLine",
-   "rows": 60,
-   "ins": 0,
-   "length_delta": 0
+   "name": "FieldBackgroundInitPackets",
+   "rows": 50,
+   "ins": 10,
+   "length_delta": 2
   },
   {
    "name": "AddBackgroundToRender",
-   "rows": 65,
+   "rows": 64,
    "ins": 0,
    "length_delta": 0
   },
   {
    "name": "FieldDebugRenderString",
-   "rows": 96,
-   "ins": 7,
+   "rows": 66,
+   "ins": 6,
    "length_delta": 0
   },
   {
-   "name": "FieldInitDefaultValues",
-   "rows": 100,
-   "ins": 18,
-   "length_delta": 3
-  },
-  {
-   "name": "DebugUpdateActor",
-   "rows": 152,
-   "ins": 4,
-   "length_delta": 2
-  },
-  {
    "name": "KawaiSetVertexColorFromLighting",
-   "rows": 181,
-   "ins": 12,
-   "length_delta": 1
+   "rows": 187,
+   "ins": 8,
+   "length_delta": -1
   },
   {
    "name": "FieldModelCreatePktsForPart",
@@ -206,16 +189,16 @@
    "length_delta": 21
   },
   {
+   "name": "FieldDebugRenderPage",
+   "rows": 806,
+   "ins": 95,
+   "length_delta": -4
+  },
+  {
    "name": "FieldBGUpdateDrawenv",
    "rows": 811,
    "ins": 134,
    "length_delta": 27
-  },
-  {
-   "name": "FieldDebugRenderPage",
-   "rows": 955,
-   "ins": 123,
-   "length_delta": 0
   }
  ],
  "queue_measured": true,
