@@ -231,7 +231,7 @@ static void EscapeCaptureScreen(void) {
  * two are not on one path: what this body needs is one giv discovered later,
  * what p2 needs is one invariant kept out of the giv machinery. */
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/magic/nonmatchings/escape", func_801B009C);
+MASPSX_OVERRIDE("asm/us/magic/nonmatchings/escape", func_801B009C);
 #else
 void func_801B009C(void) {
     s32 row;

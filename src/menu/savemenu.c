@@ -562,7 +562,7 @@ static s32 func_801D1BE0(u8* arg0, u8* arg1) {
 // Twenty-two spellings, three distinct row counts -- jump_optimize normalises
 // the whole tail dimension before anything interesting happens to it.
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D1C2C);
+MASPSX_OVERRIDE("asm/us/menu/nonmatchings/savemenu", func_801D1C2C);
 #else
 const char D_801D017C[] = "bu10:*";
 const char D_801D0184[] = "bu00:*";
@@ -893,7 +893,7 @@ s32 func_8002382C(s32);
 //   `p = &D_801E6D52` assigned at four different points, and the memcpy
 //     destination spelled off D_801E6D53/D_801E6D58 instead: all flat
 #ifndef NON_MATCHINGS
-INCLUDE_ASM("asm/us/menu/nonmatchings/savemenu", func_801D2408);
+MASPSX_OVERRIDE("asm/us/menu/nonmatchings/savemenu", func_801D2408);
 #else
 s32 func_801D2408(s8* path, u8* title) {
     // Never touched; the original reserved 0x200 bytes below the outgoing
