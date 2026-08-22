@@ -548,6 +548,7 @@ extern s8 D_80166F64;
 extern u8 D_80166F68;
 
 void func_800A4350(s16, s16, s16, u16);
+void func_800A4F60(s32, s32);
 void func_800A8E84(s32);
 void func_800AA950(Unk800FA9D0*);
 void func_800AB308(void);
@@ -675,7 +676,32 @@ extern u8 D_800F563C;
 extern u8 D_800F5EFC[]; // per-slot formation-setup config, 0x18 B stride; byte
                         // 0 -> func_800A8D18
 extern BattleMenuWidget D_800F90C6[];
+extern BattleMenuWidget D_800F90D8[];
+extern BattleMenuWidget D_800F90EA[];
 extern u8 D_80151698;
 extern u8 D_80166F74;
 extern u8 D_80166F75;
 extern BattleItemEntry D_801671B8[];
+
+s32 func_8002603C(s32);
+extern s32 D_8009C778[];
+extern u8 D_8009C84E;
+extern u16 D_8009C862;
+extern u8 D_800F33B0[][0x10];
+extern s32 D_800F5778[];
+extern s16 D_800F92E2;
+extern s16 D_800F92E4;
+extern s16 D_800F92E6;
+extern s16 D_800F92E8;
+extern s16 D_800F92EA;
+extern u8 D_800F92EC;
+extern u8 D_800F92ED;
+extern u8 D_800F92EE;
+extern u8 D_800F92EF;
+extern u8 D_800F92F0;
+extern u8 D_800F92F1;
+extern u8 D_800F92F2;
+extern u8 D_800F92F3;
+extern u8 D_800F977C;
+extern u8 D_80163778[];
+extern u8 D_80163B70[];
