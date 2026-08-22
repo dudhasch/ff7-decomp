@@ -36,7 +36,21 @@ static const char D_800A0020[] = "SCR-H";
 
 static void func_800A0B40(s32 arg) {}
 
-INCLUDE_ASM("asm/us/world/nonmatchings/world", func_800A0B48);
+void func_800A0B48(void) {
+    s32 buf;
+    s32 off;
+    s32 base;
+
+    buf = D_800D05E8 == 0;
+    off = buf * 16500;
+    D_800D05E8 = buf;
+    D_800BD130 = (u32*)(off + (s32)D_800C8564);
+    base = *(s32*)(D_800CC564 + off);
+    D_800D05E4 = off + (s32)(D_800C8564 - 0x70);
+    D_800D05DC = base;
+    D_800D05E0 = base;
+    D_800C752C = D_800D05E8;
+}
 
 static s32 func_800A0BD4(void) { return D_800D05E8; }
 
