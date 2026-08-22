@@ -819,7 +819,19 @@ void AkaoC2VolumeSlideBetweenTargets(Unk8002BB20* arg0) {
     func_8002A748();
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002BBB4);
+static void AkaoUpdateCdVolume(void);
+
+typedef struct {
+    u32 unk0;
+    u16 unk4;
+} Unk8002BBB4;
+
+// Set the CD volume outright, cancelling any slide in progress.
+void func_8002BBB4(Unk8002BBB4* arg0) {
+    g_AkaoCdVolSlideSteps = 0;
+    g_AkaoCdVol = arg0->unk4 << 16;
+    AkaoUpdateCdVolume();
+}
 
 typedef struct {
     u32 unk0;
@@ -1141,7 +1153,11 @@ void func_8002C7E8(void) {
     func_8002A798();
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/akao", func_8002C81C);
+void func_8002C81C(void) {
+    D_8009A104 = 4;
+    func_8002A748();
+    func_8002A798();
+}
 
 static void Akao81SetMonoMode(void) {
     D_8009A104 = 2;
