@@ -1242,6 +1242,34 @@ a near-miss, in rough order of frequency:
   tell is `addiu -2 / addu +1 / sll +1` in the opcode histogram with a `%hi`
   naming the base *plus the inner constant* where the target names the base
   alone.
+* **Two globals a fixed short distance apart, touched at the same stride, are
+  one record array — and the negative displacement tells you which field the
+  original wrote last.** `lbu $v0,0($a1)` / `lbu $v0,0($v1)` with a single
+  `lui`/`addiu` of one symbol and `addiu $a1,$v1,-1` between them is
+  `combine_givs` merging the loop's two address givs onto the offset referenced
+  *last* in insn order, and reaching the other by displacement. Declaring the
+  record and indexing it (`arr[i].count`, `arr[i].value`) is the only spelling
+  that reproduces it. Two pointers derived from each other in C cannot: the
+  front end folds `&SYM - 1` into `%lo(SYM-0x1)` before RTL, so you get a
+  second `lui`/`addiu` pair and the two walking pointers land in each other's
+  registers — 12 rows on `func_80019338` in `src/main/18B8.c` against 0 for the
+  record. And walking the record by hand with `rec++` gets the single base but
+  bases it on the **first** field (`addiu $v1,$a1,1` rather than
+  `addiu $a1,$v1,-1`), which is 5 rows: the hand-written biv is the record
+  pointer, so the giv it keeps is the one at offset 0.
+
+  Two more things about that loop shape, both worth a row each. **A counted
+  `for` over an index emits no zero-trip guard where a pointer compare against
+  an end pointer does** — gcc cannot prove `&SYM[0] < &SYM[0x10]` at expand
+  time, so `for (p = SYM; p < &SYM[0x10]; p++)` costs an `sltu`/`beqz`/`nop`
+  the target does not have, while `for (i = 0; i < 0x10; i++)` strength-reduces
+  to the same walk with the guard elided. It also gives `slt` against the
+  reduced end register rather than `sltu`, which is what a signed counter
+  produces. And **`arr[i] = delta + arr[i]` is not enough to put `delta` first
+  in the `addu`**: fold ranks the ARRAY_REF as the more complex operand and
+  makes it `op0` regardless of how the sum is written, so the value has to be
+  read into a local first (`v = arr[i]; arr[i] = delta + v;`) — two operands
+  fold considers equal, source order stands. `func_800193F4` needed both.
 * **A pointer bumped once per outer iteration belongs in the `for` increment.**
   `for (i = 0; i < n; i++, p += stride)` emits `i++` ahead of `p += stride`;
   written as the body's last statement the two come out in the other order and
