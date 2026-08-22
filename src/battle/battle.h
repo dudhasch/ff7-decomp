@@ -94,13 +94,27 @@ typedef struct {
     /* 0x1C */ s32 unk1C;
     /* 0x20 */ s16 unk20;
     /* 0x22 */ s16 unk22;
-    /* 0x24 */ s32 unk24;
+    /* 0x24 */ u16 unk24; // enemy id, copied from the formation entry
+    /* 0x26 */ s16 unk26;
     /* 0x28 */ s16 unk28;
     /* 0x2A */ s16 unk2A;
     /* 0x2C */ u32 curHP;
     /* 0x30 */ u32 maxHP;
     /* 0x34 */ u32 unk34[4];
-    /* 0x44 */ u32 unk44[9];
+    /* 0x44 */ u32 unk44;
+    /* 0x48 */ u32 unk48;
+    /* 0x4C */ u8 unk4C;
+    /* 0x4D */ u8 unk4D;
+    /* 0x4E */ u8 unk4E; // formation row
+    /* 0x4F */ u8 unk4F;
+    /* 0x50 */ s16 unk50;
+    /* 0x52 */ s16 unk52;
+    /* 0x54 */ u16 unk54;
+    /* 0x56 */ u8 unk56;
+    /* 0x57 */ u8 unk57;
+    /* 0x58 */ u32 unk58;
+    /* 0x5C */ u32 unk5C;
+    /* 0x60 */ u32 unk60[2];
 } Unk800F83E0; // size:0x68
 
 typedef struct {
@@ -199,7 +213,19 @@ typedef struct {
     /* 0x84 */ s32 exp;
     /* 0x88 */ s32 gil;
     /* 0x8C */ s32 statusImmunities;
-    /* 0x90 */ u32 unk90[10];
+    /* 0x90 */ u32 unk90;
+    /* 0x94 */ u16 attackIndex[4];
+    /* 0x9C */ u16 unk9C;
+    /* 0x9E */ u16 unk9E;
+    /* 0xA0 */ u8 unkA0;
+    /* 0xA1 */ u8 unkA1;
+    /* 0xA2 */ u8 unkA2;
+    /* 0xA3 */ u8 unkA3;
+    /* 0xA4 */ u32 maxHP;
+    /* 0xA8 */ u32 unkA8;
+    /* 0xAC */ u32 unkAC;
+    /* 0xB0 */ u32 unkB0;
+    /* 0xB4 */ u32 unkB4;
 } SceneEnemy; // size:0xB8
 
 // https://github.com/petfriendamy/ff7-scarlet/blob/main/src/Shared/DataParser.cs

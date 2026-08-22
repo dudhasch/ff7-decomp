@@ -150,7 +150,7 @@ void func_801B0050(s32 sceneID) {
                 g_BattleState.combatant[i + 4].curHP = hp;
                 if (hp == 0) {
                     g_BattleState.combatant[i + 4].status |= 1;
-                    g_BattleState.combatant[i + 4].unk44[0] |= 1;
+                    g_BattleState.combatant[i + 4].unk44 |= 1;
                     g_BattleState.combatant[i + 4].unk4 &= ~0x18;
                 }
             }
@@ -808,7 +808,208 @@ void func_801B1CB0(void) {
     D_80166F74 = rows;
 }
 
-INCLUDE_ASM("asm/us/battle/nonmatchings/batini", func_801B1E0C);
+extern u8 D_800F7DD4[3]; // per-loaded-model count of formation entries using it
+extern u32 D_800F89F0[6][0x20];
+extern u8 D_80166F78[6][0x10][6];
+
+/* Builds the six enemy combatants out of the loaded formation: matches each
+ * formation entry against the three loaded enemy models, copies that model's
+ * stats into the combatant record, and resolves its sixteen attack slots
+ * against the scene's attack-id table.
+ *
+ * 165 rows (154 changed / 11 inserted) at the EXACT target length of 319, with
+ * the %hi-per-address table identical -- so every address in the function is
+ * computed off the right base and the residue is three specific things, not a
+ * wall. The opcode histogram decomposes it exactly:
+ *
+ *     addiu -5   nop +3   lw +2   sw +1   ori -1   lhu +1   andi -1
+ *
+ *   (a) The two byte clears recompute `addu v0,t4,j` in the body where the
+ *       target walks a giv it set up as `addiu v1,t4,0xf` in the preheader --
+ *       same instruction count in the loop, one fewer in the preheader, hence
+ *       part of the addiu deficit.
+ *   (b) One spilled value: the frame is 0x38 against 0x30 and there is a
+ *       `sw s0,8(sp)` / `lw t5,8(sp)` pair where the target has `move t5,s0`.
+ *       It is the snapshot of `i * 0x60`, the D_80166F78 row base, that the
+ *       inner attack loops index off.
+ *   (c) One missing `andi v1,v1,0xffff` between the `lhu` of
+ *       e->attackIndex[j] and the compare against 0xFFFF -- the HImode pseudo
+ *       being promoted as its own insn rather than folded into the load.
+ *
+ * Measured, all with variant_eval against a pinned base -- read the LENGTH
+ * column, not the row count, since the two disagree here in both directions:
+ *
+ *     base (this body)                             165 rows, exact
+ *     clr-ptr    walking `u8* q` for both clears   124 rows, +2 insns
+ *     row-snap   `u8 (*row)[6] = D_80166F78[i];`   193 rows, -4 insns
+ *     clrp-row   both of the above together        189 rows, -2 insns
+ *     clr-notptr clears as the array expression    138 rows, +12 insns
+ *     no-t       drop the Unk800AF470* local       167 rows, +14 insns
+ *     no-p       D_800F7DD4 clear as a subscript   176 rows, exact
+ *     no-n       loop bound as a literal 3         171 rows, exact (inert)
+ *     hoist-e-late  `e = ...` after the enemyID store   171 rows, exact (inert)
+ *
+ * `row-snap` is the fix for (b) -- it deletes the spill outright, which is the
+ * whole `lw +2 / sw +1`. `clr-ptr` is the fix for (a). They move the length in
+ * OPPOSITE directions and together land at 317, so the set is not closed: two
+ * more instructions have to come from somewhere, and the `andi` of (c) is one
+ * of them. That is the next thing to chase, and it is a cheap one -- do not
+ * re-run the sweeps above.
+ *
+ * `tools/width_sweep.py` was run over all eight scalar locals: completely flat
+ * at the exact length, nothing better than the base. Width is not the lever.
+ *
+ * Program facts already established -- these are read off the target and are
+ * not up for re-derivation:
+ *   * the `-1` formation entry skips to `t->unk29 = 0`, which is the loop
+ *     body's LAST statement, so the guard is an `if`, not a `continue`;
+ *   * `D_8016360C.enemyModelIDs[j]` is read SIGNED (`lh`) in the match loop
+ *     while `formation[i].enemyID` is read UNSIGNED (`lhu`) -- hence the u16
+ *     local plus the `*(s16*)&` cast;
+ *   * `Unk800F83E0.unk24` is `u16` (`lhu` at 0x24 in the duplicate-count
+ *     loop), and 0x44..0x67 is not an array of words -- see battle.h;
+ *   * `formation[i].flags` and `.row` are reached by their own scaled index,
+ *     not through the pointer that serves `.enemyID`; a shared `fm` pointer
+ *     collapses three %hi materialisations into one and is 3 instructions.
+ */
+#ifndef NON_MATCHINGS
+MASPSX_OVERRIDE("asm/us/battle/nonmatchings/batini", func_801B1E0C);
+#else
+void func_801B1E0C(void) {
+    Unk800F83E0* c;
+    Unk800AF470* t;
+    SceneEnemy* e;
+    u8* atk;
+    u8* p;
+    s32 i;
+    s32 j;
+    s32 k;
+    s32 m;
+    s32 n;
+    u16 enemyID;
+    u16 attackID;
+
+    g_BattleState.unk12 = 0;
+    p = &D_800F7DD4[2];
+    for (i = 2; i >= 0; i--) {
+        *p = 0;
+        p--;
+    }
+    for (i = 0; i < 6; i++) {
+        for (j = 0x1F; j >= 0; j--) {
+            D_800F89F0[i][j] = 0;
+        }
+    }
+    for (i = 0; i < 6; i++) {
+        t = &g_CombatantTurnState.turn[i + 4];
+        c = &g_BattleState.combatant[i + 4];
+        enemyID = D_8016360C.formation[i].enemyID;
+        c->unk8 = -1;
+        c->unk24 = 0xFFFF;
+        c->unk4 = 0;
+        c->status = 0;
+        c->unk4F = 0xFF;
+        D_800F6B34[i + 4][0] = 0xFF;
+        /* 0x10..0x1F and 0x20..0x27 are cleared as two byte runs; battle.c
+         * needs the named fields there, so the runs are spelled as a byte
+         * view. An ARRAY_REF on a cast pointer still sets MEM_IN_STRUCT_P,
+         * so this aliases exactly as a real `u8 [0x10]` member would. */
+        for (j = 0xF; j >= 0; j--) {
+            ((u8*)t)[j + 0x10] = 0;
+        }
+        for (j = 7; j >= 0; j--) {
+            ((u8*)t)[j + 0x20] = 0;
+        }
+        if ((s16)enemyID != -1) {
+            c->unk24 = enemyID;
+            for (j = 0; j < 3; j++) {
+                if (*(s16*)&D_8016360C.enemyModelIDs[j] == (s16)enemyID) {
+                    break;
+                }
+            }
+            D_800F7DD4[j]++;
+            e = &D_800F5F44.enemy[(s16)j];
+            D_8016360C.formation[i].enemyID = j;
+            c->unk8 = j;
+            c->maxHP = e->maxHP;
+            c->curHP = e->maxHP;
+            c->unk2A = e->unk9C;
+            c->unk28 = e->unk9C;
+            c->unkD = e->strength;
+            c->unkE = e->magic;
+            c->unk20 = e->defense * 2;
+            c->unk22 = e->magicDef * 2;
+            c->unkF = e->evade;
+            c->unk14 = e->speed;
+            c->unk15 = e->luck;
+            c->unk9 = e->level;
+            c->unk12 = e->unkA2;
+            c->unk58 = e->unkAC;
+            c->unk11 = 1;
+            c->unk5C = e->unkA8;
+            c->unk4C = 1;
+            c->unk56 = 2;
+            c->unk10 = 0;
+            c->status = 0;
+            c->unk44 = 0;
+            c->unk50 = 0;
+            c->unk52 = 0xFFFF;
+            c->unk4 = D_8016360C.formation[i].flags & 0x1F;
+            c->unk4E = D_8016360C.formation[i].row;
+            t->unk38 = (s32)e;
+            t->unkD = 0xFF;
+            t->unkC = 0xFF;
+            t->unkF = 0xFF;
+            t->unk34 = ~e->unkB0;
+            g_BattleState.unk12 |= 1 << (i + 4);
+            c->unkC = 0;
+            for (j = 0; j < i; j++) {
+                if (g_BattleState.combatant[j + 4].unk24 == c->unk24) {
+                    c->unkC++;
+                }
+            }
+            n = 3;
+            for (j = 0; j < n; j++) {
+                atk = D_80166F78[i][j];
+                atk[0] = 0xFF;
+                atk[1] = 0;
+                atk[2] = 0;
+                atk[3] = 3;
+                attackID = e->attackIndex[j];
+                if (attackID == 0xFFFF) {
+                    continue;
+                }
+                for (m = 0; m < 0x20; m++) {
+                    if (D_800F5F44.attackIDs[m] == attackID) {
+                        k = D_800F5F44.attacks[m].targetFlags;
+                        if (k != 0) {
+                            k ^= 2;
+                        }
+                        atk[0] = m;
+                        atk[2] = k;
+                        atk[3] = 0;
+                        break;
+                    }
+                }
+            }
+            for (j = n; j < 0x10; j++) {
+                atk = D_80166F78[i][j];
+                atk[0] = 0xFF;
+                atk[1] = 0;
+                atk[2] = 0;
+                atk[3] = 3;
+            }
+        }
+        t->unk29 = 0;
+    }
+    for (i = 0; i < 6; i++) {
+        if (D_800F7DD4[D_8016360C.formation[i].enemyID] >= 2) {
+            g_CombatantTurnState.turn[i + 4].unkF =
+                g_BattleState.combatant[i + 4].unkC;
+        }
+    }
+}
+#endif
 
 void func_801B2308(void) {
     s32 i;
@@ -821,7 +1022,7 @@ void func_801B2308(void) {
     for (i = 0; i < 6; i++) {
         D_80163624.unk34[i].unkC = g_BattleState.combatant[4 + i].unk4;
         D_80163624.unk94[4 + i][1] = g_BattleState.combatant[4 + i].unk10;
-        g_BattleState.combatant[4 + i].unk44[0] =
+        g_BattleState.combatant[4 + i].unk44 =
             g_BattleState.combatant[4 + i].status;
     }
 }
@@ -889,7 +1090,7 @@ static void func_801B23E0(s32 sceneID, void (*cb)(void)) {
         D_8016360C.setup.escapeCounter = 1;
         // enemy strength and magic is 25% higher at battle square
         for (i = 0; i < 3; i++) {
-            D_800F5F44.enemy[i].unk90[5] *= 2;
+            D_800F5F44.enemy[i].maxHP *= 2;
             D_800F5F44.enemy[i].strength =
                 func_801B2770(D_800F5F44.enemy[i].strength);
             D_800F5F44.enemy[i].magic =

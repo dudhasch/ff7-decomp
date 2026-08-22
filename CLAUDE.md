@@ -5079,6 +5079,47 @@ sweep deleted a live one. gcc 2.6.3 does not stop on the undeclared identifier
 -- it substitutes 0 and keeps generating code -- so the only symptom would have
 been the score.
 
+**A mis-compile in one overlay surfaces as a link failure in a *different*
+one, naming a symbol you never touched.** `config/sym_export_battle.us.txt` is
+regenerated from `battle.elf` on every build and handed to `batini` and the
+MAGIC overlays as a `-T` script. gcc 2.6.3 reports an error and keeps going, so
+a `structure has no member named 'unk14'` in `battle.c` -- from an edit to a
+struct in `battle.h` -- still produces a `battle.elf`, with its `.bss` moved.
+Every name in the export file then shifts, and what you see is
+
+```
+build/us/src/battle/batini.c.o: in function `LM13':
+undefined reference to `D_800FAFD0'
+```
+
+in an overlay whose source you did not change, about a symbol the edit has
+nothing to do with. The second-order form is worse: if the shifted file happens
+to still carry *some* name for the address, batini links against the wrong one
+and comes out with a **one-byte** SHA-1 mismatch and no diagnostic at all.
+Both were hit in one session from that single missing member.
+
+So when a link fails on a symbol you did not touch, the first move is to
+recompile every unit of the overlay the symbol comes from and read its
+diagnostics -- not to go looking at the symbol config:
+
+```shell
+touch src/battle/battle*.c && ninja build/us/src/battle/battle.c.o ... 2>&1 \
+  | grep -v 'warning:' | grep ':[0-9]*:'
+```
+
+And do **not** "fix" it by adding the name to `config/sym_extern.us.txt`. That
+file is read by splat for every overlay and by `ld` for every link, so one line
+there moved `main`, `battle`, `batini` and all seven MAGIC overlays off their
+SHA-1s at once, which reads as a catastrophe rather than as a typo. A
+per-overlay `config/symbols.<ovl>.txt` entry is the scoped tool; the global one
+is for the `.rodata`-borrowing case this file documents above and nothing else.
+
+While a build is in that state the generated export is *poisoned*, and reading
+an address out of it is how the diagnosis goes wrong: `sym_export_battle.us.txt`
+said `D_800FAFEC = 0x800fafd0` (0x1C low, from the broken `battle.elf`), which
+reads exactly like a long-standing misnaming in the repo and is worth a
+paragraph of wrong reasoning. Fix the compile first, then re-read the file.
+
 **Never edit generated files.** `asm/`, `build/`, `expected/`,
 `config/sym_export*.txt` and `build.ninja` are all produced by the build. Editing
 them accomplishes nothing and hides real errors.
