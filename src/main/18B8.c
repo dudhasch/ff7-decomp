@@ -17,6 +17,17 @@ extern u8 D_800694D4[];
 extern u8 D_80063048[];
 extern void* D_800707C0;
 extern u8 D_80082274[];
+extern s32 D_8009D274;
+extern s16 D_8009D278;
+extern s16 D_8009D27A;
+extern s16 D_8009D27E;
+extern s16 D_8009D280;
+extern s16 D_8009D282;
+extern u8 D_8009D284;
+extern u8 D_8009D285;
+extern u8 D_8009D286;
+extern volatile u16 D_8009AC40;
+extern volatile u16 D_80114488;
 extern volatile u8 D_8009AC2C[];
 extern volatile u16 D_8009AC42;
 extern u16 D_8009AC44;
@@ -355,7 +366,44 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800119E4);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80011AEC);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80011BB4);
+#ifndef NON_MATCHINGS
+void func_80011BB4(void);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_80011BB4);
+#else
+/* PARKED at 13 rows / -1 instruction (25 against 26) on one *shared header*
+ * declaration, not on codegen. The target reaches `g_FieldDiscChangeRequest`
+ * through a register base -- `lui v1,%hi / addiu v1,v1,%lo / sb v0,0(v1)` --
+ * where `extern u8 g_FieldDiscChangeRequest;` gives the assembler's $at
+ * macro, one instruction short, and the missing instruction is what puts
+ * every constant materialisation in this function on the wrong side of a
+ * store.
+ *
+ * Measured: `extern volatile u8 g_FieldDiscChangeRequest[];` in
+ * `include/game.h`, written `g_FieldDiscChangeRequest[0] = 1;` here, is
+ * **4 rows and the exact length** -- the residue is then only the order of
+ * the `D_8009D274` and `D_8009D278` stores. The volatile and the array are
+ * both load-bearing and neither works alone: a plain `extern u8 X[];`
+ * indexed [0] is 13, `extern volatile u8 X;` is 13, and both cast forms at
+ * the access site (`*(volatile u8*)&X` and `((volatile u8*)&X)[0]`) are 13.
+ * See CLAUDE.md on the volatile-array address form.
+ *
+ * Not landed because the declaration is in `include/game.h` and
+ * `src/field/field4.c:5033` (`OpcodeFuncDskcg`) is its only other user, so
+ * the change needs a one-line edit in an overlay this batch does not own.
+ * Take it together with that file. */
+void func_80011BB4(void) {
+    g_FieldDiscChangeRequest = 1;
+    D_8009D274 = 0;
+    D_8009D278 = 1;
+    D_8009D27A = 0x74;
+    D_8009D27E = 0;
+    D_8009D280 = 0;
+    D_8009D282 = 0;
+    D_8009D284 = 0;
+    D_8009D285 = 0;
+    D_8009D286 = 0;
+}
+#endif
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", main);
 
@@ -371,7 +419,18 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_80012DB0);
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800131B8);
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_800134F4);
+void func_800134F4(void) {
+    D_8009AC42 = D_8009AC42 - D_8009AC44;
+    /* Not the volatile spelling func_80013564 uses for the same byte: there
+     * the target reaches it through a register base, here through the
+     * assembler's $at macro, and dropping the qualifier at this one site is
+     * what gives that -- the store is then free to schedule as well. */
+    *(u8*)D_8009AC2C = 0;
+    if ((s16)D_8009AC42 <= 0 || (s16)D_80114488 == 1) {
+        D_8009AC40 = 0;
+        D_8009AC42 = 0;
+    }
+}
 
 void func_80013564(void) {
     D_8009AC2C[0] = 0;
@@ -1146,7 +1205,19 @@ void func_8001A3B8(s32 arg0, s32 arg1, s32 arg2) {
     D_80062FFC = 8;
 }
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A440);
+void func_8001A440(void) {
+    if (D_80063020 == 0) {
+        func_8001B834(5);
+        func_8001B834(6);
+        func_8001B834(7);
+        func_8001B834(9);
+        func_8001B834(0xA);
+        func_8001B834(0xB);
+        func_8001B834(0xC);
+    } else {
+        D_80062FFC = 5;
+    }
+}
 
 INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001A4A8);
 
@@ -1286,7 +1357,77 @@ INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C0EC);
 
 void func_8001C3C4(void) {}
 
-INCLUDE_ASM("asm/us/main/nonmatchings/18B8", func_8001C3CC);
+#ifndef NON_MATCHINGS
+void func_8001C3CC(s8* dst, s8* src, u32 n);
+MASPSX_OVERRIDE("asm/us/main/nonmatchings/18B8", func_8001C3CC);
+#else
+/* PARKED at 17 rows, length exact (26). An unrolled `memcpy` with no caller
+ * anywhere in the tree, so nothing outside its own `.s` constrains the
+ * signature. The instruction sequence is right; the residue is which
+ * registers the four word temporaries get. The target holds them in
+ * `$t0..$t3` and keeps `$a0` as the walking destination for the whole
+ * function; this gets `$t0`, `$v0`, `$v1`, `$a0` and pays a `move a3,a0` at
+ * the top to free `$a0` as the fourth temporary -- i.e. only the first
+ * temporary is a global allocno here and all four are in the target, which
+ * is a `block_alloc` ordering fact rather than anything the body says.
+ * The other two rows are `n -= 0x10` scheduled above the stores rather than
+ * below them, and the byte loop's `dst++` landing in the back-edge delay
+ * slot where the target has a `nop`.
+ *
+ * Measured:
+ *   - the two loops as backward `goto`s rather than `while`s is the whole of
+ *     the structural fix, 28 rows / +5 instructions -> 17 and exact. Both
+ *     `while` loops let `loop_optimize` strength-reduce the pointers, which
+ *     invents a second base at `+0xc` (`combine_givs` bases on the
+ *     last-referenced offset) and three extra insns. `for (;;)` with a
+ *     `break` and a `do`/`while` behind an `if` guard measure the same 17 as
+ *     the gotos, so only the *rotation* mattered, not the spelling.
+ *   - inert at 17: a fourth unused parameter to occupy `$a3`, and moving
+ *     `n -= 0x10` below `dst += 0x10` in both loops.
+ *   - worse at 25: a separate local for the byte loop's temporary (so `t0`
+ *     is no longer shared between the loops), and a 16-byte struct
+ *     assignment in place of the four explicit temporaries.
+ * This is the shape `perm_temp_for_expr` and `perm_ins_block` search over;
+ * it is not reachable by reading the target. */
+void func_8001C3CC(s8* dst, s8* src, u32 n) {
+    s32 t0;
+    s32 t1;
+    s32 t2;
+    s32 t3;
+
+    if (n < 0x10) {
+        goto tail;
+    }
+block:
+    t0 = *(s32*)(src + 0);
+    t1 = *(s32*)(src + 4);
+    t2 = *(s32*)(src + 8);
+    t3 = *(s32*)(src + 12);
+    src += 0x10;
+    *(s32*)(dst + 0) = t0;
+    *(s32*)(dst + 4) = t1;
+    *(s32*)(dst + 8) = t2;
+    *(s32*)(dst + 12) = t3;
+    n -= 0x10;
+    dst += 0x10;
+    if (n >= 0x10) {
+        goto block;
+    }
+tail:
+    if (n == 0) {
+        return;
+    }
+byte:
+    t0 = *src;
+    src++;
+    *dst = t0;
+    dst++;
+    n--;
+    if (n != 0) {
+        goto byte;
+    }
+}
+#endif
 
 void SetupGamepad(void) {
     if (g_bPadsInitialized == 0) {
