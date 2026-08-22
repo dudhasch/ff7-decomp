@@ -3112,6 +3112,31 @@ extern u8 g_FieldLineCheckResult;
  * After both, all 220 variants over the 44 scalar locals plateau at 352, so
  * the width dimension is closed. What is left is 352 rows at the right length
  * on a body that is still an m2c seed in shape.
+ *
+ * **The one remaining `%hi` difference is `g_FieldEntity` itself, once
+ * against the target's zero, and the naive fix is a regression.** It is
+ * `self = &g_FieldEntity[id];` before the three `FieldEntity*` calls. The
+ * target derives that pointer from an interior label it already holds:
+ *
+ *     lui   $s7, %hi(D_80074F16)   /  addiu $s7, $s7, %lo(D_80074F16)
+ *     addu  $a0, $s3, $s7          <- the FieldEntityWalkmechCross argument
+ *     addiu $v0, $s7, -0x72        <- g_FieldEntity, off an already-live reg
+ *     addu  $s0, $s3, $v0
+ *
+ * -- which is exactly CLAUDE.md's "a base an already-live symbol register can
+ * be adjusted to". Writing it that way,
+ * `(FieldEntity*)((u8*)&D_80074F16 - 0x72 + off)`, does remove the
+ * materialisation and costs **8 instructions**: 352 at the exact 759 becomes
+ * 362 at **-8**. All four operand orders (`- 0x72 + off`, `+ off - 0x72`,
+ * parenthesised either way) measure identically, so it is not a fold
+ * question; cse collapses something else once the two are related. Since the
+ * length is currently exact, a lever that takes it 8 short is masking a +8
+ * this body has elsewhere -- find that first, then re-measure this.
+ *
+ * The rest of the opcode table is control flow, not widths or addressing:
+ * `beqz +2 / bnez -2` (two branch polarities), `j -1`, `nop +5 / addu +4`
+ * and `sll -6 / sra -3`, the last being three sign-extension pairs the
+ * target has and this body does not.
  */
 #ifndef NON_MATCHINGS
 MASPSX_OVERRIDE("asm/us/field/nonmatchings/field2", FieldEntityMove);
